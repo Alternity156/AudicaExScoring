@@ -1,7 +1,4 @@
-﻿using MelonLoader;
-using System.Reflection;
-
-namespace AudicaModding
+﻿namespace ExScoringMod
 {
     public static class Config
     {
