@@ -45,6 +45,27 @@ namespace ExScoringMod
             }
         }
 
+        [HarmonyPatch(typeof(ScoreKeeper), "OnFailure", new Type[] { typeof(SongCues.Cue), typeof(bool), typeof(bool) })]
+        public static class TargetOnPassPatch
+        {
+            public static void Postfix(SongCues.Cue cue, bool pass, bool failedDodge)
+            {
+                if (cue == null) return;
+
+                if (!processedCuesIndexes.Contains(cue.index))
+                {
+                    ExCue exCue = new ExCue();
+
+                    exCue.index = cue.index;
+                    exCue.handType = cue.handType;
+                    exCue.tick = cue.tick;
+                    exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal;
+                    exCue.miss = true;
+
+                    MelonLogger.Log("OnFailure: Missed");
+                }
+            }
+        }
 
         [HarmonyPatch(typeof(ScoreData), "GetScoreForCue", new Type[] { typeof(SongCues.Cue), typeof(float), typeof(float), typeof(float) })]
         public static class GetScoreForCuePatch

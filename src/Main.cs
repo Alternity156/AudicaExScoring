@@ -37,6 +37,7 @@ namespace ExScoringMod
             public float velocity;
             public float sustainPercent;
             public float aimAssist;
+            public bool miss = false;
         }
 
         
