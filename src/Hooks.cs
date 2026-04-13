@@ -1,6 +1,7 @@
 ﻿using System;
 using Harmony;
 using MelonLoader;
+using UnityEngine;
 
 namespace ExScoringMod
 {
@@ -124,8 +125,10 @@ namespace ExScoringMod
 
                         processedCuesIndexes.Add(cue.index);
                         exCues.Add(exCue);
+                        float exCueScore = GetExScoreForExCue(exCue);
 
-                        exScore += GetExScoreForExCue(exCue);
+                        exScore += exCueScore;
+                        lastExScore = exCueScore;
 
                         PrintExScore(exScore);
                     }
@@ -139,6 +142,82 @@ namespace ExScoringMod
             private static void Postfix(ScoreKeeperDisplay __instance)
             {
                 ScoreKeeperDisplayUpdate(__instance);
+            }
+        }
+
+        [HarmonyPatch(typeof(Target), "CompleteTarget")]
+        private static class Target_CompleteTarget
+        {
+            private static bool Prefix(Target __instance)
+            {
+                nextPopupIsScore = true;
+
+                MelonLogger.Log("Next Popup Is Scoe: " + nextPopupIsScore);
+
+                var cue = __instance.mCue;
+                var behavior = cue.behavior;
+
+                nextMaxScoreSub = 0;
+
+                if (behavior == Target.TargetBehavior.Standard || behavior == Target.TargetBehavior.Vertical || behavior == Target.TargetBehavior.Horizontal || behavior == Target.TargetBehavior.ChainStart)
+                {
+                    nextMaxScore = 2000;
+                }
+                else if (behavior == Target.TargetBehavior.Hold)
+                {
+                    nextMaxScore = 2000;
+                    nextMaxScoreSub = 1000;
+                }
+                else if (behavior == Target.TargetBehavior.Chain)
+                {
+                    nextMaxScore = 125;
+                }
+                else if (behavior == Target.TargetBehavior.Melee)
+                {
+                    nextMaxScore = 2000;
+                }
+                else
+                {
+                    nextMaxScore = 0;
+                }
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(TextPopupPool), "CreatePopup", new Type[] { typeof(Vector3), typeof(Quaternion), typeof(Vector3), typeof(string), typeof(string) })]
+        private static class TextPopupPool_CreatePopup
+        {
+            private static bool Prefix(TextPopupPool __instance, Vector3 position, Quaternion rotation, Vector3 scale, ref string text, ref string extraText)
+            {
+                if (nextPopupIsScore)
+                {
+                    nextPopupIsScore = false;
+
+                    MelonLogger.Log("Modifying Popup");
+                    MelonLogger.Log("Original Text: " + text);
+
+                    if (nextMaxScore == 0)
+                    {
+                        return true;
+                    }
+
+                    UInt32 score = 0;
+                    if (!UInt32.TryParse(text, out score))
+                    {
+                        return true;
+                    }
+
+                    var index = __instance.mIndex;
+                    var popup = __instance.mPopups[index];
+
+                    text = lastExScore.ToString();
+                    extraText = "";
+
+                    //popup.text.text = lastExScore.ToString();
+                    //popup.extraText.text = "";
+                }
+
+                return true;
             }
         }
 

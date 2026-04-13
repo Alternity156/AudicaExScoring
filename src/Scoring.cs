@@ -28,6 +28,7 @@ namespace ExScoringMod
             exCues.Clear();
             exScore = 0;
             currentMaxPossibleExScore = 0;
+            lastExScore = 0;
         }
 
         public static float GetMaxExScoreForCue(SongCues.Cue cue)

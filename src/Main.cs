@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using MelonLoader;
 
@@ -13,6 +14,12 @@ namespace ExScoringMod
 
         public static List<int> processedCuesIndexes = new List<int>();
         public static List<ExCue> exCues = new List<ExCue>();
+
+        public static UInt32 nextMaxScore = 0;
+        public static UInt32 nextMaxScoreSub = 0;
+
+        public static bool nextPopupIsScore = false;
+        public static float lastExScore = 0;
 
         public static float maxPossibleExScore;
         public static float exScore = 0;
