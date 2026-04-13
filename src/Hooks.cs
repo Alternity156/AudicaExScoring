@@ -129,6 +129,7 @@ namespace ExScoringMod
 
                         exScore += exCueScore;
                         lastExScore = exCueScore;
+                        nextPopupText = GetPopupText(exCue);
 
                         PrintExScore(exScore);
                     }
@@ -151,35 +152,6 @@ namespace ExScoringMod
             private static bool Prefix(Target __instance)
             {
                 nextPopupIsScore = true;
-
-                MelonLogger.Log("Next Popup Is Scoe: " + nextPopupIsScore);
-
-                var cue = __instance.mCue;
-                var behavior = cue.behavior;
-
-                nextMaxScoreSub = 0;
-
-                if (behavior == Target.TargetBehavior.Standard || behavior == Target.TargetBehavior.Vertical || behavior == Target.TargetBehavior.Horizontal || behavior == Target.TargetBehavior.ChainStart)
-                {
-                    nextMaxScore = 2000;
-                }
-                else if (behavior == Target.TargetBehavior.Hold)
-                {
-                    nextMaxScore = 2000;
-                    nextMaxScoreSub = 1000;
-                }
-                else if (behavior == Target.TargetBehavior.Chain)
-                {
-                    nextMaxScore = 125;
-                }
-                else if (behavior == Target.TargetBehavior.Melee)
-                {
-                    nextMaxScore = 2000;
-                }
-                else
-                {
-                    nextMaxScore = 0;
-                }
                 return true;
             }
         }
@@ -196,25 +168,13 @@ namespace ExScoringMod
                     MelonLogger.Log("Modifying Popup");
                     MelonLogger.Log("Original Text: " + text);
 
-                    if (nextMaxScore == 0)
-                    {
-                        return true;
-                    }
-
-                    UInt32 score = 0;
-                    if (!UInt32.TryParse(text, out score))
-                    {
-                        return true;
-                    }
-
                     var index = __instance.mIndex;
                     var popup = __instance.mPopups[index];
 
-                    text = lastExScore.ToString();
+                    text = nextPopupText.ToString();
                     extraText = "";
 
-                    //popup.text.text = lastExScore.ToString();
-                    //popup.extraText.text = "";
+                    nextPopupText = "";
                 }
 
                 return true;

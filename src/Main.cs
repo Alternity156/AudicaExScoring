@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using MelonLoader;
+using static ExScoringMod.ExScoring;
+using static SongCues;
 
 namespace ExScoringMod
 {
@@ -19,6 +21,7 @@ namespace ExScoringMod
         public static UInt32 nextMaxScoreSub = 0;
 
         public static bool nextPopupIsScore = false;
+        public static string nextPopupText = "";
         public static float lastExScore = 0;
 
         public static float maxPossibleExScore;
@@ -48,7 +51,34 @@ namespace ExScoringMod
             public bool miss = false;
         }
 
-        
+        public static string GetPopupText(ExCue exCue)
+        {
+            string text = "";
+
+            switch(exCue.behavior)
+            {
+                case Target.TargetBehavior.Standard:
+                case Target.TargetBehavior.Horizontal:
+                case Target.TargetBehavior.Vertical:
+                case Target.TargetBehavior.ChainStart:
+                case Target.TargetBehavior.Hold:
+                    text = $"T: {GetPercentFromRaw(exCue.timing)}%\nA: {GetPercentFromRaw(exCue.aim)}%";
+                    break;
+                case Target.TargetBehavior.Chain:
+                    text = $"A: {GetPercentFromRaw(exCue.aim)}%";
+                    break;
+                case Target.TargetBehavior.Melee:
+                    text = $"V: {GetPercentFromRaw(exCue.velocity)}%";
+                    break;
+            }
+
+            if (exCue.behavior == Target.TargetBehavior.Hold)
+            {
+                text += $"\nS: {GetPercentFromRaw(exCue.sustainPercent)}%";
+            }
+
+            return text;
+        }
     }
 }
 

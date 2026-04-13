@@ -5,6 +5,10 @@ namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
+        public static int GetPercentFromRaw(float rawScore)
+        {
+            return (int)(rawScore * 100);
+        }
 
         public static float GetCurrentExPercentage()
         {
