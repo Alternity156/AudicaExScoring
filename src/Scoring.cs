@@ -11,6 +11,11 @@ namespace ExScoringMod
             return (exScore / maxPossibleExScore) * 100;
         }
 
+        public static float GetCurrentMaxPossibleExPercentage()
+        {
+            return (exScore / currentMaxPossibleExScore) * 100;
+        }
+
         public static void PrintExScore(float exScore)
         {
             MelonLogger.Log("EX Score: " + exScore.ToString());
@@ -22,6 +27,7 @@ namespace ExScoringMod
             processedCuesIndexes.Clear();
             exCues.Clear();
             exScore = 0;
+            currentMaxPossibleExScore = 0;
         }
 
         public static float GetMaxExScoreForCue(SongCues.Cue cue)

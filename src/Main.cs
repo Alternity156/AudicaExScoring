@@ -16,6 +16,7 @@ namespace ExScoringMod
 
         public static float maxPossibleExScore;
         public static float exScore = 0;
+        public static float currentMaxPossibleExScore;
 
         public static class BuildInfo
         {

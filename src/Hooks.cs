@@ -54,6 +54,8 @@ namespace ExScoringMod
 
                 if (!processedCuesIndexes.Contains(cue.index))
                 {
+                    currentMaxPossibleExScore += GetMaxExScoreForCue(cue);
+
                     ExCue exCue = new ExCue();
 
                     exCue.index = cue.index;
@@ -106,6 +108,8 @@ namespace ExScoringMod
 
                     if (!processedCuesIndexes.Contains(cue.index))
                     {
+                        currentMaxPossibleExScore += GetMaxExScoreForCue(cue);
+
                         ExCue exCue = new ExCue();
 
                         exCue.behavior = cue.behavior;
