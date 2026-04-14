@@ -43,6 +43,7 @@ namespace ExScoringMod
             {
                 selectedSong = __instance.mSongData.songID;
                 maxPossibleExScore = GetMaxPossibleExScore(selectedSong);
+                selectedSongData = __instance.mSongData;
             }
         }
 
@@ -111,12 +112,35 @@ namespace ExScoringMod
                     {
                         currentMaxPossibleExScore += GetMaxExScoreForCue(cue);
 
+                        float startTick;
+                        float endTick;
+                        float tickSpan;
+
+                        if (cue.tick < cue.successTick)
+                        {
+                            startTick = cue.tick;
+                            endTick = cue.successTick;
+                            tickSpan = AudioDriver.TickSpanToMs(selectedSongData, startTick, endTick);
+                        }
+                        else if (cue.tick > cue.successTick)
+                        {
+                            startTick = cue.successTick;
+                            endTick = cue.tick;
+                            tickSpan = -AudioDriver.TickSpanToMs(selectedSongData, startTick, endTick);
+                        }
+                        else
+                        {
+                            tickSpan = 0;
+                        }
+
                         ExCue exCue = new ExCue();
 
                         exCue.behavior = cue.behavior;
                         exCue.handType = cue.handType;
                         exCue.tick = cue.tick;
+                        exCue.successTick = cue.successTick;
                         exCue.timing = timing;
+                        exCue.timingMs = tickSpan;
                         exCue.aim = aim;
                         exCue.velocity = cue.meleeVelocityAmount;
                         exCue.sustainPercent = cue.sustainPercent;
@@ -164,9 +188,6 @@ namespace ExScoringMod
                 if (nextPopupIsScore)
                 {
                     nextPopupIsScore = false;
-
-                    MelonLogger.Log("Modifying Popup");
-                    MelonLogger.Log("Original Text: " + text);
 
                     var index = __instance.mIndex;
                     var popup = __instance.mPopups[index];

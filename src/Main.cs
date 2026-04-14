@@ -11,6 +11,7 @@ namespace ExScoringMod
         public static MenuState.State menuState;
         public static bool gameHasLoaded = false;
         public static string selectedSong;
+        public static SongList.SongData selectedSongData;
 
         public static float chainAimExDivision = 10;
 
@@ -43,7 +44,9 @@ namespace ExScoringMod
             public Target.TargetHandType handType;
             public int index;
             public float tick;
+            public float successTick;
             public float timing;
+            public float timingMs;
             public float aim;
             public float velocity;
             public float sustainPercent;
