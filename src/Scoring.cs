@@ -1,4 +1,5 @@
 ﻿using MelonLoader;
+using System;
 using System.Linq;
 
 namespace ExScoringMod
@@ -32,7 +33,49 @@ namespace ExScoringMod
             exCues.Clear();
             exScore = 0;
             currentMaxPossibleExScore = 0;
-            lastExScore = 0;
+        }
+
+        public static float GetTimingMsFromCue(SongCues.Cue cue)
+        {
+            float startTick;
+            float endTick;
+            float tickSpan;
+
+            if (cue.tick < cue.successTick)
+            {
+                startTick = cue.tick;
+                endTick = cue.successTick;
+                tickSpan = AudioDriver.TickSpanToMs(selectedSongData, startTick, endTick);
+            }
+            else if (cue.tick > cue.successTick)
+            {
+                startTick = cue.successTick;
+                endTick = cue.tick;
+                tickSpan = -AudioDriver.TickSpanToMs(selectedSongData, startTick, endTick);
+            }
+            else
+            {
+                tickSpan = 0;
+            }
+
+            return tickSpan;
+        }
+
+        //This is an attemp at making my own timing score calculation, it's very different from Audica's score.
+        public static float GetTimingScoreFromTimingMs(float timingMs)
+        {
+            float timingMsAbs = Math.Abs(timingMs);
+
+            if (timingMsAbs < perfectTimingSlopMs)
+            {
+                return 1;
+            }
+            else
+            {
+                float timing = KataConfig.kSlopWindowEarlyMs - timingMsAbs;
+
+                return (timing - perfectTimingSlopMs) / (KataConfig.kSlopWindowEarlyMs - perfectTimingSlopMs);
+            }
         }
 
         public static float GetMaxExScoreForCue(SongCues.Cue cue)

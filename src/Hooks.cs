@@ -48,7 +48,7 @@ namespace ExScoringMod
         }
 
         [HarmonyPatch(typeof(ScoreKeeper), "OnFailure", new Type[] { typeof(SongCues.Cue), typeof(bool), typeof(bool) })]
-        public static class TargetOnPassPatch
+        public static class ScoreKeeperOnFailurePatch
         {
             public static void Postfix(SongCues.Cue cue, bool pass, bool failedDodge)
             {
@@ -65,8 +65,6 @@ namespace ExScoringMod
                     exCue.tick = cue.tick;
                     exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal;
                     exCue.miss = true;
-
-                    MelonLogger.Log("OnFailure: Missed");
                 }
             }
         }
@@ -112,25 +110,17 @@ namespace ExScoringMod
                     {
                         currentMaxPossibleExScore += GetMaxExScoreForCue(cue);
 
-                        float startTick;
-                        float endTick;
-                        float tickSpan;
+                        TargetHitPos targetHitPos = new TargetHitPos();
 
-                        if (cue.tick < cue.successTick)
+                        for (int i = 0; i < unprocessedTargetHitPoses.Count; i++)
                         {
-                            startTick = cue.tick;
-                            endTick = cue.successTick;
-                            tickSpan = AudioDriver.TickSpanToMs(selectedSongData, startTick, endTick);
-                        }
-                        else if (cue.tick > cue.successTick)
-                        {
-                            startTick = cue.successTick;
-                            endTick = cue.tick;
-                            tickSpan = -AudioDriver.TickSpanToMs(selectedSongData, startTick, endTick);
-                        }
-                        else
-                        {
-                            tickSpan = 0;
+                            if (unprocessedTargetHitPoses[i].index == cue.index)
+                            {
+                                targetHitPos.y = unprocessedTargetHitPoses[i].targetHitPos.y;
+                                targetHitPos.x = unprocessedTargetHitPoses[i].targetHitPos.x;
+
+                                unprocessedTargetHitPoses.RemoveAt(i);
+                            }
                         }
 
                         ExCue exCue = new ExCue();
@@ -140,8 +130,9 @@ namespace ExScoringMod
                         exCue.tick = cue.tick;
                         exCue.successTick = cue.successTick;
                         exCue.timing = timing;
-                        exCue.timingMs = tickSpan;
+                        exCue.timingMs = GetTimingMsFromCue(cue);
                         exCue.aim = aim;
+                        exCue.targetHitPos = targetHitPos;
                         exCue.velocity = cue.meleeVelocityAmount;
                         exCue.sustainPercent = cue.sustainPercent;
                         exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal;
@@ -152,10 +143,11 @@ namespace ExScoringMod
                         float exCueScore = GetExScoreForExCue(exCue);
 
                         exScore += exCueScore;
-                        lastExScore = exCueScore;
                         nextPopupText = GetPopupText(exCue);
 
                         PrintExScore(exScore);
+                        MelonLogger.Log("x" + exCue.targetHitPos.x);
+                        MelonLogger.Log("y" + exCue.targetHitPos.y);
                     }
                 }
             }
@@ -177,6 +169,20 @@ namespace ExScoringMod
             {
                 nextPopupIsScore = true;
                 return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(Target), "OnHit", new Type[] { typeof(Gun), typeof(Gun.AttackType), typeof(float), typeof(Vector2), typeof(Vector3), typeof(float), typeof(bool) })]
+        private static class TargetOnHitPatch
+        {
+            private static void Prefix(ref Target __instance, Gun gun, Gun.AttackType attackType, float aim, Vector2 targetHitPos, Vector3 intersectionPoint)
+            {
+                UnprocessedTargetHitPos unprocessedTargetHitPos = new UnprocessedTargetHitPos();
+
+                unprocessedTargetHitPos.index = __instance.mCue.index;
+                unprocessedTargetHitPos.targetHitPos = targetHitPos;
+
+                unprocessedTargetHitPoses.Add(unprocessedTargetHitPos);
             }
         }
 
