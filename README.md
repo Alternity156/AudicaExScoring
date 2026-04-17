@@ -1,3 +1,6 @@
+WARNING: This mod causes conflicts with ScorePercentage and HitScoreVizualiser mods.
+
+
 This is my take on EX scoring for Audica. EX scoring is inspired by DDR and ITG competitive scene, where accuracy matters much more than combo or other factors.
 
 
