@@ -35,6 +35,20 @@ namespace ExScoringMod
             currentMaxPossibleExScore = 0;
         }
 
+        public static bool ValidateExScore()
+        {
+            float aimAssist = exCues[0].aimAssist;
+
+            for (int i = 0; i < exCues.Count; i++)
+            {
+                if (exCues[i].aimAssist != aimAssist)
+                {
+                    return false;
+                }
+            }
+            return true;
+        }
+
         public static float GetTimingMsFromCue(SongCues.Cue cue)
         {
             float startTick;

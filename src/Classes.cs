@@ -21,6 +21,26 @@ namespace ExScoringMod
             public float aimAssist;
             public bool miss = false;
         }
+
+        public class SongInfo
+        {
+            public string songId;
+            public string songHash;
+            public string songTitle;
+            public string songArtist;
+            public string songMapper;
+            public float songLowBpm;
+            public float songHighBpm;
+        }
+
+        public class ScoreSaveData
+        {
+            public ExCue[] exCues;
+            public string songHash;
+            public string songId;
+            public long unixTimestamp;
+        }
+
         public class UnprocessedTargetHitPos
         {
             public int index;
