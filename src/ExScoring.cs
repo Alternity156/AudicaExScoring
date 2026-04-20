@@ -75,8 +75,7 @@ namespace ExScoringMod
             return tickSpan;
         }
 
-        //This is an attemp at making my own timing score calculation, it's very different from Audica's score.
-        public static float GetTimingScoreFromTimingMs(float timingMs)
+        public static float GetLinearTimingScore(float timingMs)
         {
             float timingMsAbs = Math.Abs(timingMs);
 

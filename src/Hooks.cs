@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Management.Instrumentation;
 using Harmony;
 using MelonLoader;
 using UnityEngine;
@@ -26,12 +27,14 @@ namespace ExScoringMod
                 if (menuState == MenuState.State.Launched && state != MenuState.State.Launched)
                 {
                     ResetExScore();
+                    AudicaScoringTest();
                 }
 
                 menuState = state;
                 if (state == MenuState.State.TitleScreen)
                 {
                     gameHasLoaded = true;
+                    
                 }
             }
         }
@@ -44,6 +47,8 @@ namespace ExScoringMod
                 selectedSong = __instance.mSongData.songID;
                 maxPossibleExScore = GetMaxPossibleExScore(selectedSong);
                 selectedSongData = __instance.mSongData;
+
+                
             }
         }
 
@@ -74,16 +79,17 @@ namespace ExScoringMod
         {
             /* This was a test to see what would happend if you prevent the game from doing this when it's
              * loading songs. It breaks the in-song star count.
-             * 
-            public static bool Prefix(ScoreData __instance, SongCues.Cue cue, float timing, float aim, float extra)
+             */ 
+            public static void Prefix(ScoreData __instance, SongCues.Cue cue, float timing, float aim, float extra)
             {
+                /*
                 if (!gameHasLoaded)
                 {
                     return false;
                 }
                 return true;
+                */
             }
-            */
 
             public static void Postfix(ScoreData __instance, SongCues.Cue cue, float timing, float aim, float extra, ref int __result)
             {
@@ -145,9 +151,7 @@ namespace ExScoringMod
                         exScore += exCueScore;
                         nextPopupText = GetPopupText(exCue);
 
-                        PrintExScore(exScore);
-                        MelonLogger.Log("x" + exCue.targetHitPos.x);
-                        MelonLogger.Log("y" + exCue.targetHitPos.y);
+                        //PrintExScore(exScore);
                     }
                 }
             }
