@@ -15,7 +15,7 @@ The idea is to make a new scoring system akin to classic rhythm games. I am stil
 |Melee, Velocity | 0-1 |
 |Chain, Node Aim | 0-0.1 |
 
-There is no multiplier, only these score weights. They are shown as a percentage.
+There is no multiplier, no base score, only these score weights. They are shown as a percentage.
 
 ## Mod Settings
 You can use the ModSettings mod to change the score visuals from Audica style to Ex style.
