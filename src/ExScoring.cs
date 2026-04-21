@@ -1,6 +1,7 @@
 ﻿using MelonLoader;
 using System;
 using System.Linq;
+using UnityEngine;
 
 namespace ExScoringMod
 {
@@ -75,20 +76,25 @@ namespace ExScoringMod
             return tickSpan;
         }
 
-        public static float GetLinearTimingScore(float timingMs)
+        public static float GetLinearTimingScore(float msOffset)
         {
-            float timingMsAbs = Math.Abs(timingMs);
+            float timing = Math.Abs(msOffset);
 
-            if (timingMsAbs < perfectTimingSlopMs)
-            {
-                return 1;
-            }
-            else
-            {
-                float timing = KataConfig.kSlopWindowEarlyMs - timingMsAbs;
+            if (timing <= perfectTimingSlopMs) return 1f;
+            if (timing >= KataConfig.kSlopWindowEarlyMs) return 0f;
 
-                return (timing - perfectTimingSlopMs) / (KataConfig.kSlopWindowEarlyMs - perfectTimingSlopMs);
-            }
+            return 1f - (timing - perfectTimingSlopMs) / (KataConfig.kSlopWindowEarlyMs - perfectTimingSlopMs);
+        }
+
+        public static float GetLinearAimScore(Target target, Vector3 intersectionPoint)
+        {
+            Vector3 targetPos = target.GetContactPosition();
+            float distanceFromCenter = (targetPos - intersectionPoint).magnitude;
+            const float realAimRadius = 5.0f;
+
+            if (distanceFromCenter >= realAimRadius) return 0f;
+
+            return 1f - distanceFromCenter / realAimRadius;
         }
 
         public static float GetMaxExScoreForCue(SongCues.Cue cue)

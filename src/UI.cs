@@ -1,5 +1,4 @@
 ﻿using MelonLoader;
-using System;
 
 namespace ExScoringMod
 {

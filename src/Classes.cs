@@ -20,6 +20,13 @@ namespace ExScoringMod
             public float sustainPercent;
             public float aimAssist;
             public bool miss = false;
+            public ScoringCalculation scoringCalculation;
+
+            public enum ScoringCalculation
+            {
+                Audica,
+                Linear
+            }
         }
 
         public class SongInfo

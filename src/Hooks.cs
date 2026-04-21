@@ -1,9 +1,7 @@
 ﻿using System;
-using System.Management.Instrumentation;
 using Harmony;
 using MelonLoader;
 using UnityEngine;
-using static MelonLoader.MelonPrefs;
 
 namespace ExScoringMod
 {
@@ -84,7 +82,10 @@ namespace ExScoringMod
         {
             public static void Postfix(ref Gun __instance, Target target, Vector3 intersectionPoint, ref float __result)
             {
-
+                if (Config.LinearCalculation)
+                {
+                    __result = GetLinearAimScore(target, intersectionPoint);
+                }
             }
         }
 
@@ -103,29 +104,17 @@ namespace ExScoringMod
                 }
                 return true;
                 */
+
+                if (Config.LinearCalculation)
+                {
+                    timing = GetLinearTimingScore(GetTimingMsFromCue(cue));
+                }
             }
 
             public static void Postfix(ScoreData __instance, SongCues.Cue cue, float timing, float aim, float extra, ref int __result)
             {
                 if (menuState == MenuState.State.Launched)
                 {
-                    /*
-                    MelonLogger.Log("Cue index: " + cue.index.ToString());
-                    MelonLogger.Log("Cue tick: " + cue.tick.ToString());
-                    MelonLogger.Log("Cue successTick: " + cue.successTick.ToString());
-                    MelonLogger.Log("Cue slopBeforeTicks: " + cue.slopBeforeTicks.ToString());
-                    MelonLogger.Log("Cue slopAfterTicks: " + cue.slopAfterTicks.ToString());
-                    MelonLogger.Log("Cue aim: " + cue.aim.ToString());
-                    MelonLogger.Log("Cue velocity: " + cue.velocity.ToString());
-                    MelonLogger.Log("Cue meleeVelocityAmount: " + cue.meleeVelocityAmount.ToString());
-                    MelonLogger.Log("Cue sustainPercent: " + cue.sustainPercent.ToString());
-                    MelonLogger.Log("Cue behavior: " + cue.behavior.ToString());
-                    MelonLogger.Log("timing input: " + timing.ToString());
-                    MelonLogger.Log("aim input: " + aim.ToString());
-                    MelonLogger.Log("extra input: " + extra.ToString());
-                    MelonLogger.Log("score: " + __result.ToString());
-                    */
-
                     if (!processedCuesIndexes.Contains(cue.index))
                     {
                         currentMaxPossibleExScore += GetMaxExScoreForCue(cue);
@@ -145,18 +134,28 @@ namespace ExScoringMod
 
                         ExCue exCue = new ExCue();
 
+                        float timingMs = GetTimingMsFromCue(cue);
+
+                        ExCue.ScoringCalculation scoringCalculation = ExCue.ScoringCalculation.Audica;
+
+                        if (Config.LinearCalculation)
+                        {
+                            scoringCalculation = ExCue.ScoringCalculation.Linear;
+                        }
+
                         exCue.behavior = cue.behavior;
                         exCue.handType = cue.handType;
                         exCue.tick = cue.tick;
                         exCue.successTick = cue.successTick;
                         exCue.timing = timing;
-                        exCue.timingMs = GetTimingMsFromCue(cue);
+                        exCue.timingMs = timingMs;
                         exCue.aim = aim;
                         exCue.targetHitPos = targetHitPos;
                         exCue.velocity = cue.meleeVelocityAmount;
                         exCue.sustainPercent = cue.sustainPercent;
                         exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal;
                         exCue.index = cue.index;
+                        exCue.scoringCalculation = scoringCalculation;
 
                         processedCuesIndexes.Add(cue.index);
                         exCues.Add(exCue);
@@ -176,7 +175,7 @@ namespace ExScoringMod
         {
             private static void Postfix(ScoreKeeperDisplay __instance)
             {
-                ScoreKeeperDisplayUpdate(__instance);
+                if (Config.ExType) ScoreKeeperDisplayUpdate(__instance);
             }
         }
 
@@ -209,7 +208,7 @@ namespace ExScoringMod
         {
             private static bool Prefix(TextPopupPool __instance, Vector3 position, Quaternion rotation, Vector3 scale, ref string text, ref string extraText)
             {
-                if (nextPopupIsScore)
+                if (nextPopupIsScore && Config.ExType)
                 {
                     nextPopupIsScore = false;
 
