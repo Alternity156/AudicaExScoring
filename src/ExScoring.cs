@@ -1,17 +1,10 @@
 ﻿using MelonLoader;
-using System;
 using System.Linq;
-using UnityEngine;
 
 namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
-        public static int GetPercentFromRaw(float rawScore)
-        {
-            return (int)(rawScore * 100);
-        }
-
         public static float GetCurrentExPercentage()
         {
             return (exScore / maxPossibleExScore) * 100;
@@ -48,60 +41,6 @@ namespace ExScoringMod
                 }
             }
             return true;
-        }
-
-        public static float GetTimingMsFromCue(SongCues.Cue cue)
-        {
-            float startTick;
-            float endTick;
-            float tickSpan;
-
-            if (cue.tick < cue.successTick)
-            {
-                startTick = cue.tick;
-                endTick = cue.successTick;
-                tickSpan = AudioDriver.TickSpanToMs(selectedSongData, startTick, endTick);
-            }
-            else if (cue.tick > cue.successTick)
-            {
-                startTick = cue.successTick;
-                endTick = cue.tick;
-                tickSpan = -AudioDriver.TickSpanToMs(selectedSongData, startTick, endTick);
-            }
-            else
-            {
-                tickSpan = 0;
-            }
-
-            return tickSpan;
-        }
-
-        public static float GetLinearTimingScore(float msOffset)
-        {
-            float timing = Math.Abs(msOffset);
-
-            if (timing <= perfectTimingSlopMs) return 1f;
-            if (timing >= KataConfig.kSlopWindowEarlyMs) return 0f;
-
-            return 1f - (timing - perfectTimingSlopMs) / (KataConfig.kSlopWindowEarlyMs - perfectTimingSlopMs);
-        }
-
-        public static float GetLinearAimScore(Target target, Vector3 intersectionPoint, bool useSnapZone = true)
-        {
-            Vector3 targetPos = target.GetContactPosition();
-            float distanceFromCenter = (targetPos - intersectionPoint).magnitude;
-            const float perfectRadius = 0.5f;
-            const float realAimRadius = 5.0f;
-
-            if (distanceFromCenter >= realAimRadius) return 0f;
-
-            if (useSnapZone)
-            {
-                if (distanceFromCenter <= perfectRadius) return 1f;
-                return 1f - (distanceFromCenter - perfectRadius) / (realAimRadius - perfectRadius);
-            }
-
-            return 1f - distanceFromCenter / realAimRadius;
         }
 
         public static float GetMaxExScoreForCue(SongCues.Cue cue)

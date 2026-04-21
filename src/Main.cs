@@ -40,7 +40,6 @@ namespace ExScoringMod
         public override void OnApplicationStart()
         {
             Config.RegisterConfig();
-            MelonCoroutines.Start(WatchPrefs());
         }
 
         public override void OnModSettingsApplied()

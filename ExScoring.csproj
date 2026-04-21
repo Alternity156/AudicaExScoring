@@ -186,6 +186,7 @@
     <Compile Include="src\Config.cs" />
     <Compile Include="src\Hooks.cs" />
     <Compile Include="src\Judgement.cs" />
+    <Compile Include="src\LinearScoring.cs" />
     <Compile Include="src\Main.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="src\ExScoring.cs" />
