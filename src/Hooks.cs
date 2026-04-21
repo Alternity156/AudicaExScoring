@@ -27,14 +27,12 @@ namespace ExScoringMod
                 if (menuState == MenuState.State.Launched && state != MenuState.State.Launched)
                 {
                     ResetExScore();
-                    AudicaScoringTest();
                 }
 
                 menuState = state;
                 if (state == MenuState.State.TitleScreen)
                 {
                     gameHasLoaded = true;
-                    
                 }
             }
         }
@@ -47,8 +45,6 @@ namespace ExScoringMod
                 selectedSong = __instance.mSongData.songID;
                 maxPossibleExScore = GetMaxPossibleExScore(selectedSong);
                 selectedSongData = __instance.mSongData;
-
-                
             }
         }
 
@@ -74,13 +70,22 @@ namespace ExScoringMod
             }
         }
 
+        [HarmonyPatch(typeof(Gun), "CalculateAim", new Type[] { typeof(Target), typeof(Vector3) })]
+        public static class CalculateAimPatch
+        {
+            public static void Postfix(ref Gun __instance, Target target, Vector3 intersectionPoint, ref float __result)
+            {
+
+            }
+        }
+
         [HarmonyPatch(typeof(ScoreData), "GetScoreForCue", new Type[] { typeof(SongCues.Cue), typeof(float), typeof(float), typeof(float) })]
         public static class GetScoreForCuePatch
         {
             /* This was a test to see what would happend if you prevent the game from doing this when it's
              * loading songs. It breaks the in-song star count.
              */ 
-            public static void Prefix(ScoreData __instance, SongCues.Cue cue, float timing, float aim, float extra)
+            public static void Prefix(ScoreData __instance, SongCues.Cue cue, ref float timing, ref float aim, ref float extra)
             {
                 /*
                 if (!gameHasLoaded)

@@ -181,12 +181,13 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="src\AudicaScoring.cs" />
     <Compile Include="src\Classes.cs" />
     <Compile Include="src\Config.cs" />
     <Compile Include="src\Hooks.cs" />
     <Compile Include="src\Main.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
-    <Compile Include="src\Scoring.cs" />
+    <Compile Include="src\ExScoring.cs" />
     <Compile Include="src\UI.cs" />
     <Compile Include="src\Utils.cs" />
   </ItemGroup>
