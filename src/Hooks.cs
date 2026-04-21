@@ -3,12 +3,12 @@ using System.Management.Instrumentation;
 using Harmony;
 using MelonLoader;
 using UnityEngine;
+using static MelonLoader.MelonPrefs;
 
 namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
-
         [HarmonyPatch(typeof(InGameUI), "Restart")]
         public static class InGameUIRestartPatch
         {
@@ -33,6 +33,15 @@ namespace ExScoringMod
                 if (state == MenuState.State.TitleScreen)
                 {
                     gameHasLoaded = true;
+                }
+
+                if (state == MenuState.State.MainPage)
+                {
+                    StartWatching();
+                }
+                else
+                {
+                    StopWatching();
                 }
             }
         }
