@@ -1,36 +1,24 @@
-WARNING: This mod causes conflicts with ScorePercentage and HitScoreVizualiser mods.
+## WARNING
 
+This mod conflicts with ScorePercentage and HitScoreVisualizer
 
-This is my take on EX scoring for Audica. EX scoring is inspired by DDR and ITG competitive scene, where accuracy matters much more than combo or other factors.
+## EX Scoring
 
+The idea is to make a new scoring system akin to classic rhythm games. I am still not sure where I want this to go but I am experimenting currently, if you have ideas, let me know on Discord!
 
-The current version of the mod prints the score to the MelonLoader console and shows EX scoring and percentage instead of normal scoring while playing a song.
+## Current implementation
+| Target | Score Weight |
+|--|--|
+|Normal, Aim  | 0-1 |
+|Normal, Timing | 0-1 |
+|Sustain, Hold | 0-1 |
+|Melee, Velocity | 0-1 |
+|Chain, Node Aim | 0-0.1 |
 
+There is no multiplier, only these score weights. They are shown as a percentage.
 
-This current EX scoring implementation is as follows:
-
-
-Normal/Horizontal/Vertical/Chain Start
-
-0-1 timing point
-
-0-1 aim point
-
-
-Chain nodes
-
-0-0.1 aim point
-
-
-Sustain
-
-0-1 timing point
-
-0-1 aim point
-
-0-1 sustain point
-
-
-Melee
-
-0-1 velocity point
+## Mod Settings
+You can use the ModSettings mod to change the score visuals from Audica style to Ex style.
+You can also change the score calculation from Audica to Linear.
+Default settings are Audica visuals and Audica calculations.
+If you do not have ModSettings, you can grab it [here](https://github.com/octoberU/ModSettings) or manually change settings in [Audica Folder]/UserData/MelonPreferences.cfg .
