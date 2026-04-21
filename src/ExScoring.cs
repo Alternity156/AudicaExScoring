@@ -86,13 +86,20 @@ namespace ExScoringMod
             return 1f - (timing - perfectTimingSlopMs) / (KataConfig.kSlopWindowEarlyMs - perfectTimingSlopMs);
         }
 
-        public static float GetLinearAimScore(Target target, Vector3 intersectionPoint)
+        public static float GetLinearAimScore(Target target, Vector3 intersectionPoint, bool useSnapZone = true)
         {
             Vector3 targetPos = target.GetContactPosition();
             float distanceFromCenter = (targetPos - intersectionPoint).magnitude;
+            const float perfectRadius = 0.5f;
             const float realAimRadius = 5.0f;
 
             if (distanceFromCenter >= realAimRadius) return 0f;
+
+            if (useSnapZone)
+            {
+                if (distanceFromCenter <= perfectRadius) return 1f;
+                return 1f - (distanceFromCenter - perfectRadius) / (realAimRadius - perfectRadius);
+            }
 
             return 1f - distanceFromCenter / realAimRadius;
         }
