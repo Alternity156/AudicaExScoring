@@ -1,4 +1,8 @@
 ﻿using MelonLoader;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Linq;
+using static SongCues;
 
 namespace ExScoringMod
 {
@@ -9,7 +13,7 @@ namespace ExScoringMod
             return (int)(rawScore * 100);
         }
 
-        public static float GetTimingMsFromCue(SongCues.Cue cue)
+        public static float GetTimingMsFromCue(Cue cue)
         {
             float startTick;
             float endTick;
@@ -33,6 +37,21 @@ namespace ExScoringMod
             }
 
             return tickSpan;
+        }
+
+        public static List<Cue> GetChainFromLastNode(Cue lastNode)
+        {
+            List<Cue> chain = new List<Cue>();
+            Cue current = lastNode;
+
+            while (current != null)
+            {
+                chain.Add(current);
+                current = current.chainPrevious;
+            }
+
+            chain.Reverse();
+            return chain;
         }
     }
 }

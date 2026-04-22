@@ -14,9 +14,6 @@ namespace ExScoringMod
         public static string selectedSong;
         public static SongList.SongData selectedSongData;
 
-        public static float perfectTimingSlopMs = 8.5f;
-        public static float chainAimExDivision = 10;
-
         public static List<int> processedCuesIndexes = new List<int>();
         public static List<ExCue> exCues = new List<ExCue>();
         public static List<UnprocessedTargetHitPos> unprocessedTargetHitPoses = new List<UnprocessedTargetHitPos>();

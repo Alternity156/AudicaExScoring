@@ -1,7 +1,10 @@
 ﻿using System;
+using System.Collections.Generic;
+using System.Xml.Schema;
 using Harmony;
 using MelonLoader;
 using UnityEngine;
+using static SongCues;
 
 namespace ExScoringMod
 {
@@ -105,7 +108,7 @@ namespace ExScoringMod
                 return true;
                 */
 
-                if (Config.LinearCalculation)
+                if (Config.LinearCalculation && menuState == MenuState.State.Launched)
                 {
                     timing = GetLinearTimingScore(GetTimingMsFromCue(cue));
                 }
@@ -133,6 +136,27 @@ namespace ExScoringMod
                         }
 
                         ExCue exCue = new ExCue();
+
+                        if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext == null)
+                        {
+                            List<Cue> fullChain = GetChainFromLastNode(cue);
+
+                            float chainAverage = 0;
+                            float total = 0;
+
+                            foreach (Cue chainCue in fullChain)
+                            {
+                                if (cue.behavior == Target.TargetBehavior.Chain)
+                                {
+                                    total += chainCue.aim;
+                                }
+                            }
+
+                            chainAverage = total / fullChain.Count;
+
+                            exCue.isChainTail = true;
+                            exCue.chainAverage = chainAverage;
+                        }
 
                         float timingMs = GetTimingMsFromCue(cue);
 

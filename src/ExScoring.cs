@@ -87,7 +87,7 @@ namespace ExScoringMod
             }
             else if (exCue.behavior == Target.TargetBehavior.Chain)
             {
-                return exCue.aim / chainAimExDivision;
+                return exCue.aim * exScoringChainWeight;
             }
             else if (exCue.behavior == Target.TargetBehavior.Hold)
             {
