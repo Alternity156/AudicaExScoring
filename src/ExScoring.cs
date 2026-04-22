@@ -5,6 +5,12 @@ namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
+        public static float exScoringTimingWeight = 1f;
+        public static float exScoringAimWeight = 1f;
+        public static float exScoringVelocityWeight = 1f;
+        public static float exScoringSustainWeight = 1f;
+        public static float exScoringChainWeight = 0.1f;
+
         public static float GetCurrentExPercentage()
         {
             return (exScore / maxPossibleExScore) * 100;
@@ -50,19 +56,19 @@ namespace ExScoringMod
                     cue.behavior == Target.TargetBehavior.Vertical ||
                     cue.behavior == Target.TargetBehavior.ChainStart)
             {
-                return 2;
+                return exScoringAimWeight + exScoringTimingWeight;
             }
             else if (cue.behavior == Target.TargetBehavior.Chain)
             {
-                return 1 / chainAimExDivision;
+                return exScoringChainWeight;
             }
             else if (cue.behavior == Target.TargetBehavior.Hold)
             {
-                return 3;
+                return exScoringAimWeight + exScoringTimingWeight + exScoringSustainWeight;
             }
             else if (cue.behavior == Target.TargetBehavior.Melee)
             {
-                return 1;
+                return exScoringVelocityWeight;
             }
             else
             {

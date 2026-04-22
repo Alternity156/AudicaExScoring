@@ -6,14 +6,22 @@ namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
+        public static float audicaPerfectTimingWindowMs = 8.5f;
+        public static float audicaWholeTimingWindowMs = 100f;
+
+        public static float audicaPerfectAimRadius = 0.5f;
+        public static float audicaNearPerfectAimRadius = 0.93334f;
+        public static float audicaHalfAimRadius = 1f;
+        public static float audicaFullAimRadius = 5f;
+
         public static float GetAudicaTimingScore(float msOffset)
         {
             float x = Math.Abs(msOffset);
 
-            if (x <= 8.5f) return 1f;
-            if (x >= 100f) return 0f;
+            if (x <= audicaPerfectTimingWindowMs) return 1f;
+            if (x >= audicaWholeTimingWindowMs) return 0f;
 
-            return 1f - Mathf.Pow(x / 100f, 1.8f);
+            return 1f - Mathf.Pow(x / audicaWholeTimingWindowMs, 1.8f);
         }
 
         //Audica will floor that value to 0.700005f
@@ -22,9 +30,9 @@ namespace ExScoringMod
             Vector3 targetPos = target.GetContactPosition();
             float distanceFromCenter = (targetPos - intersectionPoint).magnitude;
 
-            const float snapRadius = 0.5f;
-            const float halfRadius = 1.0f;
-            const float realAimRadius = 5.0f;
+            float snapRadius = audicaPerfectAimRadius;
+            float halfRadius = audicaHalfAimRadius;
+            float realAimRadius = audicaFullAimRadius;
 
             // Dead center snap zone: lerp from 1.0 down to 0.93334
             if (distanceFromCenter <= halfRadius)
@@ -32,14 +40,14 @@ namespace ExScoringMod
                 if (distanceFromCenter <= snapRadius)
                     return 1f;
                 float t = (distanceFromCenter - snapRadius) / (halfRadius - snapRadius);
-                return Mathf.Lerp(1f, 0.93334f, t);
+                return Mathf.Lerp(1f, audicaNearPerfectAimRadius, t);
             }
 
             // Outer zone: lerp from 0.93334 down to 0
             if (distanceFromCenter <= realAimRadius)
             {
                 float t = (distanceFromCenter - halfRadius) / (realAimRadius - halfRadius);
-                return Mathf.Lerp(0.93334f, 0f, Mathf.Clamp01(t));
+                return Mathf.Lerp(audicaNearPerfectAimRadius, 0f, Mathf.Clamp01(t));
             }
 
             return 0f;

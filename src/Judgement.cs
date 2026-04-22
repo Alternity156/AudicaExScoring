@@ -6,6 +6,27 @@ namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
+        public static float judgementImpeccableWeight = 2.25f;
+        public static float judgementFantasticWeight = 2f;
+        public static float judgementExcellentWeight = 1.5f;
+        public static float judgementGreatWeight = 1f;
+        public static float judgementGoodWeight = 0.75f;
+
+        public static float judgementImpeccableTimingWindowMs = 8.5f;
+        public static float judgementFantasticTimingWindowMs = 17f;
+        public static float judgementExcellentTimingWindowMs = 25f;
+        public static float judgementGreatTimingWindowMs = 50f;
+        public static float judgementGoodTimingWindowMs = 100f;
+
+        /* Impeccable radius is real target radius
+         * The rest is the remaining radius %, whatever remains from Impeccable radius
+        */
+        public static float judgementImpeccableAimRadius = 0.5f;
+        public static float judgementFantasticAimRadiusPercent = 0.1f;
+        public static float judgementExcellentAimRadiusPercent = 0.3f;
+        public static float judgementGreatAimRadiusPercent = 0.5f;
+        public static float judgementGoodAimRadiusPercent = 1f;
+
         public enum Judgement
         {
             Impeccable,
@@ -41,15 +62,15 @@ namespace ExScoringMod
             switch (judgement)
             {
                 case Judgement.Impeccable:
-                    return 2.25f;
+                    return judgementImpeccableWeight;
                 case Judgement.Fantastic:
-                    return 2f;
+                    return judgementFantasticWeight;
                 case Judgement.Excellent:
-                    return 1.5f;
+                    return judgementExcellentWeight;
                 case Judgement.Great:
-                    return 1f;
+                    return judgementGreatWeight;
                 case Judgement.Good:
-                    return 0.75f;
+                    return judgementGoodWeight;
             }
             return 0f;
         }
@@ -110,11 +131,11 @@ namespace ExScoringMod
         {
             float x = Math.Abs(msOffset);
 
-            if (x <= 8.5f) return Judgement.Impeccable;
-            if (x <= 17f) return Judgement.Fantastic;
-            if (x <= 25f) return Judgement.Excellent;
-            if (x <= 50f) return Judgement.Great;
-            if (x <= 100f) return Judgement.Good;
+            if (x <= judgementImpeccableTimingWindowMs) return Judgement.Impeccable;
+            if (x <= judgementFantasticTimingWindowMs) return Judgement.Fantastic;
+            if (x <= judgementExcellentTimingWindowMs) return Judgement.Excellent;
+            if (x <= judgementGreatTimingWindowMs) return Judgement.Great;
+            if (x <= judgementGoodTimingWindowMs) return Judgement.Good;
             return Judgement.Miss;
         }
 
@@ -123,15 +144,16 @@ namespace ExScoringMod
             Vector3 targetPos = target.GetContactPosition();
             float distanceFromCenter = (targetPos - intersectionPoint).magnitude;
 
-            // Remaining space after the perfect circle
-            const float impeccableRadius = 0.5f;   // snap zone = perfect
-            const float realAimRadius = 5.0f;
-            float remaining = realAimRadius - impeccableRadius; // 4.5f
+            
+            float impeccableRadius = judgementImpeccableAimRadius;   // snap zone = perfect
+            float realAimRadius = audicaFullAimRadius;
+            float remaining = realAimRadius - impeccableRadius;
 
-            float fantasticRadius = impeccableRadius + remaining * 0.10f; // 0.95f
-            float excellentRadius = impeccableRadius + remaining * 0.30f; // 1.85f
-            float greatRadius = impeccableRadius + remaining * 0.50f; // 2.75f
-            float goodRadius = impeccableRadius + remaining * 1.00f; // 5.0f  (= realAimRadius)
+            // Remaining space after the perfect circle
+            float fantasticRadius = impeccableRadius + remaining * judgementFantasticAimRadiusPercent;
+            float excellentRadius = impeccableRadius + remaining * judgementExcellentAimRadiusPercent;
+            float greatRadius = impeccableRadius + remaining * judgementGreatAimRadiusPercent;
+            float goodRadius = impeccableRadius + remaining * judgementGoodAimRadiusPercent;
 
             if (distanceFromCenter <= impeccableRadius) return Judgement.Impeccable;
             if (distanceFromCenter <= fantasticRadius) return Judgement.Fantastic;

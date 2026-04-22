@@ -10,18 +10,18 @@ namespace ExScoringMod
         {
             float timing = Math.Abs(msOffset);
 
-            if (timing <= perfectTimingSlopMs) return 1f;
-            if (timing >= KataConfig.kSlopWindowEarlyMs) return 0f;
+            if (timing <= audicaPerfectTimingWindowMs) return 1f;
+            if (timing >= audicaWholeTimingWindowMs) return 0f;
 
-            return 1f - (timing - perfectTimingSlopMs) / (KataConfig.kSlopWindowEarlyMs - perfectTimingSlopMs);
+            return 1f - (timing - audicaPerfectTimingWindowMs) / (audicaWholeTimingWindowMs - audicaPerfectTimingWindowMs);
         }
 
         public static float GetLinearAimScore(Target target, Vector3 intersectionPoint, bool useSnapZone = true)
         {
             Vector3 targetPos = target.GetContactPosition();
             float distanceFromCenter = (targetPos - intersectionPoint).magnitude;
-            const float perfectRadius = 0.5f;
-            const float realAimRadius = 5.0f;
+            float perfectRadius = audicaPerfectAimRadius;
+            float realAimRadius = audicaFullAimRadius;
 
             if (distanceFromCenter >= realAimRadius) return 0f;
 
