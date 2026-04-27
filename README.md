@@ -17,7 +17,7 @@ The idea is to make a new scoring system akin to classic rhythm games. I am stil
 
 There is no multiplier, no base score, only these score weights. They are shown as a percentage.
 
-##Current Version Quirk
+## Current Version Quirk
 Currently, judgement scoring has been implemented and is the system that is turned on when using EX scoring.
 
 ## Mod Settings
