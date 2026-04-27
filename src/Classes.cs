@@ -1,5 +1,4 @@
 ﻿using MelonLoader;
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace ExScoringMod
@@ -24,6 +23,8 @@ namespace ExScoringMod
             public float chainAverage;
             public bool miss = false;
             public ScoringCalculation scoringCalculation;
+            public Judgement timingJudgement;
+            public Judgement aimJudgement;
 
             public enum ScoringCalculation
             {

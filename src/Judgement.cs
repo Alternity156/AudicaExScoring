@@ -18,6 +18,12 @@ namespace ExScoringMod
         public static float judgementGreatTimingWindowMs = 50f;
         public static float judgementGoodTimingWindowMs = 100f;
 
+        public static float judgementImpeccableChainAverage = 0.9f;
+        public static float judgementFantasticChainAverage = 0.75f;
+        public static float judgementExcellentChainAverage = 0.6f;
+        public static float judgementGreatChainAverage = 0.4f;
+        public static float judgementGoodChainAverage = 0.0f;
+
         /* Impeccable radius is real target radius
          * The rest is the remaining radius %, whatever remains from Impeccable radius
         */
@@ -34,7 +40,8 @@ namespace ExScoringMod
             Excellent,
             Great,
             Good,
-            Miss
+            Miss,
+            OK
         }
 
         public static Color GetJudgementColor(Judgement judgement)
@@ -42,8 +49,9 @@ namespace ExScoringMod
             switch (judgement)
             {
                 case Judgement.Impeccable:
-                    return Color.blue;
+                    return Color.cyan;
                 case Judgement.Fantastic:
+                case Judgement.OK:
                     return Color.white;
                 case Judgement.Excellent:
                     return new Color(1.0f, 0.84f, 0f); //Gold
@@ -75,6 +83,41 @@ namespace ExScoringMod
             return 0f;
         }
 
+        public static string GetMeleeJudgementText()
+        {
+            return "";
+        }
+
+        public static string GetChainJudgementText(Judgement judgement)
+        {
+            string colorHex = "#" + ColorUtility.ToHtmlStringRGB(GetJudgementColor(judgement));
+
+            string judgementText = "<color=" + colorHex + ">";
+
+            switch (judgement)
+            {
+                case Judgement.Impeccable:
+                    judgementText += "Impeccable Tracing!!";
+                    break;
+                case Judgement.Fantastic:
+                    judgementText += "Fantastic Tracing!";
+                    break;
+                case Judgement.Excellent:
+                    judgementText += "Excellent Tracing";
+                    break;
+                case Judgement.Great:
+                    judgementText += "Great Tracing";
+                    break;
+                case Judgement.Good:
+                    judgementText += "Good Tracing";
+                    break;
+            }
+
+            judgementText += "</color>";
+
+            return judgementText;
+        }
+
         public static string GetJudgementText(Judgement timingJudgement, Judgement aimJudgement)
         {
             string timingColorHex = "#" + ColorUtility.ToHtmlStringRGB(GetJudgementColor(timingJudgement));
@@ -101,7 +144,7 @@ namespace ExScoringMod
                     break;
             }
 
-            judgementText += judgementText + "</color>\n<color=" + aimColorHex + ">";
+            judgementText += "</color>\n<color=" + aimColorHex + ">";
 
             switch (aimJudgement)
             {
@@ -123,6 +166,8 @@ namespace ExScoringMod
             }
 
             judgementText += "</color>";
+
+            MelonLogger.Log(judgementText);
 
             return judgementText;
         }
@@ -161,6 +206,16 @@ namespace ExScoringMod
             if (distanceFromCenter <= greatRadius) return Judgement.Great;
             if (distanceFromCenter <= goodRadius) return Judgement.Good;
             return Judgement.Miss;
+        }
+
+        public static Judgement GetChainJudgement(float chainAverage)
+        {
+            if (chainAverage >= judgementImpeccableChainAverage) return Judgement.Impeccable;
+            else if (chainAverage >= judgementFantasticChainAverage) return Judgement.Fantastic;
+            else if (chainAverage >= judgementExcellentChainAverage) return Judgement.Excellent;
+            else if (chainAverage >= judgementGreatChainAverage) return Judgement.Great;
+            else if (chainAverage >= judgementGoodChainAverage) return Judgement.Good;
+            else return Judgement.Miss;
         }
     }
 }

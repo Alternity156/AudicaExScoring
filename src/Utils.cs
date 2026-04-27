@@ -1,7 +1,7 @@
 ﻿using MelonLoader;
 using System.Collections.Generic;
-using System.Globalization;
-using System.Linq;
+using UnityEngine;
+using static ExScoringMod.ExScoring;
 using static SongCues;
 
 namespace ExScoringMod
@@ -52,6 +52,37 @@ namespace ExScoringMod
 
             chain.Reverse();
             return chain;
+        }
+
+        public static TargetHitPos GetTargetHitPos(Target target, Vector3 intersectionPoint)
+        {
+            Vector3 targetPos = target.GetContactPosition();
+            Vector3 localPoint = intersectionPoint - targetPos;
+
+            return new TargetHitPos
+            {
+                x = Vector3.Dot(localPoint, target.transform.right),
+                y = Vector3.Dot(localPoint, target.transform.up)
+            };
+        }
+
+        public static float GetChainAverageFromLastNodeCue(SongCues.Cue cue)
+        {
+            List<Cue> fullChain = GetChainFromLastNode(cue);
+
+            float total = 0;
+
+            foreach (Cue chainCue in fullChain)
+            {
+                if (cue.behavior == Target.TargetBehavior.Chain)
+                {
+                    total += chainCue.aim;
+                }
+            }
+
+            float chainAverage = total / fullChain.Count;
+
+            return chainAverage;
         }
     }
 }

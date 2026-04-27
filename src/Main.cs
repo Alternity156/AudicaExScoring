@@ -18,6 +18,8 @@ namespace ExScoringMod
         public static List<ExCue> exCues = new List<ExCue>();
         public static List<UnprocessedTargetHitPos> unprocessedTargetHitPoses = new List<UnprocessedTargetHitPos>();
 
+        private static Dictionary<int, List<(float aimScore, Vector3 intersectionPoint)>> pendingAimResults = new Dictionary<int, List<(float, Vector3)>>();
+
         public static bool nextPopupIsScore = false;
         public static string nextPopupText = "";
 

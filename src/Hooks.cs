@@ -1,6 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
-using System.Xml.Schema;
+using System.Linq;
 using Harmony;
 using MelonLoader;
 using UnityEngine;
@@ -13,17 +13,25 @@ namespace ExScoringMod
         [HarmonyPatch(typeof(InGameUI), "Restart")]
         public static class InGameUIRestartPatch
         {
-            public static void Postfix(InGameUI __instance)
+            public static void Postfix(
+                InGameUI __instance
+                )
             {
                 ResetExScore();
             }
         }
 
-        [HarmonyPatch(typeof(MenuState), "SetState", new Type[] { typeof(MenuState.State) })]
+        [HarmonyPatch(typeof(MenuState), "SetState", new Type[] 
+        { 
+            typeof(MenuState.State) 
+        })]
         public static class SetStatePatch
         {
 
-            public static void Postfix(MenuState __instance, MenuState.State state)
+            public static void Postfix(
+                MenuState __instance, 
+                MenuState.State state
+                )
             {
                 if (menuState == MenuState.State.Launched && state != MenuState.State.Launched)
                 {
@@ -50,7 +58,9 @@ namespace ExScoringMod
         [HarmonyPatch(typeof(SongSelectItem), "OnSelect")]
         private static class PatchSongOnSelect
         {
-            private static void Postfix(SongSelectItem __instance)
+            private static void Postfix(
+                SongSelectItem __instance
+                )
             {
                 selectedSong = __instance.mSongData.songID;
                 maxPossibleExScore = GetMaxPossibleExScore(selectedSong);
@@ -58,10 +68,19 @@ namespace ExScoringMod
             }
         }
 
-        [HarmonyPatch(typeof(ScoreKeeper), "OnFailure", new Type[] { typeof(SongCues.Cue), typeof(bool), typeof(bool) })]
+        [HarmonyPatch(typeof(ScoreKeeper), "OnFailure", new Type[] 
+        { 
+            typeof(SongCues.Cue), 
+            typeof(bool), 
+            typeof(bool) 
+        })]
         public static class ScoreKeeperOnFailurePatch
         {
-            public static void Postfix(SongCues.Cue cue, bool pass, bool failedDodge)
+            public static void Postfix(
+                SongCues.Cue cue, 
+                bool pass, 
+                bool failedDodge
+                )
             {
                 if (cue == null) return;
 
@@ -72,6 +91,7 @@ namespace ExScoringMod
                     ExCue exCue = new ExCue();
 
                     exCue.index = cue.index;
+                    exCue.behavior = cue.behavior;
                     exCue.handType = cue.handType;
                     exCue.tick = cue.tick;
                     exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal;
@@ -80,25 +100,55 @@ namespace ExScoringMod
             }
         }
 
-        [HarmonyPatch(typeof(Gun), "CalculateAim", new Type[] { typeof(Target), typeof(Vector3) })]
+        [HarmonyPatch(typeof(Gun), "CalculateAim", new Type[] 
+        { 
+            typeof(Target), 
+            typeof(Vector3) 
+        })]
         public static class CalculateAimPatch
         {
-            public static void Postfix(ref Gun __instance, Target target, Vector3 intersectionPoint, ref float __result)
+            public static void Postfix(
+                ref Gun __instance, 
+                Target target, 
+                Vector3 intersectionPoint, 
+                ref float __result
+                )
             {
                 if (Config.LinearCalculation)
                 {
                     __result = GetLinearAimScore(target, intersectionPoint);
                 }
+
+                int index = target.mCue.index;
+
+                if (!pendingAimResults.ContainsKey(index))
+                {
+                    pendingAimResults[index] = new List<(float, Vector3)>();
+                }
+
+                pendingAimResults[index].Add((__result, intersectionPoint));
             }
         }
 
-        [HarmonyPatch(typeof(ScoreData), "GetScoreForCue", new Type[] { typeof(SongCues.Cue), typeof(float), typeof(float), typeof(float) })]
+        [HarmonyPatch(typeof(ScoreData), "GetScoreForCue", new Type[] 
+        { 
+            typeof(SongCues.Cue), 
+            typeof(float), 
+            typeof(float), 
+            typeof(float) 
+        })]
         public static class GetScoreForCuePatch
         {
             /* This was a test to see what would happend if you prevent the game from doing this when it's
              * loading songs. It breaks the in-song star count.
              */ 
-            public static void Prefix(ScoreData __instance, SongCues.Cue cue, ref float timing, ref float aim, ref float extra)
+            public static void Prefix(
+                ScoreData __instance, 
+                SongCues.Cue cue, 
+                ref float timing, 
+                ref float aim, 
+                ref float extra
+                )
             {
                 /*
                 if (!gameHasLoaded)
@@ -114,7 +164,14 @@ namespace ExScoringMod
                 }
             }
 
-            public static void Postfix(ScoreData __instance, SongCues.Cue cue, float timing, float aim, float extra, ref int __result)
+            public static void Postfix(
+                ScoreData __instance, 
+                SongCues.Cue cue, 
+                float timing, 
+                float aim, 
+                float extra, 
+                ref int __result
+                )
             {
                 if (menuState == MenuState.State.Launched)
                 {
@@ -122,50 +179,33 @@ namespace ExScoringMod
                     {
                         currentMaxPossibleExScore += GetMaxExScoreForCue(cue);
 
-                        TargetHitPos targetHitPos = new TargetHitPos();
-
-                        for (int i = 0; i < unprocessedTargetHitPoses.Count; i++)
-                        {
-                            if (unprocessedTargetHitPoses[i].index == cue.index)
-                            {
-                                targetHitPos.y = unprocessedTargetHitPoses[i].targetHitPos.y;
-                                targetHitPos.x = unprocessedTargetHitPoses[i].targetHitPos.x;
-
-                                unprocessedTargetHitPoses.RemoveAt(i);
-                            }
-                        }
-
                         ExCue exCue = new ExCue();
 
-                        if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext == null)
-                        {
-                            List<Cue> fullChain = GetChainFromLastNode(cue);
-
-                            float chainAverage = 0;
-                            float total = 0;
-
-                            foreach (Cue chainCue in fullChain)
-                            {
-                                if (cue.behavior == Target.TargetBehavior.Chain)
-                                {
-                                    total += chainCue.aim;
-                                }
-                            }
-
-                            chainAverage = total / fullChain.Count;
-
-                            exCue.isChainTail = true;
-                            exCue.chainAverage = chainAverage;
-                        }
-
-                        float timingMs = GetTimingMsFromCue(cue);
-
                         ExCue.ScoringCalculation scoringCalculation = ExCue.ScoringCalculation.Audica;
+                        float timingMs = GetTimingMsFromCue(cue);
 
                         if (Config.LinearCalculation)
                         {
                             scoringCalculation = ExCue.ScoringCalculation.Linear;
                         }
+
+                        if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext == null)
+                        {
+                            exCue.isChainTail = true;
+                            exCue.chainAverage = GetChainAverageFromLastNodeCue(cue);
+                        }
+
+                        Vector3 finalIntersection = Vector3.zero;
+
+                        if (pendingAimResults.TryGetValue(cue.index, out var results))
+                        {
+                            var match = results.FirstOrDefault(r => Mathf.Approximately(r.aimScore, aim));
+                            finalIntersection = match.intersectionPoint;
+                            pendingAimResults.Remove(cue.index);
+                        }
+
+                        Judgement timingJudgement = GetTimingJudgement(timingMs);
+                        Judgement aimJudgement = GetAimJudgement(cue.target, finalIntersection);
 
                         exCue.behavior = cue.behavior;
                         exCue.handType = cue.handType;
@@ -174,21 +214,38 @@ namespace ExScoringMod
                         exCue.timing = timing;
                         exCue.timingMs = timingMs;
                         exCue.aim = aim;
-                        exCue.targetHitPos = targetHitPos;
+                        exCue.targetHitPos = GetTargetHitPos(cue.target, finalIntersection);
                         exCue.velocity = cue.meleeVelocityAmount;
                         exCue.sustainPercent = cue.sustainPercent;
                         exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal;
                         exCue.index = cue.index;
                         exCue.scoringCalculation = scoringCalculation;
+                        exCue.timingJudgement = timingJudgement;
+                        exCue.aimJudgement = aimJudgement;
 
                         processedCuesIndexes.Add(cue.index);
                         exCues.Add(exCue);
                         float exCueScore = GetExScoreForExCue(exCue);
 
                         exScore += exCueScore;
-                        nextPopupText = GetPopupText(exCue);
+                        //nextPopupText = GetPopupText(exCue);
 
-                        //PrintExScore(exScore);
+                        if(cue.behavior == Target.TargetBehavior.Melee && cue.meleeVelocityAmount > 0)
+                        {
+                            nextPopupText = GetMeleeJudgementText();
+                        }
+                        else if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext != null)
+                        {
+                            nextPopupText = "";
+                        }
+                        else if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext == null)
+                        {
+                            nextPopupText = GetChainJudgementText(GetChainJudgement(exCue.chainAverage));
+                        }
+                        else
+                        {
+                            nextPopupText = GetJudgementText(timingJudgement, aimJudgement);
+                        }
                     }
                 }
             }
@@ -197,7 +254,9 @@ namespace ExScoringMod
         [HarmonyPatch(typeof(ScoreKeeperDisplay), "Update")]
         private static class PatchScoreKeeperUpdate
         {
-            private static void Postfix(ScoreKeeperDisplay __instance)
+            private static void Postfix(
+                ScoreKeeperDisplay __instance
+                )
             {
                 if (Config.ExType) ScoreKeeperDisplayUpdate(__instance);
             }
@@ -206,17 +265,35 @@ namespace ExScoringMod
         [HarmonyPatch(typeof(Target), "CompleteTarget")]
         private static class Target_CompleteTarget
         {
-            private static bool Prefix(Target __instance)
+            private static void Prefix(
+                Target __instance
+                )
             {
                 nextPopupIsScore = true;
-                return true;
             }
         }
-
-        [HarmonyPatch(typeof(Target), "OnHit", new Type[] { typeof(Gun), typeof(Gun.AttackType), typeof(float), typeof(Vector2), typeof(Vector3), typeof(float), typeof(bool) })]
+        /*
+        [HarmonyPatch(typeof(Target), "OnHit", new Type[] { 
+            typeof(Gun), 
+            typeof(Gun.AttackType), 
+            typeof(float), 
+            typeof(Vector2), 
+            typeof(Vector3), 
+            typeof(float), 
+            typeof(bool) 
+        })]
         private static class TargetOnHitPatch
         {
-            private static void Prefix(ref Target __instance, Gun gun, Gun.AttackType attackType, float aim, Vector2 targetHitPos, Vector3 intersectionPoint)
+            private static void Postfix(
+                Target __instance, 
+                Gun gun, 
+                Gun.AttackType attackType, 
+                float aim, 
+                Vector2 targetHitPos, 
+                Vector3 intersectionPoint,
+                float meleeVelocity,
+                bool forceSuccessful
+                )
             {
                 UnprocessedTargetHitPos unprocessedTargetHitPos = new UnprocessedTargetHitPos();
 
@@ -224,13 +301,37 @@ namespace ExScoringMod
                 unprocessedTargetHitPos.targetHitPos = targetHitPos;
 
                 unprocessedTargetHitPoses.Add(unprocessedTargetHitPos);
+
+                if (gun.GetHandType() != __instance.mCue.handType)
+                {
+                    MelonLogger.Log($"Hand mismatch! Gun={gun.GetHandType()} Cue={__instance.mCue.handType} Index={__instance.mCue.index}");
+                }
+
+                if (__instance.mCue.behavior != Target.TargetBehavior.Melee)
+                {
+                    MelonLogger.Log("OnHit aim: " + aim);
+                    MelonLogger.Log("Recalculated aim: " + GetAudicaAimScore(__instance, intersectionPoint));
+                }
             }
         }
-
-        [HarmonyPatch(typeof(TextPopupPool), "CreatePopup", new Type[] { typeof(Vector3), typeof(Quaternion), typeof(Vector3), typeof(string), typeof(string) })]
+        */
+        [HarmonyPatch(typeof(TextPopupPool), "CreatePopup", new Type[] { 
+            typeof(Vector3), 
+            typeof(Quaternion), 
+            typeof(Vector3), 
+            typeof(string), 
+            typeof(string) 
+        })]
         private static class TextPopupPool_CreatePopup
         {
-            private static bool Prefix(TextPopupPool __instance, Vector3 position, Quaternion rotation, Vector3 scale, ref string text, ref string extraText)
+            private static void Prefix(
+                TextPopupPool __instance, 
+                Vector3 position, 
+                Quaternion rotation, 
+                Vector3 scale, 
+                ref string text, 
+                ref string extraText
+                )
             {
                 if (nextPopupIsScore && Config.ExType)
                 {
@@ -239,13 +340,13 @@ namespace ExScoringMod
                     var index = __instance.mIndex;
                     var popup = __instance.mPopups[index];
 
+                    popup.text.richText = true;
+
                     text = nextPopupText.ToString();
                     extraText = "";
 
                     nextPopupText = "";
                 }
-
-                return true;
             }
         }
 
