@@ -11,8 +11,11 @@ namespace ExScoringMod
         {
             if (!KataConfig.I.practiceMode)
             {
-                float score = exScore;
-                float percentage = GetCurrentMaxPossibleExPercentage();
+                //float score = exScore;
+                //float percentage = GetCurrentMaxPossibleExPercentage();
+
+                float score = judgementScore;
+                float percentage = GetCurrentMaxPossibleJudgementPercentage();
 
                 //Make pretty-ish strings
                 string scoreString = "<size=" + inGameCurrentScoreSize + ">" + score + "</size>";

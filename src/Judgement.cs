@@ -1,5 +1,6 @@
 ﻿using MelonLoader;
 using System;
+using System.Linq;
 using UnityEngine;
 
 namespace ExScoringMod
@@ -11,6 +12,8 @@ namespace ExScoringMod
         public static float judgementExcellentWeight = 1.5f;
         public static float judgementGreatWeight = 1f;
         public static float judgementGoodWeight = 0.75f;
+
+        public static float judgementOkWeight = 1f;
 
         public static float judgementImpeccableTimingWindowMs = 8.5f;
         public static float judgementFantasticTimingWindowMs = 17f;
@@ -216,6 +219,61 @@ namespace ExScoringMod
             else if (chainAverage >= judgementGreatChainAverage) return Judgement.Great;
             else if (chainAverage >= judgementGoodChainAverage) return Judgement.Good;
             else return Judgement.Miss;
+        }
+
+        public static float GetMaxJudgementScoreForCue(SongCues.Cue cue)
+        {
+            float score = 0f;
+
+            if (cue.behavior == Target.TargetBehavior.Vertical ||
+                cue.behavior == Target.TargetBehavior.Horizontal ||
+                cue.behavior == Target.TargetBehavior.ChainStart ||
+                cue.behavior == Target.TargetBehavior.Standard ||
+                cue.behavior == Target.TargetBehavior.Hold)
+            {
+                score += judgementImpeccableWeight * 2;
+            }
+            if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext == null)
+            {
+                score += judgementImpeccableWeight;
+            }
+            if (cue.behavior == Target.TargetBehavior.Hold ||
+                cue.behavior == Target.TargetBehavior.Melee)
+            {
+                score += 1;
+            }
+
+            return score;
+        }
+
+        public static float GetJudgementScoreFromJudgement(Judgement judgement)
+        {
+            if (judgement == Judgement.Impeccable) return judgementImpeccableWeight;
+            if (judgement == Judgement.Fantastic) return judgementFantasticWeight;
+            if (judgement == Judgement.Excellent) return judgementExcellentWeight;
+            if (judgement == Judgement.Great) return judgementGreatWeight;
+            if (judgement == Judgement.Good) return judgementGoodWeight;
+            if (judgement == Judgement.OK) return judgementOkWeight;
+            return 0;
+        }
+
+        public static float GetMaxPossibleJudgementScore(string songId)
+        {
+            float maxJudgementScore = 0;
+
+            SongCues.Cue[] cues = SongCues.GetCues(SongList.I.GetSong(songId), KataConfig.Difficulty.Expert).ToArray();
+
+            foreach (SongCues.Cue cue in cues)
+            {
+                maxJudgementScore += GetMaxJudgementScoreForCue(cue);
+            }
+
+            return maxJudgementScore;
+        }
+
+        public static float GetCurrentMaxPossibleJudgementPercentage()
+        {
+            return (judgementScore / currentMaxPossibleJudgementScore) * 100;
         }
     }
 }

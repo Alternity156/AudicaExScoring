@@ -8,6 +8,16 @@ namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
+        public static void ResetExScore()
+        {
+            processedCuesIndexes.Clear();
+            exCues.Clear();
+            exScore = 0;
+            judgementScore = 0;
+            currentMaxPossibleExScore = 0;
+            currentMaxPossibleJudgementScore = 0;
+        }
+
         public static int GetPercentFromRaw(float rawScore)
         {
             return (int)(rawScore * 100);

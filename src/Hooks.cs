@@ -178,6 +178,7 @@ namespace ExScoringMod
                     if (!processedCuesIndexes.Contains(cue.index))
                     {
                         currentMaxPossibleExScore += GetMaxExScoreForCue(cue);
+                        currentMaxPossibleJudgementScore += GetMaxJudgementScoreForCue(cue);
 
                         ExCue exCue = new ExCue();
 
@@ -193,6 +194,7 @@ namespace ExScoringMod
                         {
                             exCue.isChainTail = true;
                             exCue.chainAverage = GetChainAverageFromLastNodeCue(cue);
+                            exCue.chainJudgement = GetChainJudgement(exCue.chainAverage);
                         }
 
                         Vector3 finalIntersection = Vector3.zero;
@@ -227,6 +229,31 @@ namespace ExScoringMod
                         exCues.Add(exCue);
                         float exCueScore = GetExScoreForExCue(exCue);
 
+                        float judgementCueScore = 0f;
+
+                        if (cue.behavior == Target.TargetBehavior.Vertical ||
+                            cue.behavior == Target.TargetBehavior.Horizontal ||
+                            cue.behavior == Target.TargetBehavior.ChainStart ||
+                            cue.behavior == Target.TargetBehavior.Standard ||
+                            cue.behavior == Target.TargetBehavior.Hold)
+                        {
+                            judgementCueScore += GetJudgementScore(timingJudgement) + GetJudgementScore(aimJudgement);
+                        }
+                        if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext == null)
+                        {
+                            judgementCueScore += GetJudgementScore(exCue.chainJudgement);
+                        }
+                        if (cue.behavior == Target.TargetBehavior.Hold && exCue.sustainPercent == 1)
+                        {
+                            judgementCueScore += 1;
+                        }
+                        if (cue.behavior == Target.TargetBehavior.Melee && exCue.velocity != 0)
+                        {
+                            judgementCueScore += 1;
+                        }
+
+                        judgementScore += judgementCueScore;
+
                         exScore += exCueScore;
                         //nextPopupText = GetPopupText(exCue);
 
@@ -240,7 +267,7 @@ namespace ExScoringMod
                         }
                         else if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext == null)
                         {
-                            nextPopupText = GetChainJudgementText(GetChainJudgement(exCue.chainAverage));
+                            nextPopupText = GetChainJudgementText(exCue.chainJudgement);
                         }
                         else
                         {

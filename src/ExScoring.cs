@@ -27,14 +27,6 @@ namespace ExScoringMod
             MelonLogger.Log("EX Percentage: " + GetCurrentExPercentage().ToString() + "%");
         }
 
-        public static void ResetExScore()
-        {
-            processedCuesIndexes.Clear();
-            exCues.Clear();
-            exScore = 0;
-            currentMaxPossibleExScore = 0;
-        }
-
         public static bool ValidateExScore()
         {
             float aimAssist = exCues[0].aimAssist;
@@ -100,11 +92,11 @@ namespace ExScoringMod
             else return 0;
         }
 
-        public static float GetMaxPossibleExScore(string songID)
+        public static float GetMaxPossibleExScore(string songId)
         {
             float maxExScore = 0;
 
-            SongCues.Cue[] cues = SongCues.GetCues(SongList.I.GetSong(songID), KataConfig.Difficulty.Expert).ToArray();
+            SongCues.Cue[] cues = SongCues.GetCues(SongList.I.GetSong(songId), KataConfig.Difficulty.Expert).ToArray();
 
             foreach (SongCues.Cue cue in cues)
             {

@@ -25,6 +25,7 @@ namespace ExScoringMod
             public ScoringCalculation scoringCalculation;
             public Judgement timingJudgement;
             public Judgement aimJudgement;
+            public Judgement chainJudgement;
 
             public enum ScoringCalculation
             {
