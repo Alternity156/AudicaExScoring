@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Harmony;
 using MelonLoader;
+using TMPro;
 using UnityEngine;
 using static SongCues;
 
@@ -299,49 +300,7 @@ namespace ExScoringMod
                 nextPopupIsScore = true;
             }
         }
-        /*
-        [HarmonyPatch(typeof(Target), "OnHit", new Type[] { 
-            typeof(Gun), 
-            typeof(Gun.AttackType), 
-            typeof(float), 
-            typeof(Vector2), 
-            typeof(Vector3), 
-            typeof(float), 
-            typeof(bool) 
-        })]
-        private static class TargetOnHitPatch
-        {
-            private static void Postfix(
-                Target __instance, 
-                Gun gun, 
-                Gun.AttackType attackType, 
-                float aim, 
-                Vector2 targetHitPos, 
-                Vector3 intersectionPoint,
-                float meleeVelocity,
-                bool forceSuccessful
-                )
-            {
-                UnprocessedTargetHitPos unprocessedTargetHitPos = new UnprocessedTargetHitPos();
-
-                unprocessedTargetHitPos.index = __instance.mCue.index;
-                unprocessedTargetHitPos.targetHitPos = targetHitPos;
-
-                unprocessedTargetHitPoses.Add(unprocessedTargetHitPos);
-
-                if (gun.GetHandType() != __instance.mCue.handType)
-                {
-                    MelonLogger.Log($"Hand mismatch! Gun={gun.GetHandType()} Cue={__instance.mCue.handType} Index={__instance.mCue.index}");
-                }
-
-                if (__instance.mCue.behavior != Target.TargetBehavior.Melee)
-                {
-                    MelonLogger.Log("OnHit aim: " + aim);
-                    MelonLogger.Log("Recalculated aim: " + GetAudicaAimScore(__instance, intersectionPoint));
-                }
-            }
-        }
-        */
+        
         [HarmonyPatch(typeof(TextPopupPool), "CreatePopup", new Type[] { 
             typeof(Vector3), 
             typeof(Quaternion), 
@@ -377,5 +336,52 @@ namespace ExScoringMod
             }
         }
 
+        [HarmonyPatch(typeof(GameplayStats), "UpdateDisplay")]
+        public static class GameplayStatsUpdateDisplayPatch
+        {
+            public static bool _hasRun = false;
+
+            public static bool Prefix(GameplayStats __instance)
+            {
+                if (_hasRun) return false;
+                _hasRun = true;
+
+                // Hide GameplayStats children except frame and header
+                Transform t = __instance.transform;
+                for (int i = 0; i < t.childCount; i++)
+                {
+                    Transform child = t.GetChild(i);
+                    if (child.name != "frame" && child.name != "header")
+                        child.gameObject.SetActive(false);
+                }
+
+                // Hide siblings on ShellPanel_Center except what we want to keep
+                Transform parent = __instance.transform.parent;
+                for (int i = 0; i < parent.childCount; i++)
+                {
+                    Transform sibling = parent.GetChild(i);
+                    if (sibling.name != "GameplayStats" &&
+                        sibling.name != "continue" &&
+                        sibling.name != "Glass" &&
+                        sibling.name != "SongAndDifficulty" &&
+                        sibling.name != "Reflector")
+                        sibling.gameObject.SetActive(false);
+                }
+
+                Transform songAndDifficulty = parent.Find("SongAndDifficulty");
+                TMP_Text original = songAndDifficulty.GetComponent<TMP_Text>();
+                RectTransform originalRt = songAndDifficulty.GetComponent<RectTransform>();
+
+                int layer = songAndDifficulty.gameObject.layer;
+
+                CreateTextObject("ExTimingDisplay", GetTimingJudgementString(exCues), parent, layer, original, originalRt, new Vector3(-203, 290, 0), new Vector3(50, 50, 50));
+                CreateTextObject("ExAimDisplay", GetAimJudgementString(exCues), parent, layer, original, originalRt, new Vector3(100, 290, 0), new Vector3(50, 50, 50));
+                CreateTextObject("ExChainDisplay", GetChainJudgementString(exCues), parent, layer, original, originalRt, new Vector3(405, 290, 0), new Vector3(50, 50, 50));
+                CreateTextObject("ExMiscDisplay", GetMiscString(exCues), parent, layer, original, originalRt, new Vector3(130, 465, 0), new Vector3(50, 50, 50));
+                CreateTextObject("ExScoreDisplay", $"Score: {GetCurrentMaxPossibleJudgementPercentage()}%", parent, layer, original, originalRt, new Vector3(287, 548, 0), new Vector3(120, 120, 120), TextAlignmentOptions.Center);
+
+                return false;
+            }
+        }
     }
 }

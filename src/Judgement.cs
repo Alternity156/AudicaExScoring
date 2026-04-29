@@ -7,18 +7,18 @@ namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
-        public static float judgementImpeccableWeight = 2.25f;
-        public static float judgementFantasticWeight = 2f;
-        public static float judgementExcellentWeight = 1.5f;
-        public static float judgementGreatWeight = 1f;
-        public static float judgementGoodWeight = 0.75f;
+        public static float judgementImpeccableWeight = 1f;
+        public static float judgementFantasticWeight = 0.9f;
+        public static float judgementExcellentWeight = 0.8f;
+        public static float judgementGreatWeight = 0.75f;
+        public static float judgementGoodWeight = 0.5f;
 
         public static float judgementOkWeight = 1f;
 
         public static float judgementImpeccableTimingWindowMs = 8.5f;
-        public static float judgementFantasticTimingWindowMs = 17f;
-        public static float judgementExcellentTimingWindowMs = 25f;
-        public static float judgementGreatTimingWindowMs = 50f;
+        public static float judgementFantasticTimingWindowMs = 20f;
+        public static float judgementExcellentTimingWindowMs = 35f;
+        public static float judgementGreatTimingWindowMs = 70f;
         public static float judgementGoodTimingWindowMs = 100f;
 
         public static float judgementImpeccableChainAverage = 0.9f;
@@ -31,9 +31,9 @@ namespace ExScoringMod
          * The rest is the remaining radius %, whatever remains from Impeccable radius
         */
         public static float judgementImpeccableAimRadius = 0.5f;
-        public static float judgementFantasticAimRadiusPercent = 0.1f;
-        public static float judgementExcellentAimRadiusPercent = 0.3f;
-        public static float judgementGreatAimRadiusPercent = 0.5f;
+        public static float judgementFantasticAimRadiusPercent = 0.15f;
+        public static float judgementExcellentAimRadiusPercent = 0.35f;
+        public static float judgementGreatAimRadiusPercent = 0.7f;
         public static float judgementGoodAimRadiusPercent = 1f;
 
         public enum Judgement
@@ -169,8 +169,6 @@ namespace ExScoringMod
             }
 
             judgementText += "</color>";
-
-            MelonLogger.Log(judgementText);
 
             return judgementText;
         }

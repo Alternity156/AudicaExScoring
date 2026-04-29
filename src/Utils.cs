@@ -10,6 +10,7 @@ namespace ExScoringMod
     {
         public static void ResetExScore()
         {
+            GameplayStatsUpdateDisplayPatch._hasRun = false;
             processedCuesIndexes.Clear();
             exCues.Clear();
             exScore = 0;
