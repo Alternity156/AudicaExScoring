@@ -8,8 +8,8 @@ namespace ExScoringMod
     public partial class ExScoring : MelonMod
     {
         public static float judgementImpeccableWeight = 1f;
-        public static float judgementFantasticWeight = 0.9f;
-        public static float judgementExcellentWeight = 0.8f;
+        public static float judgementFantasticWeight = 0.95f;
+        public static float judgementExcellentWeight = 0.9f;
         public static float judgementGreatWeight = 0.75f;
         public static float judgementGoodWeight = 0.5f;
 
