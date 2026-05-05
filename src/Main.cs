@@ -29,6 +29,9 @@ namespace ExScoringMod
         public static float currentMaxPossibleExScore;
         public static float currentMaxPossibleJudgementScore;
 
+        public static string laurelStart = "laurel_start";
+        public static string laurelEnd = "laurel_end";
+
         public static class BuildInfo
         {
             public const string Name = "ExScoring";  // Name of the Mod.  (MUST BE SET)
@@ -109,6 +112,14 @@ namespace ExScoringMod
                 Config.ExType = exType;
                 Config.AudicaCalculation = audicaCalc;
                 Config.LinearCalculation = linearCalc;
+            }
+        }
+
+        public override void OnUpdate()
+        {
+            if (Input.GetKeyDown(KeyCode.P))
+            {
+                Time.timeScale = Time.timeScale == 0f ? 1f : 0f;
             }
         }
     }

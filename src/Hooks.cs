@@ -5,6 +5,7 @@ using Harmony;
 using MelonLoader;
 using TMPro;
 using UnityEngine;
+using UnhollowerBaseLib;
 using static SongCues;
 
 namespace ExScoringMod
@@ -88,6 +89,7 @@ namespace ExScoringMod
                 if (!processedCuesIndexes.Contains(cue.index))
                 {
                     currentMaxPossibleExScore += GetMaxExScoreForCue(cue);
+                    currentMaxPossibleJudgementScore += GetMaxJudgementScoreForCue(cue);
 
                     ExCue exCue = new ExCue();
 
@@ -381,6 +383,23 @@ namespace ExScoringMod
                 CreateTextObject("ExScoreDisplay", $"Score: {GetCurrentMaxPossibleJudgementPercentage()}%", parent, layer, original, originalRt, new Vector3(287, 548, 0), new Vector3(120, 120, 120), TextAlignmentOptions.Center);
 
                 return false;
+            }
+        }
+
+        [HarmonyPatch(typeof(SongEndSequence), "Update")]
+        public static class SongEndSequenceUpdatePatch
+        {
+            public static void Postfix(SongEndSequence __instance)
+            {
+                if (__instance.mState == SongEndSequence.State.WaitForScorePercentStars) return;
+
+                GameObject scoreAndPercent = __instance.scorePercentStars
+                    .transform.Find("ScoreAndPercent")?.gameObject;
+                if (scoreAndPercent == null) return;
+
+                TextMeshPro tmp = scoreAndPercent.GetComponent<TextMeshPro>();
+                if (tmp.text != $"{GetCurrentMaxPossibleJudgementPercentage()}%")
+                    tmp.text = $"{GetCurrentMaxPossibleJudgementPercentage()}%";
             }
         }
     }

@@ -95,5 +95,11 @@ namespace ExScoringMod
 
             return chainAverage;
         }
+
+        private static string Colorize(string text, Color color)
+        {
+            string hex = ColorUtility.ToHtmlStringRGB(color);
+            return $"<color=#{hex}>{text}</color>";
+        }
     }
 }
