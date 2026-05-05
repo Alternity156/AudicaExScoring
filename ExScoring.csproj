@@ -184,7 +184,9 @@
     <Compile Include="src\AudicaScoring.cs" />
     <Compile Include="src\Classes.cs" />
     <Compile Include="src\Config.cs" />
+    <Compile Include="src\GameplayStatsUI.cs" />
     <Compile Include="src\Hooks.cs" />
+    <Compile Include="src\InGameUI.cs" />
     <Compile Include="src\Judgement.cs" />
     <Compile Include="src\LinearScoring.cs" />
     <Compile Include="src\Main.cs" />
