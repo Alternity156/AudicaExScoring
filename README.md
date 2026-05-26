@@ -1,24 +1,17 @@
 ## WARNING
 
-This mod conflicts with ScorePercentage and HitScoreVisualizer
+This mod conflicts with ScorePercentage HitScoreVisualizer and SongBrowser.
+
+I am currently implementing SongBrowser features that most players expect to be functional in the game.
 
 ## EX Scoring
 
 The idea is to make a new scoring system akin to classic rhythm games. I am still not sure where I want this to go but I am experimenting currently, if you have ideas, let me know on Discord!
 
 ## Current implementation
-| Target | Score Weight |
-|--|--|
-|Normal, Aim  | 0-1 |
-|Normal, Timing | 0-1 |
-|Sustain, Hold | 0-1 |
-|Melee, Velocity | 0-1 |
-|Chain, Node Aim | 0-0.1 |
-
-There is no multiplier, no base score, only these score weights. They are shown as a percentage.
-
-## Current Version Quirk
 Currently, judgement scoring has been implemented and is the system that is turned on when using EX scoring.
+
+The values are currently in testing, you can browse the current values in Judgement.cs.
 
 ## Mod Settings
 You can use the ModSettings mod to change the score visuals from Audica style to Ex style.
