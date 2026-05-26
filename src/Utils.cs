@@ -42,6 +42,7 @@ namespace ExScoringMod
             difficultyUISetup = false;
             songListUISetup = false;
             launchPanelUISetup = false;
+            favoriteButtonSetup = false;
             GameplayStatsUpdateDisplayPatch._hasRun = false;
             processedCuesIndexes.Clear();
             exCues.Clear();

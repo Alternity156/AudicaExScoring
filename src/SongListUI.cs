@@ -125,8 +125,8 @@ namespace ExScoringMod
                 launchPanelCenterTitleLabel.transform.parent,
                 launchPanelCenterTitleLabel.gameObject.layer,
                 launchPanelCenterTitleLabel.GetComponent<TextMeshPro>(),
-                launchPanelCenterTitleLabel.GetComponent<RectTransform>(), 
-                new Vector3(-2.15f, 12.3f, 0f), 
+                launchPanelCenterTitleLabel.GetComponent<RectTransform>(),
+                new Vector3(-2.15f, 12.3f, 0f),
                 new Vector3(1.5f, 1.5f, 1.5f)
                 );
 
@@ -243,6 +243,8 @@ namespace ExScoringMod
 
             RefreshIntensityGraph();
             SetupDifficultyIndicators();
+            SetupFavoriteButton();
+            CreateDeleteButton(ButtonUtils.ButtonLocation.Menu);
         }
 
         public static void UpdateLaunchPanelInfo()
@@ -266,6 +268,10 @@ namespace ExScoringMod
             launchPanelCenterTotalRightHandTargets.GetComponent<TextMeshPro>().text = GetRightHandCueStatsString(stats);
             launchPanelCenterTotalLeftHandTargets.GetComponent<TextMeshPro>().text = GetLeftHandCueStatsString(stats);
             launchPanelCenterTotalEitherHandTargets.GetComponent<TextMeshPro>().text = GetEitherHandCueStatsString(stats);
+
+            UpdateFavoriteIndicator();
+            if (deleteGunButton != null && deleteButtonText != null)
+                UpdateDeleteButtonEnabled(deleteGunButton, deleteButtonText);
         }
 
         public static void SetupDifficultyIndicators()
@@ -383,7 +389,13 @@ namespace ExScoringMod
                 if (buttons != null && buttons.Count > 0) break;
             }
 
-            if (buttons == null || buttons.Count == 0) yield break;
+            MelonLogger.Log($"AutoSelect: buttons found={buttons != null}, count={buttons?.Count ?? 0}");
+
+            if (buttons == null || buttons.Count == 0)
+            {
+                HideLaunchPanel();
+                yield break;
+            }
 
             SongSelectItem targetItem = null;
 

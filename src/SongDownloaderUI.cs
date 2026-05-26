@@ -134,6 +134,14 @@ namespace ExScoringMod
                 null, "Downloads all songs from the current page, this will cause major stutters");
             optionsMenu.scrollable.AddRow(downloadFullPage.gameObject);
 
+            var restoreSongs = optionsMenu.AddButton(0, "Restore Deleted Songs",
+                new Action(() =>
+                {
+                    ExScoring.RestoreDeletedSongs();
+                }),
+                null, "Restores all the songs you have deleted.");
+            optionsMenu.scrollable.AddRow(restoreSongs.gameObject);
+
             string popularityFilterText = "Sort by downloads: " + popularity.ToString();
             popularityToggle = optionsMenu.AddButton(1, popularityFilterText,
                 new Action(() =>

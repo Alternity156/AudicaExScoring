@@ -46,6 +46,9 @@ namespace ExScoringMod
         public static bool shouldShowKeyboard = false;
         public static string downloadsDirectory;
         public static string mainSongDirectory;
+        public static string deletedDownloadsListPath;
+        public static List<string> deletedSongs = new List<string>();
+        public static List<string> deletedSongPaths = new List<string>();
 
         public static class BuildInfo
         {
@@ -63,7 +66,9 @@ namespace ExScoringMod
             // Set up download directories
             mainSongDirectory = Path.Combine(Application.streamingAssetsPath, "HmxAudioAssets", "songs");
             downloadsDirectory = Application.dataPath.Replace("Audica_Data", "Downloads");
+            deletedDownloadsListPath = Path.Combine(downloadsDirectory, "ExScoring_DeletedFiles");
             CheckFolderDirectories();
+            CleanMarkedForDeletion();
 
             // Move any previously downloaded songs into the main songs folder
             // so the game picks them up naturally on this launch
@@ -151,6 +156,100 @@ namespace ExScoringMod
             catch (Exception e)
             {
                 MelonLogger.Log($"[WARNING] Could not register Downloads directory: {e.Message}");
+            }
+        }
+
+        public static void RemoveSong(string songID)
+        {
+            if (deletedSongs.Contains(songID))
+                return;
+            var song = SongList.I.GetSong(songID);
+            deletedSongPaths.Add(song.searchRoot + "/" + song.zipPath);
+            deletedSongs.Add(song.songID);
+        }
+
+        public static void RestoreDeletedSongs()
+        {
+            deletedSongPaths = new List<string>();
+            deletedSongs = new List<string>();
+            KataConfig.I.CreateDebugText("Restored songs", new Vector3(0f, -1f, 5f), 5f, null, false, 0.2f);
+        }
+
+        public override void OnApplicationQuit()
+        {
+            CleanDeletedSongs();
+        }
+
+        private static void CleanDeletedSongs()
+        {
+            List<string> downloadsMarkedForDeletion = new List<string>();
+            foreach (var songPath in deletedSongPaths)
+            {
+                if (File.Exists(songPath))
+                {
+                    try
+                    {
+                        File.Delete(songPath);
+                    }
+                    catch
+                    {
+                        downloadsMarkedForDeletion.Add(Path.GetFileName(songPath));
+                    }
+                }
+                else
+                {
+                    string fileName = Path.GetFileName(songPath);
+                    string downloadPath = Path.Combine(downloadsDirectory, fileName);
+                    if (File.Exists(downloadPath))
+                    {
+                        downloadsMarkedForDeletion.Add(fileName);
+                    }
+                }
+            }
+            if (downloadsMarkedForDeletion.Count > 0)
+            {
+                string text = MelonLoader.TinyJSON.JSON.Dump(downloadsMarkedForDeletion);
+                File.WriteAllText(deletedDownloadsListPath, text);
+            }
+        }
+
+        private static void CleanMarkedForDeletion()
+        {
+            if (!File.Exists(deletedDownloadsListPath)) return;
+
+            try
+            {
+                string text = File.ReadAllText(deletedDownloadsListPath);
+                List<string> deleted = MelonLoader.TinyJSON.JSON.Load(text).Make<List<string>>();
+
+                foreach (string fileName in deleted)
+                {
+                    string path = Path.Combine(downloadsDirectory, fileName);
+                    try
+                    {
+                        if (File.Exists(path))
+                        {
+                            File.Delete(path);
+                        }
+                        else
+                        {
+                            path = Path.Combine(mainSongDirectory, fileName);
+                            if (File.Exists(path))
+                            {
+                                File.Delete(path);
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        MelonLogger.Log($"[WARNING] Unable to delete {fileName}");
+                    }
+                }
+                File.Delete(deletedDownloadsListPath);
+            }
+            catch (Exception e)
+            {
+                MelonLogger.Log($"[WARNING] Could not process deletion list: {e.Message}");
             }
         }
 

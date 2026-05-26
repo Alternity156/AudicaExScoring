@@ -7,25 +7,38 @@ using UnityEngine;
 namespace ExScoringMod
 {
     /// <summary>
-    /// Tracks which song filenames are currently loaded in the song list.
-    /// Used by SongDownloaderUI to show "Downloaded!" for songs that are already present.
+    /// Tracks which songs are currently loaded in the song list.
+    /// Used by SongDownloaderUI to show "Downloaded!" status,
+    /// and by FilterPanel/SongSearch for filtering.
     /// </summary>
     internal static class SongDownloadTracker
     {
         public static HashSet<string> songFilenames = new HashSet<string>();
+        public static HashSet<string> songIDs = new HashSet<string>();
+        public static Dictionary<string, string> songDictionary = new Dictionary<string, string>();
 
         /// <summary>
-        /// Rebuilds the set of loaded song filenames from SongList.I.
+        /// Rebuilds all tracking data from SongList.I.
         /// Call after the song list has finished loading/reloading.
         /// </summary>
-        public static void UpdateSongFilenames()
+        public static void UpdateSongData()
         {
             songFilenames.Clear();
+            songIDs.Clear();
+            songDictionary.Clear();
+
             for (int i = 0; i < SongList.I.songs.Count; i++)
             {
-                string path = Path.GetFileName(SongList.I.songs[i].zipPath);
-                if (!songFilenames.Contains(path))
-                    songFilenames.Add(path);
+                string songID = SongList.I.songs[i].songID;
+                string filename = Path.GetFileName(SongList.I.songs[i].zipPath);
+
+                songIDs.Add(songID);
+
+                if (!songFilenames.Contains(filename))
+                    songFilenames.Add(filename);
+
+                if (!songDictionary.ContainsKey(filename))
+                    songDictionary.Add(filename, songID);
             }
         }
 
@@ -50,8 +63,12 @@ namespace ExScoringMod
 
         private static IEnumerator PostProcess()
         {
-            UpdateSongFilenames();
+            UpdateSongData();
             yield return null;
+
+            SongSearch.Search(); // update search results with any new songs
+            yield return null;
+
             KataConfig.I.CreateDebugText("Songs Loaded", new Vector3(0f, -1f, 5f), 5f, null, false, 0.2f);
         }
     }

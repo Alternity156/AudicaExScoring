@@ -182,9 +182,13 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="src\AudicaScoring.cs" />
+    <Compile Include="src\ButtonUtils.cs" />
     <Compile Include="src\Classes.cs" />
     <Compile Include="src\Config.cs" />
     <Compile Include="src\CueStats.cs" />
+    <Compile Include="src\DeleteButton.cs" />
+    <Compile Include="src\FavoriteButton.cs" />
+    <Compile Include="src\FilterPanel.cs" />
     <Compile Include="src\GameplayStatsUI.cs" />
     <Compile Include="src\Heatmap.cs" />
     <Compile Include="src\Hooks.cs" />
@@ -195,10 +199,14 @@
     <Compile Include="src\Main.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="src\ExScoring.cs" />
+    <Compile Include="src\RefreshButton.cs" />
     <Compile Include="src\SongDownloader.cs" />
     <Compile Include="src\SongDownloaderTracker.cs" />
     <Compile Include="src\SongDownloaderUI.cs" />
     <Compile Include="src\SongListUI.cs" />
+    <Compile Include="src\SongSearch.cs" />
+    <Compile Include="src\SongSearchButton.cs" />
+    <Compile Include="src\SongSearchMenu.cs" />
     <Compile Include="src\TargetIcons.cs" />
     <Compile Include="src\UI.cs" />
     <Compile Include="src\Utils.cs" />

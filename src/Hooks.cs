@@ -78,6 +78,11 @@ namespace ExScoringMod
                     InitializeTargetIcons();
                 }
 
+                if (state == MenuState.State.SettingsPage)
+                {
+                    suppressShellPageAnimations = false;
+                }
+
                 if (state == MenuState.State.MainPage)
                 {
                     StartWatching();
@@ -102,9 +107,26 @@ namespace ExScoringMod
                     LaunchPanelUISetup();
                     suppressShellPageAnimations = true;
 
+                    MelonLogger.Log($"SongPage entered, sLastState={MenuState.sLastState}");
                     if (MenuState.sLastState == MenuState.State.MainPage)
                     {
                         AutoSelectSong();
+                    }
+
+                    if (MenuState.sLastState == MenuState.State.SettingsPage)
+                    {
+                        var songSelectObj = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect");
+                        if (songSelectObj != null)
+                        {
+                            var ss = songSelectObj.GetComponent<SongSelect>();
+                            if (ss != null) ss.ShowSongList();
+                        }
+                        AutoSelectSong();
+                    }
+
+                    if (MenuState.sLastState == MenuState.State.SettingsPage)
+                    {
+                        suppressShellPageAnimations = true;
                     }
                 }
             }
@@ -560,6 +582,7 @@ namespace ExScoringMod
                     if (settingsButtonCount == 9)
                     {
                         SongDownloaderUI.AddPageButton(__instance, 0);
+                        SongSearchScreen.SetMenu(__instance);
                     }
                 }
             }
@@ -567,6 +590,7 @@ namespace ExScoringMod
 
         /// <summary>
         /// Resets state when navigating between settings pages.
+        /// Postfix redirects to search page if a song search is in progress.
         /// </summary>
         [HarmonyPatch(typeof(OptionsMenu), "ShowPage", new Type[] { typeof(OptionsMenu.Page) })]
         private static class OptionsMenuShowPagePatch
@@ -577,21 +601,39 @@ namespace ExScoringMod
                 settingsButtonCount = 0;
                 SongDownloader.searchString = "";
             }
+
+            private static void Postfix(OptionsMenu __instance, OptionsMenu.Page page)
+            {
+                if (page == OptionsMenu.Page.Main)
+                {
+                    if (SongSearch.searchInProgress)
+                    {
+                        SongSearchScreen.GoToSearch();
+                    }
+                }
+            }
         }
 
         /// <summary>
-        /// Handles cleanup when backing out of the download page.
-        /// Hides the secondary song panel and triggers a song reload if needed.
+        /// Handles cleanup when backing out of the download or search page.
         /// </summary>
         [HarmonyPatch(typeof(OptionsMenu), "BackOut", new Type[0])]
         private static class OptionsMenuBackOutPatch
         {
             private static bool Prefix(OptionsMenu __instance)
             {
-                if (SongDownloaderUI.songItemPanel != null)
-                    SongDownloaderUI.songItemPanel.SetPageActive(false);
-                if (SongDownloader.needRefresh)
-                    ReloadSongList(false);
+                if (SongSearch.searchInProgress)
+                {
+                    SongSearch.CancelSearch();
+                    return false;
+                }
+                else
+                {
+                    if (SongDownloaderUI.songItemPanel != null)
+                        SongDownloaderUI.songItemPanel.SetPageActive(false);
+                    if (SongDownloader.needRefresh)
+                        ReloadSongList(false);
+                }
                 return true;
             }
         }
@@ -611,7 +653,9 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Routes keyboard input to the download search field when shouldShowKeyboard is true.
+        /// Routes keyboard input to the appropriate search field.
+        /// If a song search is in progress, input goes to SongSearch.
+        /// Otherwise input goes to the download search.
         /// </summary>
         [HarmonyPatch(typeof(KeyboardEntry), "OnKey", new Type[] { typeof(KeyCode), typeof(string) })]
         private static class KeyboardEntryOnKeyPatch
@@ -620,24 +664,49 @@ namespace ExScoringMod
             {
                 if (shouldShowKeyboard)
                 {
-                    switch (label)
+                    if (SongSearch.searchInProgress)
                     {
-                        case "done":
-                            __instance.Hide();
-                            shouldShowKeyboard = false;
-                            SongDownloader.StartNewSongSearch();
-                            break;
-                        case "clear":
-                            SongDownloader.searchString = "";
-                            break;
-                        default:
-                            SongDownloader.searchString += label;
-                            break;
-                    }
+                        switch (label)
+                        {
+                            case "done":
+                                __instance.Hide();
+                                shouldShowKeyboard = false;
+                                SongSearch.OnNewUserSearch();
+                                break;
+                            case "clear":
+                                SongSearch.query = "";
+                                break;
+                            default:
+                                SongSearch.query += label;
+                                break;
+                        }
 
-                    if (SongDownloaderUI.searchText != null)
+                        if (SongSearchScreen.searchText != null)
+                        {
+                            SongSearchScreen.searchText.text = SongSearch.query;
+                        }
+                    }
+                    else
                     {
-                        SongDownloaderUI.searchText.text = SongDownloader.searchString;
+                        switch (label)
+                        {
+                            case "done":
+                                __instance.Hide();
+                                shouldShowKeyboard = false;
+                                SongDownloader.StartNewSongSearch();
+                                break;
+                            case "clear":
+                                SongDownloader.searchString = "";
+                                break;
+                            default:
+                                SongDownloader.searchString += label;
+                                break;
+                        }
+
+                        if (SongDownloaderUI.searchText != null)
+                        {
+                            SongDownloaderUI.searchText.text = SongDownloader.searchString;
+                        }
                     }
 
                     return false;
@@ -647,7 +716,71 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Initializes the song download tracker and triggers initial API search
+        /// Handles backspace for search and download search fields.
+        /// </summary>
+        [HarmonyPatch(typeof(KeyboardEntry), "OnBackspace", new Type[0])]
+        private static class KeyboardEntryOnBackspacePatch
+        {
+            private static bool Prefix(KeyboardEntry __instance)
+            {
+                if (shouldShowKeyboard)
+                {
+                    if (SongSearch.searchInProgress)
+                    {
+                        if (SongSearch.query == "" || SongSearch.query == null)
+                            return false;
+                        SongSearch.query = SongSearch.query.Substring(0, SongSearch.query.Length - 1);
+
+                        if (SongSearchScreen.searchText != null)
+                            SongSearchScreen.searchText.text = SongSearch.query;
+                    }
+                    else
+                    {
+                        if (SongDownloader.searchString == "" || SongDownloader.searchString == null)
+                            return false;
+                        SongDownloader.searchString = SongDownloader.searchString.Substring(0, SongDownloader.searchString.Length - 1);
+
+                        if (SongDownloaderUI.searchText != null)
+                            SongDownloaderUI.searchText.text = SongDownloader.searchString;
+                    }
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Handles underscore/space key for search and download search fields.
+        /// </summary>
+        [HarmonyPatch(typeof(KeyboardEntry), "OnUnderscore", new Type[0])]
+        private static class KeyboardEntryOnUnderscorePatch
+        {
+            private static bool Prefix(KeyboardEntry __instance)
+            {
+                if (shouldShowKeyboard)
+                {
+                    if (SongSearch.searchInProgress)
+                    {
+                        SongSearch.query += " ";
+
+                        if (SongSearchScreen.searchText != null)
+                            SongSearchScreen.searchText.text = SongSearch.query;
+                    }
+                    else
+                    {
+                        SongDownloader.searchString += " ";
+
+                        if (SongDownloaderUI.searchText != null)
+                            SongDownloaderUI.searchText.text = SongDownloader.searchString;
+                    }
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Initializes the song download tracker, filter panel, and triggers initial API search
         /// once the game startup logo is done.
         /// </summary>
         [HarmonyPatch(typeof(StartupLogo), "SetState", new Type[] { typeof(StartupLogo.State) })]
@@ -658,7 +791,94 @@ namespace ExScoringMod
                 if (state == StartupLogo.State.Done)
                 {
                     SongDownloader.StartNewSongSearch();
+                    FilterPanel.OnApplicationStart();
                     SongDownloadTracker.StartSongListUpdate();
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        //  Filter / song search hooks
+        // ══════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Applies the active custom filter to the song list results.
+        /// </summary>
+        [HarmonyPatch(typeof(SongSelect), "GetSongIDs", new Type[] { typeof(bool) })]
+        private static class SongSelectGetSongIDsPatch
+        {
+            private static void Postfix(SongSelect __instance, ref bool extras, ref Il2CppSystem.Collections.Generic.List<string> __result)
+            {
+                FilterPanel.ApplyFilter(__instance, ref extras, ref __result);
+                if (deletedSongs.Count > 0)
+                {
+                    foreach (var deletedSong in deletedSongs)
+                    {
+                        __result.Remove(deletedSong);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Initializes the filter panel and creates buttons when the song select page loads.
+        /// </summary>
+        [HarmonyPatch(typeof(SongSelect), "OnEnable", new Type[0])]
+        private static class SongSelectOnEnablePatch
+        {
+            private static void Postfix(SongSelect __instance)
+            {
+                FilterPanel.Initialize();
+            }
+        }
+
+        [HarmonyPatch(typeof(SongListControls), "FilterAll", new Type[0])]
+        private static class SongListControlsFilterAllPatch
+        {
+            private static void Prefix(SongListControls __instance)
+            {
+                FilterPanel.DisableCustomFilters();
+            }
+            private static void Postfix(SongListControls __instance)
+            {
+                AutoSelectSong();
+            }
+        }
+
+        [HarmonyPatch(typeof(SongListControls), "FilterMain", new Type[0])]
+        private static class SongListControlsFilterMainPatch
+        {
+            private static void Prefix(SongListControls __instance)
+            {
+                FilterPanel.DisableCustomFilters();
+            }
+            private static void Postfix(SongListControls __instance)
+            {
+                AutoSelectSong();
+            }
+        }
+
+        [HarmonyPatch(typeof(SongListControls), "FilterExtras", new Type[0])]
+        private static class SongListControlsFilterExtrasPatch
+        {
+            private static void Postfix(SongListControls __instance)
+            {
+                AutoSelectSong();
+            }
+        }
+
+        /// <summary>
+        /// Creates the search and refresh buttons when entering the song page.
+        /// </summary>
+        [HarmonyPatch(typeof(MenuState), "SetState", new Type[] { typeof(MenuState.State) })]
+        private static class MenuStateSetStateFilterPatch
+        {
+            private static void Postfix(MenuState __instance, ref MenuState.State state)
+            {
+                if (state == MenuState.State.SongPage)
+                {
+                    SongSearchButton.CreateSearchButton();
+                    RefreshButton.CreateRefreshButton();
                 }
             }
         }
