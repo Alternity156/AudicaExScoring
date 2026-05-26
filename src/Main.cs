@@ -11,6 +11,7 @@ namespace ExScoringMod
 
         public static MenuState.State menuState;
         public static bool gameHasLoaded = false;
+        public static bool suppressShellPageAnimations = false;
         public static string selectedSong;
         public static SongList.SongData selectedSongData;
 
@@ -28,6 +29,13 @@ namespace ExScoringMod
         public static float judgementScore = 0;
         public static float currentMaxPossibleExScore;
         public static float currentMaxPossibleJudgementScore;
+
+        public static Dictionary<string, KataConfig.Difficulty> difficultyButtonMap = new Dictionary<string, KataConfig.Difficulty>();
+        public static GameObject difficultyIndicatorSource;
+        public static bool difficultyUISetup = false;
+        public static bool songListUISetup = false;
+        public static bool launchPanelUISetup = false;
+        public static bool isAutoSelecting = false;
 
         public static string laurelStart = "laurel_start";
         public static string laurelEnd = "laurel_end";

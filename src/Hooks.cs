@@ -5,13 +5,13 @@ using Harmony;
 using MelonLoader;
 using TMPro;
 using UnityEngine;
-using UnhollowerBaseLib;
-using static SongCues;
 
 namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
+        public static string protectedScrollerItem = null;
+
         [HarmonyPatch(typeof(InGameUI), "Restart")]
         public static class InGameUIRestartPatch
         {
@@ -23,18 +23,46 @@ namespace ExScoringMod
             }
         }
 
+        [HarmonyPatch(typeof(LaunchPanel), "Play")]
+        public static class PlayPatch
+        {
+            public static void Prefix()
+            {
+                suppressShellPageAnimations = false;
+            }
+        }
+
+        [HarmonyPatch(typeof(MenuState), "GoToLaunchPage")]
+        public static class GoToLaunchPagePatch
+        {
+            public static bool Prefix()
+            {
+                return false;
+            }
+        }
+
         [HarmonyPatch(typeof(MenuState), "SetState", new Type[] 
         { 
             typeof(MenuState.State) 
         })]
+
         public static class SetStatePatch
         {
+            public static bool Prefix(MenuState.State state)
+            {
+                if (state == MenuState.State.LaunchPage && menuState == MenuState.State.SongPage)
+                    return false;
+
+                return true;
+            }
 
             public static void Postfix(
                 MenuState __instance, 
                 MenuState.State state
                 )
             {
+                MelonLogger.Log($"SetState: {menuState} -> {state}");
+
                 if (menuState == MenuState.State.Launched && state != MenuState.State.Launched)
                 {
                     ResetExScore();
@@ -44,15 +72,81 @@ namespace ExScoringMod
                 if (state == MenuState.State.TitleScreen)
                 {
                     gameHasLoaded = true;
+                    InitializeTargetIcons();
                 }
 
                 if (state == MenuState.State.MainPage)
                 {
                     StartWatching();
+
+                    if (MenuState.sLastState == MenuState.State.SongPage)
+                    {
+                        HideLaunchPanel();
+                        suppressShellPageAnimations = false;
+                    }
                 }
                 else
                 {
                     StopWatching();
+                }
+
+                if (state == MenuState.State.SongPage)
+                {
+                    if (isAutoSelecting) return;
+
+                    SongListUISetup();
+                    ShowLaunchPanel();
+                    LaunchPanelUISetup();
+                    suppressShellPageAnimations = true;
+
+                    if (MenuState.sLastState == MenuState.State.MainPage)
+                    {
+                        AutoSelectSong();
+                    }
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(SongPreview), "OnLaunchScreen")]
+        public static class SongPreviewOnLaunchScreenPatch
+        {
+            public static void Postfix(ref bool __result)
+            {
+                if (menuState == MenuState.State.SongPage)
+                {
+                    __result = true;
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(GunButton), "OnHit", new Type[] { typeof(Vector3), typeof(Gun) })]
+        public static class GunButtonOnHitPatch
+        {
+            public static bool Prefix(GunButton __instance, Vector3 position, Gun gun)
+            {
+                Transform parent = __instance.transform.parent;
+                if (parent == null) return true;
+                DifficultySelectButton diffButton = parent.GetComponent<DifficultySelectButton>();
+                if (diffButton == null) return true;
+                KataConfig.I.SetDifficulty(diffButton.difficulty);
+                var songSelectObj = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect");
+                var songSelect = songSelectObj.GetComponent<SongSelect>();
+                songSelect.mDisplayingForDifficulty = diffButton.difficulty;
+                UpdateDifficultyIndicator(diffButton.difficulty);
+                RefreshIntensityGraph();
+                KataUtil.PlayFMODEvent("event:/shell/button_shatter");
+                return false;
+            }
+        }
+
+        [HarmonyPatch(typeof(SongSelectItem), "Update")]
+        public static class SongSelectItemUpdatePatch
+        {
+            public static void Postfix(SongSelectItem __instance)
+            {
+                if (__instance.songPreview != null && __instance.songPreview.gameObject.activeSelf)
+                {
+                    __instance.songPreview.gameObject.SetActive(false);
                 }
             }
         }
@@ -60,13 +154,45 @@ namespace ExScoringMod
         [HarmonyPatch(typeof(SongSelectItem), "OnSelect")]
         private static class PatchSongOnSelect
         {
-            private static void Postfix(
-                SongSelectItem __instance
-                )
+            private static void Postfix(SongSelectItem __instance)
             {
                 selectedSong = __instance.mSongData.songID;
                 maxPossibleExScore = GetMaxPossibleExScore(selectedSong);
                 selectedSongData = __instance.mSongData;
+
+                if (!isAutoSelecting)
+                {
+                    MenuState.SetState(MenuState.State.SongPage);
+                }
+
+                var songSelect = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect");
+                var scrollable = songSelect.GetComponent<ShellScrollable>();
+                if (scrollable != null)
+                    scrollable.enabled = true;
+
+                LaunchPanel launchPanel = GameObject.Find("menu/ShellPage_Launch").GetComponentInChildren<LaunchPanel>();
+                if (launchPanel != null)
+                    launchPanel.OnEnable();
+
+                UpdateLaunchPanelInfo();
+                RefreshIntensityGraph();
+            }
+        }
+
+        [HarmonyPatch(typeof(Animation), "Play", new Type[] { typeof(string) })]
+        public static class AnimationPlayPatch
+        {
+            public static bool Prefix(Animation __instance, string animation)
+            {
+                MelonLogger.Log($"Animation.Play({animation}) on {__instance.gameObject.name} suppress={suppressShellPageAnimations}");
+                if (suppressShellPageAnimations)
+                {
+                    if (__instance.gameObject.name == "ShellPage_Launch")
+                        return false;
+                    if (__instance.gameObject.name == "ShellPage_Song")
+                        return false;
+                }
+                return true;
             }
         }
 
@@ -345,44 +471,52 @@ namespace ExScoringMod
 
             public static bool Prefix(GameplayStats __instance)
             {
-                if (_hasRun) return false;
-                _hasRun = true;
-
-                // Hide GameplayStats children except frame and header
-                Transform t = __instance.transform;
-                for (int i = 0; i < t.childCount; i++)
+                if(Config.ExType)
                 {
-                    Transform child = t.GetChild(i);
-                    if (child.name != "frame" && child.name != "header")
-                        child.gameObject.SetActive(false);
+                    if (_hasRun) return false;
+                    _hasRun = true;
+
+                    // Hide GameplayStats children except frame and header
+                    Transform t = __instance.transform;
+                    for (int i = 0; i < t.childCount; i++)
+                    {
+                        Transform child = t.GetChild(i);
+                        if (child.name != "frame" && child.name != "header")
+                            child.gameObject.SetActive(false);
+                    }
+
+                    // Hide siblings on ShellPanel_Center except what we want to keep
+                    Transform parent = __instance.transform.parent;
+                    for (int i = 0; i < parent.childCount; i++)
+                    {
+                        Transform sibling = parent.GetChild(i);
+                        if (sibling.name != "GameplayStats" &&
+                            sibling.name != "continue" &&
+                            sibling.name != "Glass" &&
+                            sibling.name != "SongAndDifficulty" &&
+                            sibling.name != "Reflector")
+                            sibling.gameObject.SetActive(false);
+                    }
+
+                    Transform songAndDifficulty = parent.Find("SongAndDifficulty");
+                    TMP_Text original = songAndDifficulty.GetComponent<TMP_Text>();
+                    RectTransform originalRt = songAndDifficulty.GetComponent<RectTransform>();
+
+                    int layer = songAndDifficulty.gameObject.layer;
+
+                    CreateTextObject("ExTimingDisplay", GetTimingJudgementString(exCues), parent, layer, original, originalRt, new Vector3(-203, 290, 0), new Vector3(50, 50, 50));
+                    CreateTextObject("ExAimDisplay", GetAimJudgementString(exCues), parent, layer, original, originalRt, new Vector3(100, 290, 0), new Vector3(50, 50, 50));
+                    CreateTextObject("ExChainDisplay", GetChainJudgementString(exCues), parent, layer, original, originalRt, new Vector3(405, 290, 0), new Vector3(50, 50, 50));
+                    CreateTextObject("ExMiscDisplay", GetMiscString(exCues), parent, layer, original, originalRt, new Vector3(130, 465, 0), new Vector3(50, 50, 50));
+                    CreateTextObject("ExScoreDisplay", $"Score: {GetCurrentMaxPossibleJudgementPercentage()}%", parent, layer, original, originalRt, new Vector3(287, 548, 0), new Vector3(120, 120, 120), TextAlignmentOptions.Center);
+
+                    return false;
+                }
+                else
+                {
+                    return true;
                 }
 
-                // Hide siblings on ShellPanel_Center except what we want to keep
-                Transform parent = __instance.transform.parent;
-                for (int i = 0; i < parent.childCount; i++)
-                {
-                    Transform sibling = parent.GetChild(i);
-                    if (sibling.name != "GameplayStats" &&
-                        sibling.name != "continue" &&
-                        sibling.name != "Glass" &&
-                        sibling.name != "SongAndDifficulty" &&
-                        sibling.name != "Reflector")
-                        sibling.gameObject.SetActive(false);
-                }
-
-                Transform songAndDifficulty = parent.Find("SongAndDifficulty");
-                TMP_Text original = songAndDifficulty.GetComponent<TMP_Text>();
-                RectTransform originalRt = songAndDifficulty.GetComponent<RectTransform>();
-
-                int layer = songAndDifficulty.gameObject.layer;
-
-                CreateTextObject("ExTimingDisplay", GetTimingJudgementString(exCues), parent, layer, original, originalRt, new Vector3(-203, 290, 0), new Vector3(50, 50, 50));
-                CreateTextObject("ExAimDisplay", GetAimJudgementString(exCues), parent, layer, original, originalRt, new Vector3(100, 290, 0), new Vector3(50, 50, 50));
-                CreateTextObject("ExChainDisplay", GetChainJudgementString(exCues), parent, layer, original, originalRt, new Vector3(405, 290, 0), new Vector3(50, 50, 50));
-                CreateTextObject("ExMiscDisplay", GetMiscString(exCues), parent, layer, original, originalRt, new Vector3(130, 465, 0), new Vector3(50, 50, 50));
-                CreateTextObject("ExScoreDisplay", $"Score: {GetCurrentMaxPossibleJudgementPercentage()}%", parent, layer, original, originalRt, new Vector3(287, 548, 0), new Vector3(120, 120, 120), TextAlignmentOptions.Center);
-
-                return false;
             }
         }
 
@@ -391,15 +525,18 @@ namespace ExScoringMod
         {
             public static void Postfix(SongEndSequence __instance)
             {
-                if (__instance.mState == SongEndSequence.State.WaitForScorePercentStars) return;
+                if (Config.ExType)
+                {
+                    if (__instance.mState == SongEndSequence.State.WaitForScorePercentStars) return;
 
-                GameObject scoreAndPercent = __instance.scorePercentStars
-                    .transform.Find("ScoreAndPercent")?.gameObject;
-                if (scoreAndPercent == null) return;
+                    GameObject scoreAndPercent = __instance.scorePercentStars
+                        .transform.Find("ScoreAndPercent")?.gameObject;
+                    if (scoreAndPercent == null) return;
 
-                TextMeshPro tmp = scoreAndPercent.GetComponent<TextMeshPro>();
-                if (tmp.text != $"{GetCurrentMaxPossibleJudgementPercentage()}%")
-                    tmp.text = $"{GetCurrentMaxPossibleJudgementPercentage()}%";
+                    TextMeshPro tmp = scoreAndPercent.GetComponent<TextMeshPro>();
+                    if (tmp.text != $"{GetCurrentMaxPossibleJudgementPercentage()}%")
+                        tmp.text = $"{GetCurrentMaxPossibleJudgementPercentage()}%";
+                }
             }
         }
     }
