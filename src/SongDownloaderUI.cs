@@ -1,0 +1,334 @@
+﻿using System;
+using System.Collections;
+using System.Collections.Generic;
+using MelonLoader;
+using TMPro;
+using UnityEngine;
+
+namespace ExScoringMod
+{
+    internal static class SongDownloaderUI
+    {
+        public static TextMeshPro searchText;
+        public static GameObject secondaryPanel;
+        public static ShellPage songItemPanel;
+        public static OptionsMenu songItemMenu;
+        public static DifficultyFilter difficultyFilter = DifficultyFilter.All;
+        public static OptionsMenuButton difficultyToggle;
+        public static bool popularity;
+        public static OptionsMenuButton popularityToggle;
+        public static APISongList activeSongList;
+
+        private static OptionsMenu primaryMenu;
+        private static GunButton backButton;
+        private static TextMeshPro backText;
+        private static string originalBackText;
+        private static int activeDownloadsCount = 0;
+
+        private static Dictionary<Song, OptionsMenuButton> downloadButtons = new Dictionary<Song, OptionsMenuButton>();
+
+        /// <summary>
+        /// Called from the OptionsMenu.AddButton hook to inject the "Download Songs"
+        /// button onto the Settings page.
+        /// </summary>
+        public static void AddPageButton(OptionsMenu optionsMenu, int col)
+        {
+            primaryMenu = optionsMenu;
+            primaryMenu.AddButton(col, "Download Songs", new Action(() => {
+                GoToWebSearchPage();
+                if (songItemPanel != null)
+                    songItemPanel.SetPageActive(true);
+            }), null, "Download new maps from maudica.com");
+        }
+
+        public static void GoToWebSearchPage()
+        {
+            SongDownloader.StartNewSongSearch();
+
+            if (backButton == null)
+            {
+                var button = GameObject.Find("menu/ShellPage_Settings/page/backParent/back");
+                backButton = button.GetComponentInChildren<GunButton>();
+                backText = button.GetComponentInChildren<TextMeshPro>();
+                originalBackText = backText.text;
+
+                UnityEngine.Object.Destroy(button.GetComponentInChildren<Localizer>());
+            }
+
+            if (songItemPanel == null)
+            {
+                secondaryPanel = GameObject.Instantiate(GameObject.Find("ShellPage_Settings"));
+                secondaryPanel.SetActive(true);
+                secondaryPanel.transform.Rotate(0, -65, 0);
+                SpawnSecondaryPanel(secondaryPanel);
+            }
+            else
+            {
+                SpawnSecondaryPanel(secondaryPanel);
+            }
+
+            primaryMenu.ShowPage(OptionsMenu.Page.Customization);
+            CleanUpPage(primaryMenu);
+            AddFilterButtons(primaryMenu);
+            primaryMenu.screenTitle.text = "Filters";
+        }
+
+        public static void ResetScrollPosition()
+        {
+            songItemMenu?.scrollable.SnapTo(0);
+        }
+
+        private static void SpawnSecondaryPanel(GameObject panel)
+        {
+            songItemPanel = panel.GetComponent<ShellPage>();
+            songItemPanel.SetPageActive(true, true);
+            songItemPanel.gameObject.transform.GetChild(0).GetChild(1).gameObject.SetActive(false); // Remove back button
+            MelonCoroutines.Start(WaitForSpawningMenu(panel));
+        }
+
+        private static void SetupSecondaryPanel(GameObject panel)
+        {
+            songItemMenu = panel.GetComponentInChildren<OptionsMenu>();
+            songItemMenu.ShowPage(OptionsMenu.Page.Customization);
+            CleanUpPage(songItemMenu);
+            songItemMenu.screenTitle.text = "Songs";
+        }
+
+        private static void AddFilterButtons(OptionsMenu optionsMenu)
+        {
+            var header = optionsMenu.AddHeader(0, "Filter by: Artist, Title, Mapper");
+            optionsMenu.scrollable.AddRow(header);
+
+            var searchField = optionsMenu.AddButton(0, "Search:", new Action(() => {
+                ExScoring.shouldShowKeyboard = true;
+                optionsMenu.keyboard.Show();
+            }), null, "Filter by: Artist, Title, Mapper", optionsMenu.textEntryButtonPrefab);
+            optionsMenu.scrollable.AddRow(searchField.gameObject);
+            searchText = searchField.gameObject.GetComponentInChildren<TextMeshPro>();
+
+            var difficultyHeader = optionsMenu.AddHeader(0, "Filter difficulty");
+            optionsMenu.scrollable.AddRow(difficultyHeader);
+
+            string difficultyFilterText = difficultyFilter.ToString();
+            difficultyToggle = optionsMenu.AddButton(0, difficultyFilterText,
+                new Action(() =>
+                {
+                    difficultyFilter++;
+                    if ((int)difficultyFilter > 4) difficultyFilter = 0;
+                    difficultyToggle.label.text = difficultyFilter.ToString();
+                    SongDownloader.StartNewSongSearch();
+                }),
+                null, "Filters the search to the selected difficulty");
+            difficultyToggle.button.doMeshExplosion = false;
+            difficultyToggle.button.doParticles = false;
+            optionsMenu.scrollable.AddRow(difficultyToggle.gameObject);
+
+            var extraHeader = optionsMenu.AddHeader(0, "Extra");
+            optionsMenu.scrollable.AddRow(extraHeader);
+
+            var downloadFullPage = optionsMenu.AddButton(0, "Download current page",
+                new Action(() =>
+                {
+                    DownloadFullPage();
+                }),
+                null, "Downloads all songs from the current page, this will cause major stutters");
+            optionsMenu.scrollable.AddRow(downloadFullPage.gameObject);
+
+            string popularityFilterText = "Sort by downloads: " + popularity.ToString();
+            popularityToggle = optionsMenu.AddButton(1, popularityFilterText,
+                new Action(() =>
+                {
+                    popularity = !popularity;
+                    popularityToggle.label.text = "Sort by downloads: " + popularity.ToString();
+                    SongDownloader.StartNewSongSearch();
+                }),
+                null, "Sorts songs by number of downloads rather than date.");
+            popularityToggle.button.doMeshExplosion = false;
+            popularityToggle.button.doParticles = false;
+            optionsMenu.scrollable.AddRow(popularityToggle.gameObject);
+
+            var downloadFolderBlock = optionsMenu.AddTextBlock(0, "You can hotload songs by placing them in Audica/Downloads and pressing F5");
+            optionsMenu.scrollable.AddRow(downloadFolderBlock);
+        }
+
+        private static void DownloadFullPage()
+        {
+            KataConfig.I.CreateDebugText("Downloading...", new Vector3(0f, -1f, 5f), 5f, null, false, 0.2f);
+            foreach (var song in activeSongList.songs)
+            {
+                OnDownloadStart(song);
+                MelonCoroutines.Start(SongDownloader.DownloadSong(song.song_id, song.download_url,
+                    (songID, success) => { OnDownloadDone(song, success); }));
+            }
+        }
+
+        public static void AddSongItems(OptionsMenu optionsMenu, APISongList songlist)
+        {
+            CleanUpPage(optionsMenu);
+            activeSongList = songlist;
+            optionsMenu.screenTitle.text = "Displaying page " + SongDownloader.page.ToString() + " out of " + songlist.total_pages.ToString();
+
+            var pageHeader = optionsMenu.AddHeader(0, "Listing " + songlist.song_count.ToString() + " songs");
+            optionsMenu.scrollable.AddRow(pageHeader.gameObject);
+
+            AddPageButtons(optionsMenu);
+
+            foreach (var song in songlist.songs)
+            {
+                CreateSongItem(song, optionsMenu);
+            }
+
+            AddPageButtons(optionsMenu);
+        }
+
+        private static void AddPageButtons(OptionsMenu optionsMenu)
+        {
+            var row = new Il2CppSystem.Collections.Generic.List<GameObject>();
+            var previousPage = optionsMenu.AddButton(0, "Previous Page",
+                new Action(() => {
+                    SongDownloader.PreviousPage();
+                    SongDownloader.StartNewPageSearch();
+                    optionsMenu.scrollable.SnapTo(0);
+                }), null, null);
+            row.Add(previousPage.gameObject);
+
+            var nextPage = optionsMenu.AddButton(1, "Next Page",
+                new Action(() => {
+                    SongDownloader.NextPage();
+                    SongDownloader.StartNewPageSearch();
+                    optionsMenu.scrollable.SnapTo(0);
+                }), null, null);
+            row.Add(nextPage.gameObject);
+            optionsMenu.scrollable.AddRow(row);
+        }
+
+        private static void CreateSongItem(Song song, OptionsMenu optionsMenu)
+        {
+            var textBlock = optionsMenu.AddTextBlock(0, song.title + " - " + song.artist + " (mapped by " + song.author + ")");
+            var TMP = textBlock.transform.GetChild(0).GetComponent<TextMeshPro>();
+            TMP.fontSizeMax = 32;
+            TMP.fontSizeMin = 8;
+            optionsMenu.scrollable.AddRow(textBlock.gameObject);
+
+            string diffString = GetDifficultyString(song);
+
+            bool destroyOnShot = true;
+            Action onHit = new Action(() => {
+                OnDownloadStart(song);
+                MelonCoroutines.Start(SongDownloader.DownloadSong(song.song_id, song.download_url,
+                    (songID, success) => { OnDownloadDone(song, success); }));
+                KataConfig.I.CreateDebugText("Downloading...", new Vector3(0f, -1f, 5f), 5f, null, false, 0.2f);
+            });
+            string label = "Download" + diffString;
+            float alpha = 1f;
+            bool interactable = true;
+
+            if (SongDownloadTracker.songFilenames.Contains(song.filename) ||
+                SongDownloader.downloadedFileNames.Contains(song.filename) ||
+                SongDownloader.failedDownloads.Contains(song.filename))
+            {
+                if (SongDownloader.failedDownloads.Contains(song.filename))
+                    label = "Download unavailable";
+                else
+                    label = "Downloaded!";
+
+                destroyOnShot = false;
+                onHit = new Action(() => { });
+                alpha = 0.25f;
+                interactable = false;
+            }
+
+            var row = new Il2CppSystem.Collections.Generic.List<GameObject>();
+
+            var downloadButton = optionsMenu.AddButton(0, label, onHit, null, null);
+            downloadButton.button.SetInteractable(interactable);
+            downloadButton.button.destroyOnShot = destroyOnShot;
+            downloadButton.button.doMeshExplosion = destroyOnShot;
+            downloadButton.label.alpha = alpha;
+
+            downloadButtons.Add(song, downloadButton);
+            row.Add(downloadButton.gameObject);
+
+            var previewButton = optionsMenu.AddButton(1, "Preview",
+                new Action(() => { MelonCoroutines.Start(SongDownloader.StreamPreviewSong(song.preview_url)); }),
+                null, null);
+            row.Add(previewButton.gameObject);
+
+            optionsMenu.scrollable.AddRow(row);
+        }
+
+        private static string GetDifficultyString(Song song)
+        {
+            return "[" +
+                (song.beginner ? "<color=#54f719>B</color>" : "") +
+                (song.standard ? "<color=#19d2f7>S</color>" : "") +
+                (song.advanced ? "<color=#f7a919>A</color>" : "") +
+                (song.expert ? "<color=#b119f7>E</color>" : "") +
+                "]";
+        }
+
+        private static void OnDownloadStart(Song song)
+        {
+            activeDownloadsCount++;
+
+            if (activeDownloadsCount > 0)
+            {
+                backButton.SetInteractable(false);
+                backText.alpha = 0.25f;
+                backText.text = "Waiting...";
+            }
+            if (downloadButtons.ContainsKey(song))
+            {
+                downloadButtons[song].button.SetInteractable(false);
+                downloadButtons[song].button.destroyOnShot = false;
+                downloadButtons[song].button.doMeshExplosion = false;
+                downloadButtons[song].button.onHitEvent = new UnityEngine.Events.UnityEvent();
+                downloadButtons[song].label.alpha = 0.25f;
+                downloadButtons[song].label.text = "Downloading...";
+            }
+        }
+
+        private static void OnDownloadDone(Song song, bool success)
+        {
+            if (downloadButtons.ContainsKey(song))
+            {
+                if (success)
+                    downloadButtons[song].label.text = "Downloaded!";
+                else
+                    downloadButtons[song].label.text = "Download failed";
+            }
+            activeDownloadsCount--;
+
+            if (activeDownloadsCount == 0)
+            {
+                backText.alpha = 1.0f;
+                backText.text = originalBackText;
+                backButton.SetInteractable(true);
+            }
+        }
+
+        private static void CleanUpPage(OptionsMenu optionsMenu)
+        {
+            Transform optionsTransform = optionsMenu.transform;
+            for (int i = 0; i < optionsTransform.childCount; i++)
+            {
+                Transform child = optionsTransform.GetChild(i);
+                if (child.gameObject.name.Contains("(Clone)"))
+                {
+                    GameObject.Destroy(child.gameObject);
+                }
+            }
+            optionsMenu.mRows.Clear();
+            optionsMenu.scrollable.ClearRows();
+            optionsMenu.scrollable.mRows.Clear();
+            downloadButtons.Clear();
+        }
+
+        static IEnumerator WaitForSpawningMenu(GameObject panel)
+        {
+            yield return new WaitForSeconds(0.05f);
+            SetupSecondaryPanel(panel);
+            AddSongItems(panel.GetComponentInChildren<OptionsMenu>(), SongDownloader.songlist);
+        }
+    }
+}

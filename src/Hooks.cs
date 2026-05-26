@@ -12,6 +12,9 @@ namespace ExScoringMod
     {
         public static string protectedScrollerItem = null;
 
+        // ── Song downloader hook state ──
+        private static int settingsButtonCount = 0;
+
         [HarmonyPatch(typeof(InGameUI), "Restart")]
         public static class InGameUIRestartPatch
         {
@@ -41,9 +44,9 @@ namespace ExScoringMod
             }
         }
 
-        [HarmonyPatch(typeof(MenuState), "SetState", new Type[] 
-        { 
-            typeof(MenuState.State) 
+        [HarmonyPatch(typeof(MenuState), "SetState", new Type[]
+        {
+            typeof(MenuState.State)
         })]
 
         public static class SetStatePatch
@@ -57,7 +60,7 @@ namespace ExScoringMod
             }
 
             public static void Postfix(
-                MenuState __instance, 
+                MenuState __instance,
                 MenuState.State state
                 )
             {
@@ -196,17 +199,17 @@ namespace ExScoringMod
             }
         }
 
-        [HarmonyPatch(typeof(ScoreKeeper), "OnFailure", new Type[] 
-        { 
-            typeof(SongCues.Cue), 
-            typeof(bool), 
-            typeof(bool) 
+        [HarmonyPatch(typeof(ScoreKeeper), "OnFailure", new Type[]
+        {
+            typeof(SongCues.Cue),
+            typeof(bool),
+            typeof(bool)
         })]
         public static class ScoreKeeperOnFailurePatch
         {
             public static void Postfix(
-                SongCues.Cue cue, 
-                bool pass, 
+                SongCues.Cue cue,
+                bool pass,
                 bool failedDodge
                 )
             {
@@ -229,17 +232,17 @@ namespace ExScoringMod
             }
         }
 
-        [HarmonyPatch(typeof(Gun), "CalculateAim", new Type[] 
-        { 
-            typeof(Target), 
-            typeof(Vector3) 
+        [HarmonyPatch(typeof(Gun), "CalculateAim", new Type[]
+        {
+            typeof(Target),
+            typeof(Vector3)
         })]
         public static class CalculateAimPatch
         {
             public static void Postfix(
-                ref Gun __instance, 
-                Target target, 
-                Vector3 intersectionPoint, 
+                ref Gun __instance,
+                Target target,
+                Vector3 intersectionPoint,
                 ref float __result
                 )
             {
@@ -259,34 +262,23 @@ namespace ExScoringMod
             }
         }
 
-        [HarmonyPatch(typeof(ScoreData), "GetScoreForCue", new Type[] 
-        { 
-            typeof(SongCues.Cue), 
-            typeof(float), 
-            typeof(float), 
-            typeof(float) 
+        [HarmonyPatch(typeof(ScoreData), "GetScoreForCue", new Type[]
+        {
+            typeof(SongCues.Cue),
+            typeof(float),
+            typeof(float),
+            typeof(float)
         })]
         public static class GetScoreForCuePatch
         {
-            /* This was a test to see what would happend if you prevent the game from doing this when it's
-             * loading songs. It breaks the in-song star count.
-             */ 
             public static void Prefix(
-                ScoreData __instance, 
-                SongCues.Cue cue, 
-                ref float timing, 
-                ref float aim, 
+                ScoreData __instance,
+                SongCues.Cue cue,
+                ref float timing,
+                ref float aim,
                 ref float extra
                 )
             {
-                /*
-                if (!gameHasLoaded)
-                {
-                    return false;
-                }
-                return true;
-                */
-
                 if (Config.LinearCalculation && menuState == MenuState.State.Launched)
                 {
                     timing = GetLinearTimingScore(GetTimingMsFromCue(cue));
@@ -294,11 +286,11 @@ namespace ExScoringMod
             }
 
             public static void Postfix(
-                ScoreData __instance, 
-                SongCues.Cue cue, 
-                float timing, 
-                float aim, 
-                float extra, 
+                ScoreData __instance,
+                SongCues.Cue cue,
+                float timing,
+                float aim,
+                float extra,
                 ref int __result
                 )
             {
@@ -384,9 +376,8 @@ namespace ExScoringMod
                         judgementScore += judgementCueScore;
 
                         exScore += exCueScore;
-                        //nextPopupText = GetPopupText(exCue);
 
-                        if(cue.behavior == Target.TargetBehavior.Melee && cue.meleeVelocityAmount > 0)
+                        if (cue.behavior == Target.TargetBehavior.Melee && cue.meleeVelocityAmount > 0)
                         {
                             nextPopupText = GetMeleeJudgementText();
                         }
@@ -428,22 +419,22 @@ namespace ExScoringMod
                 nextPopupIsScore = true;
             }
         }
-        
-        [HarmonyPatch(typeof(TextPopupPool), "CreatePopup", new Type[] { 
-            typeof(Vector3), 
-            typeof(Quaternion), 
-            typeof(Vector3), 
-            typeof(string), 
-            typeof(string) 
+
+        [HarmonyPatch(typeof(TextPopupPool), "CreatePopup", new Type[] {
+            typeof(Vector3),
+            typeof(Quaternion),
+            typeof(Vector3),
+            typeof(string),
+            typeof(string)
         })]
         private static class TextPopupPool_CreatePopup
         {
             private static void Prefix(
-                TextPopupPool __instance, 
-                Vector3 position, 
-                Quaternion rotation, 
-                Vector3 scale, 
-                ref string text, 
+                TextPopupPool __instance,
+                Vector3 position,
+                Quaternion rotation,
+                Vector3 scale,
+                ref string text,
                 ref string extraText
                 )
             {
@@ -471,7 +462,7 @@ namespace ExScoringMod
 
             public static bool Prefix(GameplayStats __instance)
             {
-                if(Config.ExType)
+                if (Config.ExType)
                 {
                     if (_hasRun) return false;
                     _hasRun = true;
@@ -536,6 +527,138 @@ namespace ExScoringMod
                     TextMeshPro tmp = scoreAndPercent.GetComponent<TextMeshPro>();
                     if (tmp.text != $"{GetCurrentMaxPossibleJudgementPercentage()}%")
                         tmp.text = $"{GetCurrentMaxPossibleJudgementPercentage()}%";
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        //  Song downloader hooks
+        // ══════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Injects the "Download Songs" button onto the Settings page.
+        /// Counts buttons added to the Main settings page; once the 9th
+        /// button appears we know the page is fully built and we add ours.
+        /// </summary>
+        [HarmonyPatch(typeof(OptionsMenu), "AddButton", new Type[] {
+            typeof(int),
+            typeof(string),
+            typeof(OptionsMenuButton.SelectedActionDelegate),
+            typeof(OptionsMenuButton.IsCheckedDelegate),
+            typeof(string),
+            typeof(OptionsMenuButton)
+        })]
+        private static class OptionsMenuAddButtonPatch
+        {
+            private static void Postfix(OptionsMenu __instance, int col, string label,
+                OptionsMenuButton.SelectedActionDelegate onSelected,
+                OptionsMenuButton.IsCheckedDelegate isChecked)
+            {
+                if (__instance.mPage == OptionsMenu.Page.Main)
+                {
+                    settingsButtonCount++;
+                    if (settingsButtonCount == 9)
+                    {
+                        SongDownloaderUI.AddPageButton(__instance, 0);
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Resets state when navigating between settings pages.
+        /// </summary>
+        [HarmonyPatch(typeof(OptionsMenu), "ShowPage", new Type[] { typeof(OptionsMenu.Page) })]
+        private static class OptionsMenuShowPagePatch
+        {
+            private static void Prefix(OptionsMenu __instance, OptionsMenu.Page page)
+            {
+                shouldShowKeyboard = false;
+                settingsButtonCount = 0;
+                SongDownloader.searchString = "";
+            }
+        }
+
+        /// <summary>
+        /// Handles cleanup when backing out of the download page.
+        /// Hides the secondary song panel and triggers a song reload if needed.
+        /// </summary>
+        [HarmonyPatch(typeof(OptionsMenu), "BackOut", new Type[0])]
+        private static class OptionsMenuBackOutPatch
+        {
+            private static bool Prefix(OptionsMenu __instance)
+            {
+                if (SongDownloaderUI.songItemPanel != null)
+                    SongDownloaderUI.songItemPanel.SetPageActive(false);
+                if (SongDownloader.needRefresh)
+                    ReloadSongList(false);
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Prevents the keyboard from hiding while the download search field is active.
+        /// </summary>
+        [HarmonyPatch(typeof(KeyboardEntry), "Hide", new Type[0])]
+        private static class KeyboardEntryHidePatch
+        {
+            private static bool Prefix(KeyboardEntry __instance)
+            {
+                if (shouldShowKeyboard)
+                    return false;
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Routes keyboard input to the download search field when shouldShowKeyboard is true.
+        /// </summary>
+        [HarmonyPatch(typeof(KeyboardEntry), "OnKey", new Type[] { typeof(KeyCode), typeof(string) })]
+        private static class KeyboardEntryOnKeyPatch
+        {
+            private static bool Prefix(KeyboardEntry __instance, KeyCode keyCode, string label)
+            {
+                if (shouldShowKeyboard)
+                {
+                    switch (label)
+                    {
+                        case "done":
+                            __instance.Hide();
+                            shouldShowKeyboard = false;
+                            SongDownloader.StartNewSongSearch();
+                            break;
+                        case "clear":
+                            SongDownloader.searchString = "";
+                            break;
+                        default:
+                            SongDownloader.searchString += label;
+                            break;
+                    }
+
+                    if (SongDownloaderUI.searchText != null)
+                    {
+                        SongDownloaderUI.searchText.text = SongDownloader.searchString;
+                    }
+
+                    return false;
+                }
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Initializes the song download tracker and triggers initial API search
+        /// once the game startup logo is done.
+        /// </summary>
+        [HarmonyPatch(typeof(StartupLogo), "SetState", new Type[] { typeof(StartupLogo.State) })]
+        private static class StartupLogoSetStatePatch
+        {
+            private static void Postfix(StartupLogo __instance, ref StartupLogo.State state)
+            {
+                if (state == StartupLogo.State.Done)
+                {
+                    SongDownloader.StartNewSongSearch();
+                    SongDownloadTracker.StartSongListUpdate();
                 }
             }
         }
