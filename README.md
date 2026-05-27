@@ -20,3 +20,9 @@ You can use the ModSettings mod to change the score visuals from Audica style to
 You can also change the score calculation from Audica to Linear.
 Default settings are Audica visuals and Audica calculations.
 If you do not have ModSettings, you can grab it [here](https://github.com/octoberU/ModSettings) or manually change settings in [Audica Folder]/UserData/MelonPreferences.cfg .
+
+## Thanks
+This mod uses code or concepts from other mods and software such as: 
+
+[SongBrowser](https://github.com/Silzoid/SongBrowser) Mod (Song Downloading, Favorite system, Song deliting)
+[NotReaper](https://github.com/octoberU/NotReaper/tree/2021-upgrade) (Target Icons for song data)
