@@ -103,6 +103,13 @@ namespace ExScoringMod
 
         private static void UpdateDeleteButtonEnabled(GunButton button, TextMeshPro text)
         {
+            if (SongDataHolder.I == null || SongDataHolder.I.songData == null)
+            {
+                button.SetInteractable(false);
+                text.alpha = 0.25f;
+                return;
+            }
+
             if (SongSearch.IsCustomSong(SongDataHolder.I.songData.songID))
             {
                 button.SetInteractable(true);
@@ -113,6 +120,12 @@ namespace ExScoringMod
                 button.SetInteractable(false);
                 text.alpha = 0.25f;
             }
+        }
+
+        internal static void UpdateDeleteButtonEnabled()
+        {
+            if (deleteGunButton != null && deleteButtonText != null)
+                UpdateDeleteButtonEnabled(deleteGunButton, deleteButtonText);
         }
     }
 }

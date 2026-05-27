@@ -132,6 +132,33 @@ namespace ExScoringMod
                     }
                     return false;
                 });
+
+            PlaylistManager.playlistFilter = RegisterFilter("playlists", false, "Playlist",
+                () =>
+                {
+                    PlaylistManager.OnFilterApplied();
+                    SelectPlaylistButton.ShowPlaylistButton();
+                    PlaylistEndlessButton.CreatePlaylistButton();
+                },
+                () =>
+                {
+                    SelectPlaylistButton.HidePlaylistButton();
+                    PlaylistEndlessButton.HidePlaylistButton();
+                },
+                (result) =>
+                {
+                    if (PlaylistManager.selectedPlaylist != null)
+                    {
+                        result.Clear();
+                        foreach (string song in PlaylistManager.selectedPlaylist.songs)
+                        {
+                            if (SongDownloadTracker.songIDs.Contains(song))
+                                result.Add(song);
+                        }
+                        return true;
+                    }
+                    return false;
+                })();
         }
 
         internal static void Initialize()
@@ -224,7 +251,6 @@ namespace ExScoringMod
                 DisableCustomFilters();
             }
             songSelect.ShowSongList();
-            ExScoring.AutoSelectSong();
         }
 
         private static void UpdateScrollPosition(ShellScrollable scroller)
@@ -348,7 +374,7 @@ namespace ExScoringMod
         public static void AddFavorite(string songID)
         {
             var song = SongList.I.GetSong(songID);
-            if (song == null) return;
+            if (!song.extrasSong) return;
             if (favorites.songIDs.Contains(songID))
             {
                 favorites.songIDs.Remove(songID);

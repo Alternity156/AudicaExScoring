@@ -99,7 +99,7 @@ namespace ExScoringMod
             launchPanelDifficultyButtonNormal.transform.localPosition = new Vector3(-3.5f, -9.5f, 0f);
             launchPanelDifficultyButtonHard.transform.localPosition = new Vector3(3.5f, -7.25f, 0f);
             launchPanelDifficultyButtonExpert.transform.localPosition = new Vector3(3.5f, -9.5f, 0f);
-            launchPanelPlayButton.transform.localPosition = new Vector3(0f, -4.5f, 0f);
+            launchPanelPlayButton.transform.localPosition = new Vector3(-3.45f, -4.8f, 0f);
 
             launchPanelCenterGlass.transform.localScale = new Vector3(14.4f, 25f, 3f);
             launchPanelCenterPanelFrame.transform.localScale = new Vector3(0.7f, 1.8f, 1f);
@@ -115,7 +115,7 @@ namespace ExScoringMod
             launchPanelDifficultyButtonNormal.transform.localScale = new Vector3(2f, 2f, 2f);
             launchPanelDifficultyButtonHard.transform.localScale = new Vector3(2f, 2f, 2f);
             launchPanelDifficultyButtonExpert.transform.localScale = new Vector3(2f, 2f, 2f);
-            launchPanelPlayButton.transform.localScale = new Vector3(2.5f, 2.5f, 2.5f);
+            launchPanelPlayButton.transform.localScale = new Vector3(2f, 2f, 2f);
 
             launchPanelCenterTitleLabel.GetComponent<TextMeshPro>().alignment = TextAlignmentOptions.Left;
 
@@ -245,6 +245,7 @@ namespace ExScoringMod
             SetupDifficultyIndicators();
             SetupFavoriteButton();
             CreateDeleteButton(ButtonUtils.ButtonLocation.Menu);
+            AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.Menu);
         }
 
         public static void UpdateLaunchPanelInfo()
@@ -270,8 +271,8 @@ namespace ExScoringMod
             launchPanelCenterTotalEitherHandTargets.GetComponent<TextMeshPro>().text = GetEitherHandCueStatsString(stats);
 
             UpdateFavoriteIndicator();
-            if (deleteGunButton != null && deleteButtonText != null)
-                UpdateDeleteButtonEnabled(deleteGunButton, deleteButtonText);
+            UpdateDeleteButtonEnabled();
+            AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.Menu);
         }
 
         public static void SetupDifficultyIndicators()
@@ -389,13 +390,7 @@ namespace ExScoringMod
                 if (buttons != null && buttons.Count > 0) break;
             }
 
-            MelonLogger.Log($"AutoSelect: buttons found={buttons != null}, count={buttons?.Count ?? 0}");
-
-            if (buttons == null || buttons.Count == 0)
-            {
-                HideLaunchPanel();
-                yield break;
-            }
+            if (buttons == null || buttons.Count == 0) yield break;
 
             SongSelectItem targetItem = null;
 

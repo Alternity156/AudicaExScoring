@@ -2,8 +2,11 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using MelonLoader;
 using UnityEngine;
+
+[assembly: MelonOptionalDependencies("AuthorableModifiers")]
 
 namespace ExScoringMod
 {
@@ -13,6 +16,7 @@ namespace ExScoringMod
 
         public static MenuState.State menuState;
         public static bool gameHasLoaded = false;
+        public static bool authorableInstalled = false;
         public static bool suppressShellPageAnimations = false;
         public static string selectedSong;
         public static SongList.SongData selectedSongData;
@@ -46,6 +50,8 @@ namespace ExScoringMod
         public static bool shouldShowKeyboard = false;
         public static string downloadsDirectory;
         public static string mainSongDirectory;
+
+        // ── Song deletion fields ──
         public static string deletedDownloadsListPath;
         public static List<string> deletedSongs = new List<string>();
         public static List<string> deletedSongPaths = new List<string>();
@@ -62,12 +68,22 @@ namespace ExScoringMod
         public override void OnApplicationStart()
         {
             Config.RegisterConfig();
+            PlaylistConfig.RegisterConfig();
+
+            // Check if AuthorableModifiers is installed
+            if (MelonHandler.Mods.Any(it => it.Assembly.GetName().Name == "AuthorableModifiers"))
+            {
+                authorableInstalled = true;
+                MelonLogger.Log("AuthorableModifiers detected");
+            }
 
             // Set up download directories
             mainSongDirectory = Path.Combine(Application.streamingAssetsPath, "HmxAudioAssets", "songs");
             downloadsDirectory = Application.dataPath.Replace("Audica_Data", "Downloads");
             deletedDownloadsListPath = Path.Combine(downloadsDirectory, "ExScoring_DeletedFiles");
             CheckFolderDirectories();
+
+            // Clean up any songs marked for deletion from previous session
             CleanMarkedForDeletion();
 
             // Move any previously downloaded songs into the main songs folder
@@ -158,6 +174,8 @@ namespace ExScoringMod
                 MelonLogger.Log($"[WARNING] Could not register Downloads directory: {e.Message}");
             }
         }
+
+        // ── Song deletion methods ──
 
         public static void RemoveSong(string songID)
         {

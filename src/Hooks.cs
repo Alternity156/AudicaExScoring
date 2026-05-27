@@ -78,11 +78,6 @@ namespace ExScoringMod
                     InitializeTargetIcons();
                 }
 
-                if (state == MenuState.State.SettingsPage)
-                {
-                    suppressShellPageAnimations = false;
-                }
-
                 if (state == MenuState.State.MainPage)
                 {
                     StartWatching();
@@ -107,27 +102,15 @@ namespace ExScoringMod
                     LaunchPanelUISetup();
                     suppressShellPageAnimations = true;
 
-                    MelonLogger.Log($"SongPage entered, sLastState={MenuState.sLastState}");
                     if (MenuState.sLastState == MenuState.State.MainPage)
                     {
                         AutoSelectSong();
                     }
+                }
 
-                    if (MenuState.sLastState == MenuState.State.SettingsPage)
-                    {
-                        var songSelectObj = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect");
-                        if (songSelectObj != null)
-                        {
-                            var ss = songSelectObj.GetComponent<SongSelect>();
-                            if (ss != null) ss.ShowSongList();
-                        }
-                        AutoSelectSong();
-                    }
-
-                    if (MenuState.sLastState == MenuState.State.SettingsPage)
-                    {
-                        suppressShellPageAnimations = true;
-                    }
+                if (state == MenuState.State.SettingsPage)
+                {
+                    suppressShellPageAnimations = false;
                 }
             }
         }
@@ -590,7 +573,7 @@ namespace ExScoringMod
 
         /// <summary>
         /// Resets state when navigating between settings pages.
-        /// Postfix redirects to search page if a song search is in progress.
+        /// Postfix routes to the correct panel based on current state.
         /// </summary>
         [HarmonyPatch(typeof(OptionsMenu), "ShowPage", new Type[] { typeof(OptionsMenu.Page) })]
         private static class OptionsMenuShowPagePatch
@@ -606,16 +589,42 @@ namespace ExScoringMod
             {
                 if (page == OptionsMenu.Page.Main)
                 {
+                    PlaylistCreatePanel.SetMenu(__instance);
+                    PlaylistSelectPanel.SetMenu(__instance);
+                    PlaylistEditPanel.SetMenu(__instance);
+                    PlaylistEndlessPanel.SetMenu(__instance);
+
                     if (SongSearch.searchInProgress)
                     {
                         SongSearchScreen.GoToSearch();
+                    }
+                    else if (PlaylistManager.state == PlaylistManager.PlaylistState.Selecting ||
+                             PlaylistManager.state == PlaylistManager.PlaylistState.Adding)
+                    {
+                        PlaylistSelectPanel.GoToPanel();
+                    }
+                    else if (PlaylistManager.state == PlaylistManager.PlaylistState.Endless)
+                    {
+                        PlaylistEndlessPanel.GoToPanel();
+                    }
+                }
+                else if (page == OptionsMenu.Page.Misc)
+                {
+                    if (PlaylistManager.state == PlaylistManager.PlaylistState.Creating)
+                    {
+                        PlaylistCreatePanel.GoToPanel();
+                    }
+                    else if (PlaylistManager.state == PlaylistManager.PlaylistState.Editing)
+                    {
+                        PlaylistEditPanel.GoToPanel();
                     }
                 }
             }
         }
 
         /// <summary>
-        /// Handles cleanup when backing out of the download or search page.
+        /// Handles cleanup when backing out of settings pages.
+        /// Routes to the correct cancel handler based on current state.
         /// </summary>
         [HarmonyPatch(typeof(OptionsMenu), "BackOut", new Type[0])]
         private static class OptionsMenuBackOutPatch
@@ -625,6 +634,27 @@ namespace ExScoringMod
                 if (SongSearch.searchInProgress)
                 {
                     SongSearch.CancelSearch();
+                    return false;
+                }
+                else if (PlaylistManager.state == PlaylistManager.PlaylistState.Selecting ||
+                         PlaylistManager.state == PlaylistManager.PlaylistState.Adding)
+                {
+                    PlaylistSelectPanel.CancelSelect();
+                    return false;
+                }
+                else if (PlaylistManager.state == PlaylistManager.PlaylistState.Creating)
+                {
+                    PlaylistCreatePanel.CancelCreate();
+                    return false;
+                }
+                else if (PlaylistManager.state == PlaylistManager.PlaylistState.Editing)
+                {
+                    PlaylistEditPanel.CancelEdit();
+                    return false;
+                }
+                else if (PlaylistManager.state == PlaylistManager.PlaylistState.Endless)
+                {
+                    PlaylistEndlessPanel.CancelEndless();
                     return false;
                 }
                 else
@@ -686,6 +716,27 @@ namespace ExScoringMod
                             SongSearchScreen.searchText.text = SongSearch.query;
                         }
                     }
+                    else if (PlaylistManager.state == PlaylistManager.PlaylistState.Creating)
+                    {
+                        switch (label)
+                        {
+                            case "done":
+                                __instance.Hide();
+                                shouldShowKeyboard = false;
+                                break;
+                            case "clear":
+                                PlaylistCreatePanel.newName = "";
+                                break;
+                            default:
+                                PlaylistCreatePanel.newName += label;
+                                break;
+                        }
+
+                        if (PlaylistCreatePanel.playlistText != null)
+                        {
+                            PlaylistCreatePanel.playlistText.text = PlaylistCreatePanel.newName;
+                        }
+                    }
                     else
                     {
                         switch (label)
@@ -716,7 +767,7 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Handles backspace for search and download search fields.
+        /// Handles backspace for search, playlist create, and download search fields.
         /// </summary>
         [HarmonyPatch(typeof(KeyboardEntry), "OnBackspace", new Type[0])]
         private static class KeyboardEntryOnBackspacePatch
@@ -734,6 +785,15 @@ namespace ExScoringMod
                         if (SongSearchScreen.searchText != null)
                             SongSearchScreen.searchText.text = SongSearch.query;
                     }
+                    else if (PlaylistManager.state == PlaylistManager.PlaylistState.Creating)
+                    {
+                        if (PlaylistCreatePanel.newName == "" || PlaylistCreatePanel.newName is null)
+                            return false;
+                        PlaylistCreatePanel.newName = PlaylistCreatePanel.newName.Substring(0, PlaylistCreatePanel.newName.Length - 1);
+
+                        if (PlaylistCreatePanel.playlistText != null)
+                            PlaylistCreatePanel.playlistText.text = PlaylistCreatePanel.newName;
+                    }
                     else
                     {
                         if (SongDownloader.searchString == "" || SongDownloader.searchString == null)
@@ -750,7 +810,7 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Handles underscore/space key for search and download search fields.
+        /// Handles underscore/space key for search, playlist create, and download search fields.
         /// </summary>
         [HarmonyPatch(typeof(KeyboardEntry), "OnUnderscore", new Type[0])]
         private static class KeyboardEntryOnUnderscorePatch
@@ -766,6 +826,13 @@ namespace ExScoringMod
                         if (SongSearchScreen.searchText != null)
                             SongSearchScreen.searchText.text = SongSearch.query;
                     }
+                    else if (PlaylistManager.state == PlaylistManager.PlaylistState.Creating)
+                    {
+                        PlaylistCreatePanel.newName += " ";
+
+                        if (PlaylistCreatePanel.playlistText != null)
+                            PlaylistCreatePanel.playlistText.text = PlaylistCreatePanel.newName;
+                    }
                     else
                     {
                         SongDownloader.searchString += " ";
@@ -780,7 +847,7 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Initializes the song download tracker, filter panel, and triggers initial API search
+        /// Initializes the song download tracker, filter panel, playlists, and triggers initial API search
         /// once the game startup logo is done.
         /// </summary>
         [HarmonyPatch(typeof(StartupLogo), "SetState", new Type[] { typeof(StartupLogo.State) })]
@@ -791,6 +858,7 @@ namespace ExScoringMod
                 if (state == StartupLogo.State.Done)
                 {
                     SongDownloader.StartNewSongSearch();
+                    PlaylistManager.OnApplicationStart();
                     FilterPanel.OnApplicationStart();
                     SongDownloadTracker.StartSongListUpdate();
                 }
@@ -829,9 +897,14 @@ namespace ExScoringMod
             private static void Postfix(SongSelect __instance)
             {
                 FilterPanel.Initialize();
+                PlaylistManager.PopulatePlaylistsSongNames();
+                PlaylistManager.DownloadMissingSongs();
             }
         }
 
+        /// <summary>
+        /// Disables custom filters when the user clicks "All" in the song list.
+        /// </summary>
         [HarmonyPatch(typeof(SongListControls), "FilterAll", new Type[0])]
         private static class SongListControlsFilterAllPatch
         {
@@ -839,12 +912,11 @@ namespace ExScoringMod
             {
                 FilterPanel.DisableCustomFilters();
             }
-            private static void Postfix(SongListControls __instance)
-            {
-                AutoSelectSong();
-            }
         }
 
+        /// <summary>
+        /// Disables custom filters when the user clicks "Main" in the song list.
+        /// </summary>
         [HarmonyPatch(typeof(SongListControls), "FilterMain", new Type[0])]
         private static class SongListControlsFilterMainPatch
         {
@@ -852,18 +924,20 @@ namespace ExScoringMod
             {
                 FilterPanel.DisableCustomFilters();
             }
-            private static void Postfix(SongListControls __instance)
-            {
-                AutoSelectSong();
-            }
         }
 
-        [HarmonyPatch(typeof(SongListControls), "FilterExtras", new Type[0])]
-        private static class SongListControlsFilterExtrasPatch
+        /// <summary>
+        /// Forces default sort when playlist filter is active to preserve playlist order.
+        /// </summary>
+        [HarmonyPatch(typeof(SongSelect), "ChangeSort", new Type[] { typeof(SongSelect.Sort) })]
+        private static class SongSelectChangeSortPatch
         {
-            private static void Postfix(SongListControls __instance)
+            private static void Prefix(SongSelect __instance, ref SongSelect.Sort newSort)
             {
-                AutoSelectSong();
+                if (FilterPanel.IsFiltering("playlists"))
+                {
+                    newSort = SongSelect.Sort.Default;
+                }
             }
         }
 
@@ -879,7 +953,133 @@ namespace ExScoringMod
                 {
                     SongSearchButton.CreateSearchButton();
                     RefreshButton.CreateRefreshButton();
+                    SelectPlaylistButton.CreatePlaylistButton();
+                    PlaylistEndlessManager.ResetIndex();
                 }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        //  Playlist endless mode hooks
+        // ══════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// Handles endless mode song transitions when score screen is shown.
+        /// Triggers fade out and allows score display.
+        /// </summary>
+        [HarmonyPatch(typeof(SongEndSequence), "SetState", new Type[] { typeof(SongEndSequence.State) })]
+        private static class SongEndSequenceSetStatePatch
+        {
+            private static bool Prefix(SongEndSequence __instance, ref SongEndSequence.State newState)
+            {
+                if (PlaylistManager.state == PlaylistManager.PlaylistState.Endless)
+                {
+                    if (PlaylistConfig.ShowScores)
+                    {
+                        if (newState == SongEndSequence.State.WaitForScorePercentStars)
+                        {
+                            PlaylistEndlessManager.FadeOut();
+                            return true;
+                        }
+                    }
+                }
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Skips the score screen in endless mode when ShowScores is disabled.
+        /// Zeroes out delays and hides UI elements, then jumps to SequenceComplete.
+        /// </summary>
+        [HarmonyPatch(typeof(SongEndSequence), "Start", new Type[0])]
+        private static class SongEndSequenceStartPatch
+        {
+            private static bool Prefix(SongEndSequence __instance)
+            {
+                if (PlaylistManager.state == PlaylistManager.PlaylistState.Endless)
+                {
+                    if (!PlaylistConfig.ShowScores)
+                    {
+                        PlaylistEndlessManager.FadeOut();
+                        __instance.startDelay = 0f;
+                        __instance.waitDelay = 0f;
+                        __instance.endDelay = 0f;
+                        __instance.levelComplete.SetActive(false);
+                        __instance.newHighScore.SetActive(false);
+                        __instance.scorePercentStars.SetActive(false);
+                        __instance.fullCombo.SetActive(false);
+                        __instance.SetState(SongEndSequence.State.SequenceComplete);
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+
+        /// <summary>
+        /// Handles endless mode results page skip and creates buttons on in-game screens.
+        /// </summary>
+        [HarmonyPatch(typeof(InGameUI), "SetState", new Type[] { typeof(InGameUI.State), typeof(bool) })]
+        private static class InGameUISetStatePatch
+        {
+            private static bool Prefix(InGameUI __instance, InGameUI.State state, bool instant)
+            {
+                if (PlaylistManager.state == PlaylistManager.PlaylistState.Endless)
+                {
+                    if (state == InGameUI.State.ResultsPage)
+                    {
+                        PlaylistEndlessManager.NextSong();
+                        return false;
+                    }
+                }
+                return true;
+            }
+
+            private static void Postfix(InGameUI __instance, InGameUI.State state, bool instant)
+            {
+                if (state == InGameUI.State.FailedPage)
+                {
+                    CreateDeleteButton(ButtonUtils.ButtonLocation.Failed);
+                    CreateFavoriteButton(ButtonUtils.ButtonLocation.Failed);
+                    AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.Failed);
+                    PlaylistEndlessSkipButton.CreateSkipButton(ButtonUtils.ButtonLocation.Failed);
+                }
+                else if (state == InGameUI.State.PausePage)
+                {
+                    CreateDeleteButton(ButtonUtils.ButtonLocation.Pause);
+                    CreateFavoriteButton(ButtonUtils.ButtonLocation.Pause);
+                    AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.Pause);
+                    PlaylistEndlessSkipButton.CreateSkipButton(ButtonUtils.ButtonLocation.Pause);
+                }
+                else if (state == InGameUI.State.EndGameContinuePage)
+                {
+                    CreateDeleteButton(ButtonUtils.ButtonLocation.EndGame);
+                    CreateFavoriteButton(ButtonUtils.ButtonLocation.EndGame);
+                    AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.EndGame);
+                }
+                else if (state == InGameUI.State.PracticeModeOverPage)
+                {
+                    CreateDeleteButton(ButtonUtils.ButtonLocation.PracticeModeOver);
+                    CreateFavoriteButton(ButtonUtils.ButtonLocation.PracticeModeOver);
+                    AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.PracticeModeOver);
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        //  Song download tracker post-process hooks
+        // ══════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// After the song list is loaded/refreshed, populate playlists and enable the back button.
+        /// </summary>
+        [HarmonyPatch(typeof(SongList), "SongListLoaded", new Type[0])]
+        private static class SongListSongListLoadedPatch
+        {
+            private static void Postfix()
+            {
+                PlaylistManager.PopulatePlaylistsSongNames();
+                PlaylistManager.EnableBackButton();
             }
         }
     }

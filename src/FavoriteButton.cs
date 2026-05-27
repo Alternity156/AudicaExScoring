@@ -56,14 +56,13 @@ namespace ExScoringMod
             }
 
             // Create the selected indicator (same approach as difficulty buttons)
-            GameObject indicatorSource = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center/play/SelectedIndicator");
-            if (indicatorSource != null)
+            if (difficultyIndicatorSource != null)
             {
                 // Remove any existing indicator from the clone
                 Transform existing = favoriteButton.transform.Find("SelectedIndicator");
                 if (existing != null) GameObject.Destroy(existing.gameObject);
 
-                favoriteIndicator = GameObject.Instantiate(indicatorSource, favoriteButton.transform);
+                favoriteIndicator = GameObject.Instantiate(difficultyIndicatorSource, favoriteButton.transform);
                 favoriteIndicator.name = "SelectedIndicator";
                 favoriteIndicator.transform.localPosition = new Vector3(0f, 0f, -0.005f);
                 favoriteIndicator.transform.localRotation = Quaternion.identity;
@@ -95,6 +94,49 @@ namespace ExScoringMod
 
             bool isFav = selectedSong != null && FilterPanel.IsFavorite(selectedSong);
             favoriteIndicator.SetActive(isFav);
+        }
+
+        /// <summary>
+        /// Creates a favorite button at the specified location (menu launch panel or in-game screens).
+        /// Menu version is handled by SetupFavoriteButton; this handles in-game screens.
+        /// </summary>
+        internal static void CreateFavoriteButton(ButtonUtils.ButtonLocation location = ButtonUtils.ButtonLocation.Menu)
+        {
+            if (location == ButtonUtils.ButtonLocation.Menu)
+            {
+                // Menu version uses SetupFavoriteButton
+                return;
+            }
+
+            if (PlaylistManager.state == PlaylistManager.PlaylistState.Endless) return;
+
+            string name = "InGameUI/ShellPage_EndGameContinue/page/ShellPanel_Center/exit";
+            Vector3 localPosition = new Vector3(-5f, 17f, 0f);
+            Vector3 rotation = new Vector3(0f, 0f, 0f);
+
+            if (location == ButtonUtils.ButtonLocation.Failed)
+            {
+                name = "InGameUI/ShellPage_Failed/page/ShellPanel_Center/exit";
+            }
+            else if (location == ButtonUtils.ButtonLocation.Pause)
+            {
+                name = "InGameUI/ShellPage_Pause/page/ShellPanel_Center/exit";
+            }
+            else if (location == ButtonUtils.ButtonLocation.PracticeModeOver)
+            {
+                name = "InGameUI/ShellPage_PracticeModeOver/page/ShellPanel_Center/exit";
+            }
+
+            var refButton = GameObject.Find(name);
+            if (refButton == null) return;
+
+            GameObject button = GameObject.Instantiate(refButton, refButton.transform.parent.transform);
+            ButtonUtils.InitButton(button, "Favorite", new Action(() =>
+            {
+                if (SongDataHolder.I == null || SongDataHolder.I.songData == null) return;
+                string songID = System.IO.Path.GetFileNameWithoutExtension(SongDataHolder.I.songData.zipPath);
+                FilterPanel.AddFavorite(songID);
+            }), localPosition, rotation);
         }
     }
 }

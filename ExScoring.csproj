@@ -39,6 +39,10 @@
       <HintPath>lib\Assembly-CSharp-firstpass.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="AuthorableModifiers">
+      <HintPath>lib\AuthorableModifiers.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="Il2CppMono.Security">
       <HintPath>lib\Il2CppMono.Security.dll</HintPath>
       <Private>False</Private>
@@ -70,6 +74,9 @@
     <Reference Include="MelonLoader.ModHandler">
       <HintPath>lib\MelonLoader.ModHandler.dll</HintPath>
       <Private>False</Private>
+    </Reference>
+    <Reference Include="Newtonsoft.Json">
+      <HintPath>lib\Newtonsoft.Json.dll</HintPath>
     </Reference>
     <Reference Include="Oculus.VR">
       <HintPath>lib\Oculus.VR.dll</HintPath>
@@ -181,6 +188,18 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="src\AddPlaylistButton.cs" />
+    <Compile Include="src\PlaylistConfig.cs" />
+    <Compile Include="src\PlaylistCreatePanel.cs" />
+    <Compile Include="src\PlaylistDownloadManager.cs" />
+    <Compile Include="src\PlaylistEditPanel.cs" />
+    <Compile Include="src\PlaylistEndlessButton.cs" />
+    <Compile Include="src\PlaylistEndlessManager.cs" />
+    <Compile Include="src\PlaylistEndlessPanel.cs" />
+    <Compile Include="src\PlaylistEndlessSkipButton.cs" />
+    <Compile Include="src\PlaylistIOHandler.cs" />
+    <Compile Include="src\PlaylistSelectPanel.cs" />
+    <Compile Include="src\PlaylistUtil.cs" />
     <Compile Include="src\AudicaScoring.cs" />
     <Compile Include="src\ButtonUtils.cs" />
     <Compile Include="src\Classes.cs" />
@@ -199,7 +218,10 @@
     <Compile Include="src\Main.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="src\ExScoring.cs" />
+    <Compile Include="src\Playlist.cs" />
+    <Compile Include="src\PlaylistManager.cs" />
     <Compile Include="src\RefreshButton.cs" />
+    <Compile Include="src\SelectPlaylistButton.cs" />
     <Compile Include="src\SongDownloader.cs" />
     <Compile Include="src\SongDownloaderTracker.cs" />
     <Compile Include="src\SongDownloaderUI.cs" />
