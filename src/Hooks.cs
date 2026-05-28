@@ -183,6 +183,7 @@ namespace ExScoringMod
                     launchPanel.OnEnable();
 
                 UpdateLaunchPanelInfo();
+                UpdateSongSelectionIndicator(__instance);
                 RefreshIntensityGraph();
             }
         }

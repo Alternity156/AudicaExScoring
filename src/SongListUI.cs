@@ -6,6 +6,50 @@ namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
+        // ── Song selection indicator tuning ──
+        private static Vector3 songSelectionIndicatorScale = new Vector3(3.625f, 1.5f, 1f);
+        private static Vector3 songSelectionIndicatorPosition = new Vector3(0f, 0f, -0.05f);
+
+        private static GameObject currentSongSelectionIndicator = null;
+
+        /// <summary>
+        /// Shows a selection indicator on the currently selected song list item.
+        /// Creates the indicator lazily on first selection of each item.
+        /// </summary>
+        public static void UpdateSongSelectionIndicator(SongSelectItem selectedItem)
+        {
+            if (difficultyIndicatorSource == null) return;
+
+            // Hide the previous indicator
+            if (currentSongSelectionIndicator != null)
+                currentSongSelectionIndicator.SetActive(false);
+
+            if (selectedItem == null) return;
+
+            // Reuse existing indicator if already created for this item
+            Transform existing = selectedItem.transform.Find("SelectedIndicator");
+            if (existing != null)
+            {
+                currentSongSelectionIndicator = existing.gameObject;
+                currentSongSelectionIndicator.SetActive(true);
+                return;
+            }
+
+            // First time selecting this item — create the indicator
+            GameObject indicator = GameObject.Instantiate(difficultyIndicatorSource, selectedItem.transform);
+            indicator.name = "SelectedIndicator";
+            indicator.transform.localPosition = songSelectionIndicatorPosition;
+            indicator.transform.localRotation = Quaternion.identity;
+            indicator.transform.localScale = songSelectionIndicatorScale;
+
+            MeshRenderer renderer = indicator.GetComponent<MeshRenderer>();
+            if (renderer != null)
+                renderer.material.color = new Color(1f, 1f, 1f, 1f);
+
+            currentSongSelectionIndicator = indicator;
+            currentSongSelectionIndicator.SetActive(true);
+        }
+
         public static void SongListUISetup()
         {
             if (songListUISetup) return;
