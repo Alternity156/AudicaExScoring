@@ -901,6 +901,7 @@ namespace ExScoringMod
                 FilterPanel.Initialize();
                 PlaylistManager.PopulatePlaylistsSongNames();
                 PlaylistManager.DownloadMissingSongs();
+                MelonCoroutines.Start(UpdateLastSongCount());
             }
         }
 

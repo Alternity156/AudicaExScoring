@@ -14,6 +14,9 @@ namespace ExScoringMod
         public static bool AudicaCalculation;
         public static bool LinearCalculation;
 
+        public static int LastSongCount;
+        public static bool SafeSongListReload;
+
         public static void RegisterConfig()
         {
             MelonPrefs.RegisterString(Category, nameof(typeHeader), "", "[Header]Scoring Type");
@@ -23,6 +26,11 @@ namespace ExScoringMod
             MelonPrefs.RegisterString(Category, nameof(calculationHeader), "", "[Header]Calculation Type");
             MelonPrefs.RegisterBool(Category, nameof(AudicaCalculation), true, "Enables Audica Style Calculation");
             MelonPrefs.RegisterBool(Category, nameof(LinearCalculation), false, "Enables Linear Calculation");
+
+            MelonPrefs.RegisterInt(Category, nameof(LastSongCount), 0, "");
+            LastSongCount = MelonPrefs.GetInt(Category, nameof(LastSongCount));
+
+            MelonPrefs.RegisterBool(Category, nameof(SafeSongListReload), true, "Disables menu buttons while the song list is reloading");
 
             OnModSettingsApplied();
         }
@@ -34,6 +42,14 @@ namespace ExScoringMod
 
             AudicaCalculation = MelonPrefs.GetBool(Category, nameof(AudicaCalculation));
             LinearCalculation = MelonPrefs.GetBool(Category, nameof(LinearCalculation));
+            SafeSongListReload = MelonPrefs.GetBool(Category, nameof(SafeSongListReload));
+        }
+
+        public static void UpdateSongCount(int newCount)
+        {
+            MelonPrefs.SetInt(Category, nameof(LastSongCount), newCount);
+            LastSongCount = newCount;
+            MelonPrefs.SaveConfig();
         }
 
         public static void EnforceMutualExclusion(string category, string identifier)

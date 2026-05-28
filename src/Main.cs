@@ -17,6 +17,7 @@ namespace ExScoringMod
         public static MenuState.State menuState;
         public static bool gameHasLoaded = false;
         public static bool authorableInstalled = false;
+        public static bool modSettingsInstalled = false;
         public static bool suppressShellPageAnimations = false;
         public static string selectedSong;
         public static SongList.SongData selectedSongData;
@@ -75,6 +76,13 @@ namespace ExScoringMod
             {
                 authorableInstalled = true;
                 MelonLogger.Log("AuthorableModifiers detected");
+            }
+
+            // Check if ModSettings is installed
+            if (MelonHandler.Mods.Any(it => it.Assembly.GetName().Name == "ModSettings"))
+            {
+                modSettingsInstalled = true;
+                MelonLogger.Log("ModSettings detected");
             }
 
             // Set up download directories
@@ -191,6 +199,49 @@ namespace ExScoringMod
             deletedSongPaths = new List<string>();
             deletedSongs = new List<string>();
             KataConfig.I.CreateDebugText("Restored songs", new Vector3(0f, -1f, 5f), 5f, null, false, 0.2f);
+        }
+
+        // ── Song count notification ──
+
+        public static IEnumerator UpdateLastSongCount()
+        {
+            yield return new WaitForSeconds(0.5f);
+            WWW www = new WWW(SongDownloader.apiUrl);
+            yield return www;
+            try
+            {
+                MelonLogger.Log($"[SongCount] API response length: {www.text?.Length}");
+                int newSongCount = MelonLoader.TinyJSON.JSON.Load(www.text).Make<NewAPISongList>().count;
+                MelonLogger.Log($"[SongCount] API count: {newSongCount}, LastSongCount: {Config.LastSongCount}");
+                MelonLogger.Log($"[SongCount] notificationPanel null? {FilterPanel.notificationPanel == null}");
+                if (FilterPanel.notificationPanel != null)
+                {
+                    if (Config.LastSongCount == 0)
+                    {
+                        Config.UpdateSongCount(newSongCount);
+                        MelonLogger.Log("[SongCount] First run, storing count");
+                    }
+                    else if (Config.LastSongCount == newSongCount)
+                    {
+                        FilterPanel.SetNotificationText("There are no new songs available");
+                        MelonLogger.Log("[SongCount] No new songs");
+                    }
+                    else
+                    {
+                        int diff = newSongCount - Config.LastSongCount;
+                        bool isSingular = diff == 1;
+                        string pre = isSingular ? "is " : "are ";
+                        string noun = isSingular ? "song" : "songs";
+                        FilterPanel.SetNotificationText("There " + pre + diff.ToString() + " new " + noun + " available");
+                        MelonLogger.Log($"[SongCount] {diff} new songs");
+                    }
+                    Config.UpdateSongCount(newSongCount);
+                }
+            }
+            catch (Exception e)
+            {
+                MelonLogger.Log($"[WARNING] Could not fetch song count: {e.Message}");
+            }
         }
 
         public override void OnApplicationQuit()

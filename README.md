@@ -24,6 +24,6 @@ If you do not have ModSettings, you can grab it [here](https://github.com/octobe
 ## Thanks
 This mod uses code or concepts from other mods and software such as: 
 
-[SongBrowser](https://github.com/Silzoid/SongBrowser) Mod (Song Downloading, Favorite system, Song deliting, Song Search, Fast Refresh, Playlist system, Random song)
+[SongBrowser](https://github.com/Silzoid/SongBrowser) Mod (Song Downloading, Favorite system, Song deliting, Song Search, Fast Refresh, Playlist system, Random song, EitherHand fix)
 
 [NotReaper](https://github.com/octoberU/NotReaper/tree/2021-upgrade) (Target Icons for song data)
