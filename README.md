@@ -4,7 +4,7 @@ This mod conflicts with ScorePercentage HitScoreVisualizer and SongBrowser.
 I am currently implementing SongBrowser features that most players expect to be functional in the game.
 
 ## Optional Dependencies
-SongDataLoader (Recommended for full experience)
+[SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience)
 
 ## EX Scoring
 The idea is to make a new scoring system akin to classic rhythm games. I am still not sure where I want this to go but I am experimenting currently, if you have ideas, let me know on Discord!
