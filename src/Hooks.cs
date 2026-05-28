@@ -885,6 +885,8 @@ namespace ExScoringMod
                         __result.Remove(deletedSong);
                     }
                 }
+                RandomSong.UpdateAvailableSongs(__result, extras);
+                MelonLogger.Log($"[RandomSong] UpdateAvailableSongs called: extras={extras}, count={__result.Count}");
             }
         }
 
@@ -954,6 +956,7 @@ namespace ExScoringMod
                     SongSearchButton.CreateSearchButton();
                     RefreshButton.CreateRefreshButton();
                     SelectPlaylistButton.CreatePlaylistButton();
+                    RandomSongButton.CreateRandomSongButton();
                     PlaylistEndlessManager.ResetIndex();
                 }
             }

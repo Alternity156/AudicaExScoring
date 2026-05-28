@@ -25,6 +25,7 @@ namespace ExScoringMod
 
             GunButton gb = button.GetComponentInChildren<GunButton>();
             gb.destroyOnShot = false;
+            gb.disableOnShot = false;
             gb.doMeshExplosion = false;
             gb.doParticles = false;
             gb.onHitEvent = new UnityEvent();
