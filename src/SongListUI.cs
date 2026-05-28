@@ -246,6 +246,13 @@ namespace ExScoringMod
             SetupFavoriteButton();
             CreateDeleteButton(ButtonUtils.ButtonLocation.Menu);
             AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.Menu);
+
+            if (songDataLoaderInstalled)
+            {
+                Transform parent = launchPanelCenterTitleLabel.transform.parent;
+                int layer = launchPanelCenterTitleLabel.gameObject.layer;
+                AlbumArt.CreateAlbumArtCanvas(parent, layer);
+            }
         }
 
         public static void UpdateLaunchPanelInfo()
@@ -273,6 +280,9 @@ namespace ExScoringMod
             UpdateFavoriteIndicator();
             UpdateDeleteButtonEnabled();
             AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.Menu);
+
+            if (songDataLoaderInstalled)
+                AlbumArt.UpdateAlbumArt(SongDataHolder.I.songData.songID);
         }
 
         public static void SetupDifficultyIndicators()

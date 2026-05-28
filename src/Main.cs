@@ -6,7 +6,7 @@ using System.Linq;
 using MelonLoader;
 using UnityEngine;
 
-[assembly: MelonOptionalDependencies("AuthorableModifiers")]
+[assembly: MelonOptionalDependencies("AuthorableModifiers", "SongDataLoader")]
 
 namespace ExScoringMod
 {
@@ -18,6 +18,7 @@ namespace ExScoringMod
         public static bool gameHasLoaded = false;
         public static bool authorableInstalled = false;
         public static bool modSettingsInstalled = false;
+        public static bool songDataLoaderInstalled = false;
         public static bool suppressShellPageAnimations = false;
         public static string selectedSong;
         public static SongList.SongData selectedSongData;
@@ -83,6 +84,13 @@ namespace ExScoringMod
             {
                 modSettingsInstalled = true;
                 MelonLogger.Log("ModSettings detected");
+            }
+
+            // Check if SongDataLoader is installed (optional — enables album art)
+            if (MelonHandler.Mods.Any(it => it.Info.SystemType.Name == "SongDataLoader"))
+            {
+                songDataLoaderInstalled = true;
+                MelonLogger.Log("SongDataLoader detected — album art enabled");
             }
 
             // Set up download directories

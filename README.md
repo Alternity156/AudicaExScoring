@@ -3,6 +3,9 @@ This mod conflicts with ScorePercentage HitScoreVisualizer and SongBrowser.
 
 I am currently implementing SongBrowser features that most players expect to be functional in the game.
 
+## Optional Dependencies
+SongDataLoader (Recommended for full experience)
+
 ## EX Scoring
 The idea is to make a new scoring system akin to classic rhythm games. I am still not sure where I want this to go but I am experimenting currently, if you have ideas, let me know on Discord!
 
@@ -24,6 +27,8 @@ If you do not have ModSettings, you can grab it [here](https://github.com/octobe
 ## Thanks
 This mod uses code or concepts from other mods and software such as: 
 
-[SongBrowser](https://github.com/Silzoid/SongBrowser) Mod (Song Downloading, Favorite system, Song deliting, Song Search, Fast Refresh, Playlist system, Random song, EitherHand fix)
+[SongBrowser](https://github.com/Silzoid/SongBrowser) (Song Downloading, Favorite system, Song deliting, Song Search, Fast Refresh, Playlist system, Random song, EitherHand fix)
 
 [NotReaper](https://github.com/octoberU/NotReaper/tree/2021-upgrade) (Target Icons for song data)
+
+[Meeps Audica UI Enhancements](https://github.com/MeepsKitten/Meeps-Audica-UI-Enhancements) (Album Art)

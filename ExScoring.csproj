@@ -86,6 +86,9 @@
       <HintPath>lib\Sanford.Multimedia.Midi.dll</HintPath>
       <Private>False</Private>
     </Reference>
+    <Reference Include="SongDataLoader">
+      <HintPath>lib\SongDataLoader.dll</HintPath>
+    </Reference>
     <Reference Include="SonyNP">
       <HintPath>lib\SonyNP.dll</HintPath>
       <Private>False</Private>
@@ -133,6 +136,9 @@
     <Reference Include="UnityEngine.CoreModule">
       <HintPath>lib\UnityEngine.CoreModule.dll</HintPath>
       <Private>False</Private>
+    </Reference>
+    <Reference Include="UnityEngine.ImageConversionModule">
+      <HintPath>lib\UnityEngine.ImageConversionModule.dll</HintPath>
     </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>lib\UnityEngine.IMGUIModule.dll</HintPath>
@@ -189,6 +195,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="src\AddPlaylistButton.cs" />
+    <Compile Include="src\AlbumArt.cs" />
     <Compile Include="src\DifficultyCalculator.cs" />
     <Compile Include="src\EitherHandFix.cs" />
     <Compile Include="src\PlaylistConfig.cs" />
