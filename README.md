@@ -1,5 +1,5 @@
 ## WARNING
-This mod conflicts with ScorePercentage HitScoreVisualizer and SongBrowser.
+This mod conflicts with ScorePercentage, HitScoreVisualizer, SongBrowser and Meeps Audica UI Enhancements.
 
 I am currently implementing SongBrowser features that most players expect to be functional in the game.
 
