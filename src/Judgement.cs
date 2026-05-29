@@ -27,14 +27,13 @@ namespace ExScoringMod
         public static float judgementGreatChainAverage = 0.4f;
         public static float judgementGoodChainAverage = 0.0f;
 
-        /* Impeccable radius is real target radius
-         * The rest is the remaining radius %, whatever remains from Impeccable radius
+        /* Real radius from 0 (pixel perfect) to 5 (entire target)
         */
         public static float judgementImpeccableAimRadius = 0.75f;
-        public static float judgementFantasticAimRadiusPercent = 0.15f;
-        public static float judgementExcellentAimRadiusPercent = 0.35f;
-        public static float judgementGreatAimRadiusPercent = 0.8f;
-        public static float judgementGoodAimRadiusPercent = 1f;
+        public static float judgementFantasticAimRadius = 1.3875f;
+        public static float judgementExcellentAimRadius = 2.2375f;
+        public static float judgementGreatAimRadius = 4.15f;
+        public static float judgementGoodAimRadius = 5f;
 
         public enum Judgement
         {
@@ -190,22 +189,11 @@ namespace ExScoringMod
             Vector3 targetPos = target.GetContactPosition();
             float distanceFromCenter = (targetPos - intersectionPoint).magnitude;
 
-            
-            float impeccableRadius = judgementImpeccableAimRadius;   // snap zone = perfect
-            float realAimRadius = audicaFullAimRadius;
-            float remaining = realAimRadius - impeccableRadius;
-
-            // Remaining space after the perfect circle
-            float fantasticRadius = impeccableRadius + remaining * judgementFantasticAimRadiusPercent;
-            float excellentRadius = impeccableRadius + remaining * judgementExcellentAimRadiusPercent;
-            float greatRadius = impeccableRadius + remaining * judgementGreatAimRadiusPercent;
-            float goodRadius = impeccableRadius + remaining * judgementGoodAimRadiusPercent;
-
-            if (distanceFromCenter <= impeccableRadius) return Judgement.Impeccable;
-            if (distanceFromCenter <= fantasticRadius) return Judgement.Fantastic;
-            if (distanceFromCenter <= excellentRadius) return Judgement.Excellent;
-            if (distanceFromCenter <= greatRadius) return Judgement.Great;
-            if (distanceFromCenter <= goodRadius) return Judgement.Good;
+            if (distanceFromCenter <= judgementImpeccableAimRadius) return Judgement.Impeccable;
+            if (distanceFromCenter <= judgementFantasticAimRadius) return Judgement.Fantastic;
+            if (distanceFromCenter <= judgementExcellentAimRadius) return Judgement.Excellent;
+            if (distanceFromCenter <= judgementGreatAimRadius) return Judgement.Great;
+            if (distanceFromCenter <= judgementGoodAimRadius) return Judgement.Good;
             return Judgement.Miss;
         }
 
