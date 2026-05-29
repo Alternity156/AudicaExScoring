@@ -109,6 +109,8 @@ namespace ExScoringMod
             // Fallback: also register Downloads as a song source directory
             // in case any files couldn't be moved (e.g. locked files)
             RegisterDownloadsDirectory();
+
+            RegisterSongSubfolders();
         }
 
         private void CheckFolderDirectories()
@@ -188,6 +190,40 @@ namespace ExScoringMod
             catch (Exception e)
             {
                 MelonLogger.Log($"[WARNING] Could not register Downloads directory: {e.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Registers every immediate subdirectory of the main songs folder as an
+        /// additional song source directory so the game loads .audica files placed
+        /// inside those subfolders on startup.
+        /// </summary>
+        private static void RegisterSongSubfolders()
+        {
+            if (!Directory.Exists(mainSongDirectory)) return;
+
+            string[] subdirs;
+            try
+            {
+                subdirs = Directory.GetDirectories(mainSongDirectory, "*", SearchOption.TopDirectoryOnly);
+            }
+            catch (Exception e)
+            {
+                MelonLogger.Log($"[WARNING] Could not enumerate song subfolders: {e.Message}");
+                return;
+            }
+
+            foreach (string subdir in subdirs)
+            {
+                try
+                {
+                    SongList.AddSongSearchDir(Application.streamingAssetsPath, subdir);
+                    MelonLogger.Log($"Registered song subfolder: {Path.GetFileName(subdir)}");
+                }
+                catch (Exception e)
+                {
+                    MelonLogger.Log($"[WARNING] Could not register subfolder {Path.GetFileName(subdir)}: {e.Message}");
+                }
             }
         }
 
@@ -427,6 +463,7 @@ namespace ExScoringMod
                 SongList.OnSongListLoaded.mDone = false;
                 SongList.SongSourceDirs = new Il2CppSystem.Collections.Generic.List<SongList.SongSourceDir>();
                 SongList.AddSongSearchDir(Application.dataPath, downloadsDirectory);
+                RegisterSongSubfolders();
                 SongList.I.StartAssembleSongList();
             }
             else
@@ -434,6 +471,12 @@ namespace ExScoringMod
                 List<SongList.SongSourceDir> sourceDirs = new List<SongList.SongSourceDir>();
                 sourceDirs.Add(new SongList.SongSourceDir(Application.streamingAssetsPath, mainSongDirectory));
                 sourceDirs.Add(new SongList.SongSourceDir(Application.dataPath, downloadsDirectory));
+                // Add subfolders
+                if (Directory.Exists(mainSongDirectory))
+                {
+                    foreach (string subdir in Directory.GetDirectories(mainSongDirectory, "*", SearchOption.TopDirectoryOnly))
+                        sourceDirs.Add(new SongList.SongSourceDir(Application.streamingAssetsPath, subdir));
+                }
                 for (int i = 0; i < sourceDirs.Count; i++)
                 {
                     SongList.SongSourceDir sourceDir = sourceDirs[i];

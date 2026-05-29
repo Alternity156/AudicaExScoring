@@ -104,6 +104,7 @@ namespace ExScoringMod
 
                     if (MenuState.sLastState == MenuState.State.MainPage)
                     {
+                        SongFolderManager.shouldAutoSelectOnReturn = false;
                         AutoSelectSong();
                     }
                 }
@@ -594,10 +595,15 @@ namespace ExScoringMod
                     PlaylistSelectPanel.SetMenu(__instance);
                     PlaylistEditPanel.SetMenu(__instance);
                     PlaylistEndlessPanel.SetMenu(__instance);
+                    SongFolderPanel.SetMenu(__instance);
 
                     if (SongSearch.searchInProgress)
                     {
                         SongSearchScreen.GoToSearch();
+                    }
+                    else if (SongFolderPanel.isOpen)
+                    {
+                        SongFolderPanel.GoToPanel();
                     }
                     else if (PlaylistManager.state == PlaylistManager.PlaylistState.Selecting ||
                              PlaylistManager.state == PlaylistManager.PlaylistState.Adding)
@@ -632,7 +638,12 @@ namespace ExScoringMod
         {
             private static bool Prefix(OptionsMenu __instance)
             {
-                if (SongSearch.searchInProgress)
+                if (SongFolderPanel.isOpen)
+                {
+                    SongFolderPanel.Cancel();
+                    return false;
+                }
+                else if (SongSearch.searchInProgress)
                 {
                     SongSearch.CancelSearch();
                     return false;
@@ -959,6 +970,7 @@ namespace ExScoringMod
                     RefreshButton.CreateRefreshButton();
                     SelectPlaylistButton.CreatePlaylistButton();
                     RandomSongButton.CreateRandomSongButton();
+                    SongFolderButton.CreateFolderButton();
                     PlaylistEndlessManager.ResetIndex();
                 }
             }

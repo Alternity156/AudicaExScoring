@@ -66,6 +66,9 @@ namespace ExScoringMod
             UpdateSongData();
             yield return null;
 
+            SongFolderManager.Rebuild(ExScoring.mainSongDirectory);
+            yield return null;
+
             SongSearch.Search(); // update search results with any new songs
             yield return null;
 

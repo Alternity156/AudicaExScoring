@@ -133,6 +133,37 @@ namespace ExScoringMod
                     return false;
                 });
 
+            SongFolderManager.folderFilter = RegisterFilter("folders", false, "Folder",
+            () =>
+            {
+                SongFolderButton.ShowFolderButton();
+            },
+            () =>
+            {
+                SongFolderButton.HideFolderButton();
+                SongFolderManager.ClearFolder();
+            },
+            (result) =>
+            {
+                if (SongFolderManager.selectedFolder != null)
+                {
+                    result.Clear();
+                    foreach (var kvp in SongFolderManager.songFolderMap)
+                    {
+                        if (kvp.Value == SongFolderManager.selectedFolder
+                            && SongDownloadTracker.songIDs.Contains(kvp.Key))
+                        {
+                            var songData = SongList.I.GetSong(kvp.Key);
+                            if (songData != null && !songData.hidden)
+                                result.Add(kvp.Key);
+                        }
+                    }
+                    // Update the song list header to the folder name
+                    return true;
+                }
+                return false;
+            });
+
             PlaylistManager.playlistFilter = RegisterFilter("playlists", false, "Playlist",
                 () =>
                 {
@@ -335,6 +366,19 @@ namespace ExScoringMod
             extrasButton = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Left/FilterExtras");
             notificationPanel = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Left/ShellPanel_SongListNotification");
             notificationText = notificationPanel.GetComponentInChildren<TextMeshPro>();
+        }
+
+        /// <summary>
+        /// Activates the filter with the given ID, deactivating all others.
+        /// </summary>
+        public static void ActivateFilter(string filterID)
+        {
+            if (filters == null || !filters.ContainsKey(filterID)) return;
+            DisableCustomFilters(filterID);
+            filters[filterID].IsActive = true;
+            filterStateChanged = true;
+            filters[filterID].ButtonSelectedIndicator?.SetActive(true);
+            filters[filterID].OnHit?.Invoke();
         }
 
         #region Favorites

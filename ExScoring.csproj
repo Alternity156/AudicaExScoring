@@ -236,6 +236,9 @@
     <Compile Include="src\SongDownloader.cs" />
     <Compile Include="src\SongDownloaderTracker.cs" />
     <Compile Include="src\SongDownloaderUI.cs" />
+    <Compile Include="src\SongFolderButton.cs" />
+    <Compile Include="src\SongFolderManager.cs" />
+    <Compile Include="src\SongFolderPanel.cs" />
     <Compile Include="src\SongListUI.cs" />
     <Compile Include="src\SongLoadingManager.cs" />
     <Compile Include="src\SongSearch.cs" />
