@@ -67,7 +67,7 @@ namespace ExScoringMod
             if (SongFolderManager.availableFolders == null || SongFolderManager.availableFolders.Count == 0) return;
 
             // Only run when no custom filter is active
-            if (FilterPanel.IsFiltering("search") || FilterPanel.IsFiltering("playlists"))
+            if (FilterPanel.IsFiltering("playlists"))
                 return;
 
             // Cancel any pending rebuild
@@ -128,11 +128,10 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Called when a song is favorited/unfavorited. Rebuilds the list so the
-        /// Favorites folder's song count (and its contents, if open) stay accurate.
-        /// Only runs while the song list is active; scroll and selection are preserved.
+        /// Rebuilds the folder list in place using the already-loaded song items.
+        /// Scroll and selection are preserved. No-ops if the song list isn't active.
         /// </summary>
-        public static void RefreshFavorites()
+        public static void RefreshList()
         {
             var songSelect = GameObject.FindObjectOfType<SongSelect>();
             if (songSelect == null) return; // song list not active — nothing to update
@@ -143,8 +142,16 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[FolderRowManager] Error during favorites refresh: {e}");
+                MelonLogger.Log($"[FolderRowManager] Error during RefreshList: {e}");
             }
+        }
+
+        /// <summary>
+        /// Called when a song is favorited/unfavorited.
+        /// </summary>
+        public static void RefreshFavorites()
+        {
+            RefreshList();
         }
 
         // ── Coroutine ────────────────────────────────────────────────────────
@@ -244,6 +251,15 @@ namespace ExScoringMod
                     // Favorited songs also appear in the virtual Favorites folder
                     if (FilterPanel.IsFavorite(item.mSongData.songID))
                         folderSongs[SongFolderManager.FolderFavorites].Add(item);
+
+                    // Search hits also appear in the virtual Search Results folder
+                    if (SongFolderManager.searchFolderName != null &&
+                        SongSearch.searchResult != null &&
+                        folderSongs.ContainsKey(SongFolderManager.searchFolderName) &&
+                        SongSearch.searchResult.Contains(item.mSongData.songID))
+                    {
+                        folderSongs[SongFolderManager.searchFolderName].Add(item);
+                    }
                 }
             }
 

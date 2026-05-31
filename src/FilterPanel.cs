@@ -98,22 +98,6 @@ namespace ExScoringMod
         {
             LoadFavorites();
 
-            RegisterFilter("search", false, "Search Results",
-                SongSearchButton.ShowSearchButton, SongSearchButton.HideSearchButton,
-                (result) =>
-                {
-                    if (SongSearch.searchResult != null)
-                    {
-                        result.Clear();
-                        for (int i = 0; i < SongSearch.searchResult.Count; i++)
-                        {
-                            result.Add(SongSearch.searchResult[i]);
-                        }
-                        return true;
-                    }
-                    return false;
-                });
-
             PlaylistManager.playlistFilter = RegisterFilter("playlists", false, "Playlist",
                 () =>
                 {

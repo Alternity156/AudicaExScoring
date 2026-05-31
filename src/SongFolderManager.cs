@@ -30,6 +30,13 @@ namespace ExScoringMod
         /// </summary>
         public static string openFolder = null;
 
+        /// <summary>
+        /// Name of the active search-results folder ("Search Results (query)"),
+        /// or null when no search is active. When set, it appears at the top of
+        /// the folder list. Virtual: not stored in songFolderMap.
+        /// </summary>
+        public static string searchFolderName = null;
+
         // ── Hardcoded base OST song IDs ──────────────────────────────────────
 
         private static readonly HashSet<string> audicaSongIDs = new HashSet<string>
@@ -121,9 +128,9 @@ namespace ExScoringMod
             foreach (string name in customFolders.Keys)
                 availableFolders.Add(name);
 
-            // If the previously open folder no longer exists, collapse
-            if (openFolder != null && !availableFolders.Contains(openFolder))
-                openFolder = null;
+            // Keep the search-results folder pinned at the top across rebuilds
+            if (searchFolderName != null && !availableFolders.Contains(searchFolderName))
+                availableFolders.Insert(0, searchFolderName);
 
             MelonLogger.Log($"[SongFolderManager] Rebuilt: {songFolderMap.Count} songs across {availableFolders.Count} folder(s). Open: {openFolder ?? "none"}");
         }
@@ -134,6 +141,21 @@ namespace ExScoringMod
         public static string GetFolder(string songID)
         {
             return songFolderMap.TryGetValue(songID, out string folder) ? folder : null;
+        }
+
+        /// <summary>
+        /// Sets (or clears, with null) the active search folder, keeping it pinned
+        /// at the top of availableFolders.
+        /// </summary>
+        public static void SetSearchFolder(string name)
+        {
+            if (searchFolderName != null)
+                availableFolders.Remove(searchFolderName);
+
+            searchFolderName = name;
+
+            if (name != null && !availableFolders.Contains(name))
+                availableFolders.Insert(0, name);
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────

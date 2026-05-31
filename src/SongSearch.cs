@@ -1,28 +1,16 @@
 ﻿using System.Collections.Generic;
 using System.Text.RegularExpressions;
+using TMPro;
 
 namespace ExScoringMod
 {
-    internal static class SongSearch
+    public static class SongSearch
     {
         public static List<string> searchResult = new List<string>();
         public static string query;
-        public static MapType mapType = MapType.All;
         public static bool searchInProgress = false;
-
-        public enum MapType
-        {
-            All,
-            OfficialOnly,
-            CustomsOnly
-        }
-
-        public static void CancelSearch()
-        {
-            searchInProgress = false;
-            MenuState.I.GoToSongPage();
-            SongSearchButton.UpdateSearchButton();
-        }
+        public static TextMeshPro liveText = null;
+        public static string placeholder = "Search...";
 
         public static void Search()
         {
@@ -32,19 +20,14 @@ namespace ExScoringMod
             if (query == null)
                 return;
 
+            string cleanQuery = CleanForSearch(query);
+
             for (int i = 0; i < SongList.I.songs.Count; i++)
             {
                 SongList.SongData currentSong = SongList.I.songs[i];
-                bool isCustom = IsCustomSong(currentSong.songID);
-
-                if ((mapType == MapType.CustomsOnly && !isCustom) ||
-                    (mapType == MapType.OfficialOnly && isCustom))
-                    continue;
 
                 if (currentSong.songID == "tutorial")
                     continue;
-
-                string cleanQuery = CleanForSearch(query);
 
                 if (CleanForSearch(currentSong.artist).Contains(cleanQuery) ||
                     CleanForSearch(currentSong.title).Contains(cleanQuery) ||
@@ -58,12 +41,40 @@ namespace ExScoringMod
             }
         }
 
-        public static void OnNewUserSearch()
+        /// <summary>
+        /// Runs a search for the given query and surfaces results as the virtual
+        /// "Search Results (query)" folder, opened at the top of the folder list.
+        /// An empty/whitespace query clears the search and removes the folder.
+        /// </summary>
+        public static void RunSearch(string q)
         {
+            if (string.IsNullOrEmpty(q?.Trim()))
+            {
+                ClearSearch();
+                return;
+            }
+
+            query = q;
             Search();
-            FilterPanel.ResetFilterState();
-            MenuState.I.GoToSongPage();
-            SongSearchButton.UpdateSearchButton();
+
+            SongFolderManager.SetSearchFolder($"Search Results ({q})");
+            SongFolderManager.openFolder = SongFolderManager.searchFolderName;
+            FolderRowManager.RefreshList();
+        }
+
+        /// <summary>
+        /// Clears the active search and removes the "Search Results" folder.
+        /// </summary>
+        public static void ClearSearch()
+        {
+            searchResult.Clear();
+            query = "";
+
+            if (SongFolderManager.openFolder == SongFolderManager.searchFolderName)
+                SongFolderManager.openFolder = null;
+
+            SongFolderManager.SetSearchFolder(null);
+            FolderRowManager.RefreshList();
         }
 
         private static string CleanForSearch(string s)
@@ -86,6 +97,12 @@ namespace ExScoringMod
                 return true;
 
             return false;
+        }
+
+        public static void UpdateLiveText()
+        {
+            if (liveText == null) return;
+            liveText.text = string.IsNullOrEmpty(query) ? placeholder : query;
         }
     }
 }

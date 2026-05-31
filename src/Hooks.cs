@@ -598,12 +598,8 @@ namespace ExScoringMod
                     PlaylistEditPanel.SetMenu(__instance);
                     PlaylistEndlessPanel.SetMenu(__instance);
 
-                    if (SongSearch.searchInProgress)
-                    {
-                        SongSearchScreen.GoToSearch();
-                    }
-                    else if (PlaylistManager.state == PlaylistManager.PlaylistState.Selecting ||
-                             PlaylistManager.state == PlaylistManager.PlaylistState.Adding)
+                    if (PlaylistManager.state == PlaylistManager.PlaylistState.Selecting ||
+                        PlaylistManager.state == PlaylistManager.PlaylistState.Adding)
                     {
                         PlaylistSelectPanel.GoToPanel();
                     }
@@ -635,13 +631,8 @@ namespace ExScoringMod
         {
             private static bool Prefix(OptionsMenu __instance)
             {
-                if (SongSearch.searchInProgress)
-                {
-                    SongSearch.CancelSearch();
-                    return false;
-                }
-                else if (PlaylistManager.state == PlaylistManager.PlaylistState.Selecting ||
-                         PlaylistManager.state == PlaylistManager.PlaylistState.Adding)
+                if (PlaylistManager.state == PlaylistManager.PlaylistState.Selecting ||
+                    PlaylistManager.state == PlaylistManager.PlaylistState.Adding)
                 {
                     PlaylistSelectPanel.CancelSelect();
                     return false;
@@ -703,21 +694,18 @@ namespace ExScoringMod
                         switch (label)
                         {
                             case "done":
-                                __instance.Hide();
-                                shouldShowKeyboard = false;
-                                SongSearch.OnNewUserSearch();
+                                SearchKeyboard.Hide();
+                                SongSearch.RunSearch(SongSearch.query);
+                                SongSearch.UpdateLiveText();
                                 break;
                             case "clear":
                                 SongSearch.query = "";
+                                SongSearch.UpdateLiveText();
                                 break;
                             default:
                                 SongSearch.query += label;
+                                SongSearch.UpdateLiveText();
                                 break;
-                        }
-
-                        if (SongSearchScreen.searchText != null)
-                        {
-                            SongSearchScreen.searchText.text = SongSearch.query;
                         }
                     }
                     else if (PlaylistManager.state == PlaylistManager.PlaylistState.Creating)
@@ -782,12 +770,10 @@ namespace ExScoringMod
                 {
                     if (SongSearch.searchInProgress)
                     {
-                        if (SongSearch.query == "" || SongSearch.query == null)
+                        if (string.IsNullOrEmpty(SongSearch.query))
                             return false;
                         SongSearch.query = SongSearch.query.Substring(0, SongSearch.query.Length - 1);
-
-                        if (SongSearchScreen.searchText != null)
-                            SongSearchScreen.searchText.text = SongSearch.query;
+                        SongSearch.UpdateLiveText();
                     }
                     else if (PlaylistManager.state == PlaylistManager.PlaylistState.Creating)
                     {
@@ -826,9 +812,7 @@ namespace ExScoringMod
                     if (SongSearch.searchInProgress)
                     {
                         SongSearch.query += " ";
-
-                        if (SongSearchScreen.searchText != null)
-                            SongSearchScreen.searchText.text = SongSearch.query;
+                        SongSearch.UpdateLiveText();
                     }
                     else if (PlaylistManager.state == PlaylistManager.PlaylistState.Creating)
                     {
@@ -981,7 +965,7 @@ namespace ExScoringMod
             {
                 if (state == MenuState.State.SongPage)
                 {
-                    SongSearchButton.CreateSearchButton();
+                    SongSearchField.CreateField();
                     RefreshButton.CreateRefreshButton();
                     SelectPlaylistButton.CreatePlaylistButton();
                     RandomSongButton.CreateRandomSongButton();
