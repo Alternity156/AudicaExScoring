@@ -1,23 +1,21 @@
-﻿using System;
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.IO;
 using MelonLoader;
 
 namespace ExScoringMod
 {
     /// <summary>
-    /// Manages song folder groupings for the folder filter system.
+    /// Manages song folder groupings for the inline folder row system.
     /// Hardcoded folders: "Audica" (base OST), "Audica DLC" (extras/PSVR/paid DLC).
     /// Dynamic folders: subfolders of the songs directory map to folder names.
-    /// Root-level custom songs go in "Custom Songs".
+    /// Root-level custom songs go in "Unsorted".
     /// </summary>
     internal static class SongFolderManager
     {
+        public const string FolderFavorites = "Favorites";
         public const string FolderAudica = "Audica";
         public const string FolderAudicaDLC = "Audica DLC";
-        public const string FolderCustom = "Custom Songs";
-
-        public static bool shouldAutoSelectOnReturn = false;
+        public const string FolderCustom = "Unsorted";
 
         /// <summary>Maps songID -> folder name.</summary>
         public static Dictionary<string, string> songFolderMap = new Dictionary<string, string>();
@@ -25,11 +23,12 @@ namespace ExScoringMod
         /// <summary>Ordered list of folder names that have at least one loaded song.</summary>
         public static List<string> availableFolders = new List<string>();
 
-        /// <summary>Currently selected folder name, or null if none.</summary>
-        public static string selectedFolder = null;
-
-        /// <summary>Getter for the folder filter, mirroring PlaylistManager.playlistFilter.</summary>
-        public static Func<FilterPanel.Filter> folderFilter;
+        /// <summary>
+        /// The folder whose songs are currently expanded in the song list.
+        /// Null means all folders are collapsed (only folder rows visible).
+        /// Persists across scene transitions so the list restores its state.
+        /// </summary>
+        public static string openFolder = null;
 
         // ── Hardcoded base OST song IDs ──────────────────────────────────────
 
@@ -71,14 +70,11 @@ namespace ExScoringMod
             songFolderMap.Clear();
             availableFolders.Clear();
 
-            // Build a map from filename -> subfolder name for files in subdirectories.
-            // e.g.  songs/MyPack/song.audica  ->  "MyPack"
             Dictionary<string, string> subfolderByFilename = BuildSubfolderMap(mainSongDirectory);
 
             bool hasAudica = false;
             bool hasAudicaDLC = false;
             bool hasCustom = false;
-            // Use a sorted dict so custom subfolder names appear alphabetically
             SortedDictionary<string, bool> customFolders = new SortedDictionary<string, bool>();
 
             for (int i = 0; i < SongList.I.songs.Count; i++)
@@ -87,6 +83,10 @@ namespace ExScoringMod
                 string id = song.songID;
                 string filename = Path.GetFileName(song.zipPath);
                 string folder;
+
+                // Skip hidden songs (e.g. the tutorial)
+                if (song.hidden)
+                    continue;
 
                 if (audicaSongIDs.Contains(id))
                 {
@@ -113,15 +113,19 @@ namespace ExScoringMod
                     songFolderMap.Add(id, folder);
             }
 
-            // Build availableFolders in a consistent order:
-            // Audica → Audica DLC → Custom Songs → custom subfolders (alphabetical)
+            // Favorites (virtual) → Audica → Audica DLC → Unsorted → custom subfolders
+            availableFolders.Add(FolderFavorites);
             if (hasAudica) availableFolders.Add(FolderAudica);
             if (hasAudicaDLC) availableFolders.Add(FolderAudicaDLC);
             if (hasCustom) availableFolders.Add(FolderCustom);
             foreach (string name in customFolders.Keys)
                 availableFolders.Add(name);
 
-            MelonLogger.Log($"[SongFolderManager] Rebuilt: {songFolderMap.Count} songs across {availableFolders.Count} folder(s).");
+            // If the previously open folder no longer exists, collapse
+            if (openFolder != null && !availableFolders.Contains(openFolder))
+                openFolder = null;
+
+            MelonLogger.Log($"[SongFolderManager] Rebuilt: {songFolderMap.Count} songs across {availableFolders.Count} folder(s). Open: {openFolder ?? "none"}");
         }
 
         /// <summary>
@@ -132,29 +136,8 @@ namespace ExScoringMod
             return songFolderMap.TryGetValue(songID, out string folder) ? folder : null;
         }
 
-        /// <summary>
-        /// Selects a folder and activates the folder filter.
-        /// </summary>
-        public static void SelectFolder(string folderName)
-        {
-            selectedFolder = folderName;
-            FilterPanel.ActivateFilter("folders");
-        }
-
-        /// <summary>
-        /// Clears the selected folder and deactivates the filter.
-        /// </summary>
-        public static void ClearFolder()
-        {
-            selectedFolder = null;
-        }
-
         // ── Helpers ──────────────────────────────────────────────────────────
 
-        /// <summary>
-        /// Walks one level of subdirectories under mainSongDirectory and maps
-        /// each .audica filename found there to its parent subfolder name.
-        /// </summary>
         private static Dictionary<string, string> BuildSubfolderMap(string mainSongDirectory)
         {
             var map = new Dictionary<string, string>();

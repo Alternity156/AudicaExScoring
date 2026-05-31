@@ -104,7 +104,6 @@ namespace ExScoringMod
 
                     if (MenuState.sLastState == MenuState.State.MainPage)
                     {
-                        SongFolderManager.shouldAutoSelectOnReturn = false;
                         AutoSelectSong();
                     }
                 }
@@ -165,6 +164,9 @@ namespace ExScoringMod
         {
             private static void Postfix(SongSelectItem __instance)
             {
+                // Folder rows have no song data — ignore them
+                if (__instance.mSongData == null) return;
+
                 selectedSong = __instance.mSongData.songID;
                 maxPossibleExScore = GetMaxPossibleExScore(selectedSong);
                 selectedSongData = __instance.mSongData;
@@ -595,15 +597,10 @@ namespace ExScoringMod
                     PlaylistSelectPanel.SetMenu(__instance);
                     PlaylistEditPanel.SetMenu(__instance);
                     PlaylistEndlessPanel.SetMenu(__instance);
-                    SongFolderPanel.SetMenu(__instance);
 
                     if (SongSearch.searchInProgress)
                     {
                         SongSearchScreen.GoToSearch();
-                    }
-                    else if (SongFolderPanel.isOpen)
-                    {
-                        SongFolderPanel.GoToPanel();
                     }
                     else if (PlaylistManager.state == PlaylistManager.PlaylistState.Selecting ||
                              PlaylistManager.state == PlaylistManager.PlaylistState.Adding)
@@ -638,12 +635,7 @@ namespace ExScoringMod
         {
             private static bool Prefix(OptionsMenu __instance)
             {
-                if (SongFolderPanel.isOpen)
-                {
-                    SongFolderPanel.Cancel();
-                    return false;
-                }
-                else if (SongSearch.searchInProgress)
+                if (SongSearch.searchInProgress)
                 {
                     SongSearch.CancelSearch();
                     return false;
@@ -897,6 +889,15 @@ namespace ExScoringMod
                         __result.Remove(deletedSong);
                     }
                 }
+
+                // When no custom filter is active, inject ALL songs so the folder
+                // system has every song available to organize, regardless of the
+                // built-in Main/Extras filter.
+                if (!FilterPanel.IsFiltering("search") && !FilterPanel.IsFiltering("playlists"))
+                {
+                    FolderRowManager.InjectAllSongs(__result);
+                }
+
                 RandomSong.UpdateAvailableSongs(__result, extras);
                 MelonLogger.Log($"[RandomSong] UpdateAvailableSongs called: extras={extras}, count={__result.Count}");
             }
@@ -914,18 +915,32 @@ namespace ExScoringMod
                 PlaylistManager.PopulatePlaylistsSongNames();
                 PlaylistManager.DownloadMissingSongs();
                 MelonCoroutines.Start(UpdateLastSongCount());
+
+                // Default to the Main filter (where the folder system works) instead of All
+                if (__instance.GetListFilter() == SongSelect.Filter.All &&
+                    SongFolderManager.availableFolders != null && SongFolderManager.availableFolders.Count > 0)
+                {
+                    var slc = GameObject.FindObjectOfType<SongListControls>();
+                    if (slc != null)
+                        slc.FilterMain();
+                }
             }
         }
 
         /// <summary>
-        /// Disables custom filters when the user clicks "All" in the song list.
+        /// Redirects "All" filter to "Main" filter to avoid the dual main+extras
+        /// code path that creates section headers. Our folder system organizes
+        /// ALL songs regardless of the built-in filter, so Main mode is sufficient.
         /// </summary>
         [HarmonyPatch(typeof(SongListControls), "FilterAll", new Type[0])]
         private static class SongListControlsFilterAllPatch
         {
-            private static void Prefix(SongListControls __instance)
+            private static bool Prefix(SongListControls __instance)
             {
                 FilterPanel.DisableCustomFilters();
+                // Redirect to FilterMain so ShowSongList takes the single-phase path
+                __instance.FilterMain();
+                return false; // skip original FilterAll
             }
         }
 
@@ -970,7 +985,6 @@ namespace ExScoringMod
                     RefreshButton.CreateRefreshButton();
                     SelectPlaylistButton.CreatePlaylistButton();
                     RandomSongButton.CreateRandomSongButton();
-                    SongFolderButton.CreateFolderButton();
                     PlaylistEndlessManager.ResetIndex();
                 }
             }
@@ -1088,6 +1102,19 @@ namespace ExScoringMod
         // ══════════════════════════════════════════════════════════════════
 
         /// <summary>
+        /// After ShowSongList starts building, let FolderRowManager inject folder rows
+        /// once the async build is complete.
+        /// </summary>
+        [HarmonyPatch(typeof(SongSelect), "ShowSongList", new Type[0])]
+        private static class SongSelectShowSongListPatch
+        {
+            private static void Postfix(SongSelect __instance)
+            {
+                FolderRowManager.Rebuild(__instance);
+            }
+        }
+
+        /// <summary>
         /// After the song list is loaded/refreshed, populate playlists and enable the back button.
         /// </summary>
         [HarmonyPatch(typeof(SongList), "SongListLoaded", new Type[0])]
@@ -1095,8 +1122,18 @@ namespace ExScoringMod
         {
             private static void Postfix()
             {
+                SongFolderManager.Rebuild(mainSongDirectory);
                 PlaylistManager.PopulatePlaylistsSongNames();
                 PlaylistManager.EnableBackButton();
+
+                // Force Main filter on initial load so ShowSongList uses the
+                // single-phase path (no headers). Our folder system handles all organization.
+                if (SongFolderManager.availableFolders != null && SongFolderManager.availableFolders.Count > 0)
+                {
+                    var slc = UnityEngine.GameObject.FindObjectOfType<SongListControls>();
+                    if (slc != null)
+                        slc.FilterMain();
+                }
             }
         }
     }

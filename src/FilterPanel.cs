@@ -114,56 +114,6 @@ namespace ExScoringMod
                     return false;
                 });
 
-            RegisterFilter("favorites", false, "Favorites",
-                () => { }, () => { },
-                (result) =>
-                {
-                    if (favorites != null)
-                    {
-                        result.Clear();
-                        string id;
-                        for (int i = 0; i < favorites.songIDs.Count; i++)
-                        {
-                            id = favorites.songIDs[i];
-                            if (SongDownloadTracker.songIDs.Contains(id))
-                                result.Add(id);
-                        }
-                        return true;
-                    }
-                    return false;
-                });
-
-            SongFolderManager.folderFilter = RegisterFilter("folders", false, "Folder",
-            () =>
-            {
-                SongFolderButton.ShowFolderButton();
-            },
-            () =>
-            {
-                SongFolderButton.HideFolderButton();
-                SongFolderManager.ClearFolder();
-            },
-            (result) =>
-            {
-                if (SongFolderManager.selectedFolder != null)
-                {
-                    result.Clear();
-                    foreach (var kvp in SongFolderManager.songFolderMap)
-                    {
-                        if (kvp.Value == SongFolderManager.selectedFolder
-                            && SongDownloadTracker.songIDs.Contains(kvp.Key))
-                        {
-                            var songData = SongList.I.GetSong(kvp.Key);
-                            if (songData != null && !songData.hidden)
-                                result.Add(kvp.Key);
-                        }
-                    }
-                    // Update the song list header to the folder name
-                    return true;
-                }
-                return false;
-            });
-
             PlaylistManager.playlistFilter = RegisterFilter("playlists", false, "Playlist",
                 () =>
                 {
@@ -205,13 +155,18 @@ namespace ExScoringMod
                     PrepareFilterButton(filters[filterKey]);
                 }
 
+                // Remove the built-in filter buttons from the layout — the folder
+                // system replaces them. Custom filter buttons move up to fill the space.
+                buttonOrder.Remove("All");
+                buttonOrder.Remove("Main");
+                buttonOrder.Remove("Extras");
+
                 SetFilterUIGeometry();
 
-                extrasButton.GetComponentInChildren<GunButton>().onHitEvent.AddListener(new Action(() =>
-                {
-                    DisableCustomFilters();
-                    songSelect.ShowSongList();
-                }));
+                // Hide the built-in filter button GameObjects (after cloning is done)
+                if (allButton != null) allButton.SetActive(false);
+                if (mainButton != null) mainButton.SetActive(false);
+                if (extrasButton != null) extrasButton.SetActive(false);
             }
         }
 
@@ -418,7 +373,7 @@ namespace ExScoringMod
         public static void AddFavorite(string songID)
         {
             var song = SongList.I.GetSong(songID);
-            if (!song.extrasSong) return;
+            if (song == null) return;
             if (favorites.songIDs.Contains(songID))
             {
                 favorites.songIDs.Remove(songID);
@@ -431,6 +386,9 @@ namespace ExScoringMod
                 KataConfig.I.CreateDebugText($"Added {song.title} to favorites!", new Vector3(0f, -1f, 5f), 5f, null, false, 0.2f);
                 SaveFavorites();
             }
+
+            // Update the Favorites folder if it's currently open
+            FolderRowManager.RefreshFavorites();
         }
 
         private static void LoadFavorites()
