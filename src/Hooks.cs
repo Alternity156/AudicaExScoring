@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using Harmony;
@@ -96,16 +97,10 @@ namespace ExScoringMod
                 if (state == MenuState.State.SongPage)
                 {
                     if (isAutoSelecting) return;
+                    if (songPageSetupQueued) return;
 
-                    SongListUISetup();
-                    ShowLaunchPanel();
-                    LaunchPanelUISetup();
-                    suppressShellPageAnimations = true;
-
-                    if (MenuState.sLastState == MenuState.State.MainPage)
-                    {
-                        AutoSelectSong();
-                    }
+                    songPageSetupQueued = true;
+                    MelonCoroutines.Start(SetupSongPageWhenReady(MenuState.sLastState));
                 }
 
                 if (state == MenuState.State.SettingsPage)
@@ -113,6 +108,52 @@ namespace ExScoringMod
                     suppressShellPageAnimations = false;
                 }
             }
+        }
+
+        private static IEnumerator SetupSongPageWhenReady(MenuState.State lastState)
+        {
+            // The menu hierarchy is torn down when returning straight from gameplay
+            // and is rebuilt a few frames later. Wait until the launch page exists
+            // before touching any of its objects. On the normal MainPage -> SongPage
+            // path the menu is already up, so this loop falls through immediately and
+            // the setup runs synchronously this frame.
+            GameObject launchPage;
+            int safety = 0;
+            while ((launchPage = GameObject.Find("menu/ShellPage_Launch")) == null)
+            {
+                if (menuState != MenuState.State.SongPage || ++safety > 600)
+                {
+                    songPageSetupQueued = false;
+                    yield break;
+                }
+                yield return null;
+            }
+
+            // Bail if the user navigated away while we were waiting.
+            if (menuState != MenuState.State.SongPage)
+            {
+                songPageSetupQueued = false;
+                yield break;
+            }
+
+            SongListUISetup();
+            ShowLaunchPanel();
+            LaunchPanelUISetup();
+            suppressShellPageAnimations = true;
+
+            if (lastState == MenuState.State.MainPage)
+            {
+                // Selecting a song triggers OnSelect, which refreshes the panel labels.
+                AutoSelectSong();
+            }
+            else
+            {
+                // Return-from-gameplay path: nothing re-selects the song, so refresh
+                // the launch panel labels (including target counts) explicitly.
+                UpdateLaunchPanelInfo();
+            }
+
+            songPageSetupQueued = false;
         }
 
         [HarmonyPatch(typeof(SongPreview), "OnLaunchScreen")]

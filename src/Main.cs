@@ -20,6 +20,7 @@ namespace ExScoringMod
         public static bool modSettingsInstalled = false;
         public static bool songDataLoaderInstalled = false;
         public static bool suppressShellPageAnimations = false;
+        public static bool songPageSetupQueued = false;
         public static string selectedSong;
         public static SongList.SongData selectedSongData;
 
