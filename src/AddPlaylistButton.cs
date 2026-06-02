@@ -48,6 +48,15 @@ namespace ExScoringMod
 
         private static void OnPlaylistButtonShot()
         {
+            // In the Song Requests folder, this button removes the selected request.
+            if (SongFolderManager.openFolder == SongFolderManager.FolderSongRequests
+                && FolderRowManager.IsSelectedSongRequest(ExScoring.selectedSong))
+            {
+                FolderRowManager.RemoveSelectedRequest(ExScoring.selectedSong);
+                UpdateForSelection(); // no longer a request → revert the label
+                return;
+            }
+
             string context = FolderRowManager.CurrentPlaylistContext;
             if (context != null)
             {
@@ -64,6 +73,15 @@ namespace ExScoringMod
         public static void UpdateForSelection()
         {
             if (playlistButton == null) return;
+
+            // In the Song Requests folder, a request song turns this button into "Remove Request".
+            if (SongFolderManager.openFolder == SongFolderManager.FolderSongRequests
+                && FolderRowManager.IsSelectedSongRequest(ExScoring.selectedSong))
+            {
+                ButtonUtils.UpdateButtonLabel(playlistButton, "Remove Request");
+                return;
+            }
+
             string context = FolderRowManager.CurrentPlaylistContext;
             ButtonUtils.UpdateButtonLabel(playlistButton, context != null ? "Remove from Playlist" : "Add to Playlist");
         }

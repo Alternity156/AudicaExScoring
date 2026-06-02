@@ -86,10 +86,35 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Coroutine that downloads a song from the given download URL.
-        /// Caller is responsible for calling ReloadSongList() once download is done.
+        /// Look up a single maudica.com map by its numeric site ID (the "-id N" form of !asr).
+        /// Returns an APISongList (0 or 1 songs) through the same callback shape as DoSongWebSearch,
+        /// keyed by the id string so the caller can correlate the result.
         /// </summary>
-        public static IEnumerator DownloadSong(string songID, string downloadUrl, Action<string, bool> onDownloadComplete = null)
+        public static IEnumerator DoMaudicaIDSearch(string id, Action<string, APISongList> onSearchComplete)
+        {
+            string concatURL = apiUrl + "&id=" + WebUtility.UrlEncode(id);
+
+            WWW www = new WWW(concatURL);
+            yield return www;
+            NewAPISongList list = JSON.Load(www.text).Make<NewAPISongList>();
+
+            APISongList result = new APISongList();
+            int mapCount = (list != null && list.maps != null) ? list.maps.Length : 0; // invalid id → no maps
+            result.song_count = mapCount;
+            result.page = 1;
+            result.pagesize = 14;
+            result.total_pages = 1;
+            result.songs = new Song[mapCount];
+            if (mapCount > 0)
+                ConvertAPIList(list, result, 0);
+
+            onSearchComplete(id, result);
+
+            yield return null;
+        }
+        /// </summary>
+        public static IEnumerator DownloadSong(string songID, string downloadUrl, Action<string, bool> onDownloadComplete = null,
+                                               Action<string, float> onProgress = null)
         {
             string audicaName = songID + ".audica";
             string path = Path.Combine(ExScoring.mainSongDirectory, audicaName);
@@ -99,8 +124,17 @@ namespace ExScoringMod
             if (!File.Exists(path) && !File.Exists(downloadPath))
             {
                 WWW www = new WWW(downloadUrl);
-                yield return www;
+                while (!www.isDone)
+                {
+                    onProgress?.Invoke(songID, www.progress);
+                    yield return null;
+                }
+                onProgress?.Invoke(songID, 1f);
                 results = www.bytes;
+            }
+            else
+            {
+                onProgress?.Invoke(songID, 1f); // already on disk
             }
 
             if (results != null)

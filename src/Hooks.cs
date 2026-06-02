@@ -919,6 +919,7 @@ namespace ExScoringMod
                 if (state == MenuState.State.SongPage)
                 {
                     SongSearchField.CreateField();
+                    SongRequestQueueToggle.Create();
                     RefreshButton.CreateRefreshButton();
                     RandomSongButton.CreateRandomSongButton();
                     PlaylistEndlessManager.ResetIndex();

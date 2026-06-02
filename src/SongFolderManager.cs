@@ -16,6 +16,7 @@ namespace ExScoringMod
         public const string FolderAudica = "Audica";
         public const string FolderAudicaDLC = "Audica DLC";
         public const string FolderCustom = "Unsorted";
+        public const string FolderSongRequests = "Song Requests";
 
         /// <summary>Maps songID -> folder name.</summary>
         public static Dictionary<string, string> songFolderMap = new Dictionary<string, string>();
@@ -122,6 +123,8 @@ namespace ExScoringMod
 
             // Favorites (virtual) → Audica → Audica DLC → Unsorted → custom subfolders
             availableFolders.Add(FolderFavorites);
+            if (SongRequestIntegration.IsPresent)
+                availableFolders.Add(FolderSongRequests);
             if (hasAudica) availableFolders.Add(FolderAudica);
             if (hasAudicaDLC) availableFolders.Add(FolderAudicaDLC);
             if (hasCustom) availableFolders.Add(FolderCustom);

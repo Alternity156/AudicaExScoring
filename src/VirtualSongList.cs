@@ -10,7 +10,7 @@ using UnityEngine.Events;
 
 namespace ExScoringMod
 {
-    public enum ViewRowKind { FolderHeader, Song, Action }
+    public enum ViewRowKind { FolderHeader, Song, Action, DownloadableSong }
 
     /// <summary>
     /// A single row in the song-list view: a folder header, a song, or an action button
@@ -28,18 +28,33 @@ namespace ExScoringMod
         public Color color;       // header + action: quad color (applied at bind time)
         public Action onHit;      // action: callback when shot
         public string actionId;   // action: optional id for selection highlighting
+        public string downloadUrl; // downloadable song: maudica download URL
 
         /// <summary>Default folder-header grey. Action rows override via their own color.</summary>
         public static readonly Color FolderColor = new Color(0.18f, 0.18f, 0.18f, 1f);
 
-        public static ViewRow Header(string folder, int count)
-            => new ViewRow { kind = ViewRowKind.FolderHeader, folderName = folder, songCount = count, color = FolderColor };
+        public static ViewRow Header(string folder, int count, string subLabelOverride = null)
+            => new ViewRow { kind = ViewRowKind.FolderHeader, folderName = folder, songCount = count, color = FolderColor, subLabel = subLabelOverride };
 
         public static ViewRow SongRow(string id)
             => new ViewRow { kind = ViewRowKind.Song, songID = id };
 
         public static ViewRow ActionRow(string label, Color color, Action onHit, string subLabel = null, string actionId = null)
             => new ViewRow { kind = ViewRowKind.Action, label = label, color = color, onHit = onHit, subLabel = subLabel, actionId = actionId };
+
+        public static ViewRow DownloadableSongRow(string songID, string title, string artist, string mapper,
+                                                  string downloadUrl, Color color, Action onHit)
+            => new ViewRow
+            {
+                kind = ViewRowKind.DownloadableSong,
+                songID = songID,
+                label = title,
+                subLabel = string.IsNullOrEmpty(mapper) ? (artist ?? "") : $"{artist} ({mapper})",
+                downloadUrl = downloadUrl,
+                color = color,
+                onHit = onHit,
+                actionId = songID   // lets UpdateActionRowText target this row for live progress (3b)
+            };
     }
 
     /// <summary>
@@ -95,7 +110,8 @@ namespace ExScoringMod
                 int idx = kv.Key;
                 if (idx < 0 || idx >= view.Count) continue;
                 var row = view[idx];
-                if (row.kind != ViewRowKind.Action || row.actionId != actionId) continue;
+                if ((row.kind != ViewRowKind.Action && row.kind != ViewRowKind.DownloadableSong)
+                    || row.actionId != actionId) continue;
 
                 var hi = headerPool[kv.Value.slot];
                 if (hi.title != null) hi.title.text = label ?? "";
@@ -551,7 +567,7 @@ namespace ExScoringMod
                 if (row.kind == ViewRowKind.FolderHeader)
                 {
                     if (hi.title != null) hi.title.text = row.folderName;
-                    if (hi.artist != null) hi.artist.text = $"{row.songCount} song{(row.songCount != 1 ? "s" : "")}";
+                    if (hi.artist != null) hi.artist.text = row.subLabel ?? $"{row.songCount} song{(row.songCount != 1 ? "s" : "")}";
 
                     if (hi.button != null)
                     {

@@ -19,6 +19,7 @@ namespace ExScoringMod
         public static bool authorableInstalled = false;
         public static bool modSettingsInstalled = false;
         public static bool songDataLoaderInstalled = false;
+        public static bool songRequestInstalled = false;
         public static bool suppressShellPageAnimations = false;
         public static bool songPageSetupQueued = false;
         public static string selectedSong;
@@ -92,6 +93,17 @@ namespace ExScoringMod
             {
                 songDataLoaderInstalled = true;
                 MelonLogger.Log("SongDataLoader detected — album art enabled");
+            }
+
+            // Check if SongRequest (Silzoid's optional mod) is installed.
+            // When present: enable the Song Requests folder + relocated controls (later phases),
+            // and suppress SongRequest's own song-list UI now.
+            if (SongRequestIntegration.IsPresent)
+            {
+                songRequestInstalled = true;
+                MelonLogger.Log("SongRequest detected — request folder integration enabled");
+                SongRequestBlocker.Apply();
+                SongRequestInterceptor.Apply();
             }
 
             // Set up download directories
@@ -447,6 +459,9 @@ namespace ExScoringMod
             {
                 ReloadSongList();
             }
+
+            if (Input.GetKeyDown(KeyCode.F6))
+                SongRequestIntegration.LogSnapshot();
         }
 
         public override void OnLateUpdate()

@@ -5,6 +5,7 @@ I am currently implementing SongBrowser features that most players expect to be 
 
 ## Optional Dependencies
 [SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience)
+[SongRequest](https://github.com/Silzoid/SongRequest) (Requires [TwitchConnectorMod](https://github.com/steglasaurous/twitch-connector-mod)) Full twitch song request support through the folder system.
 
 ## EX Scoring
 The idea is to make a new scoring system akin to classic rhythm games. I am still not sure where I want this to go but I am experimenting currently, if you have ideas, let me know on Discord!
@@ -27,7 +28,7 @@ If you do not have ModSettings, you can grab it [here](https://github.com/octobe
 ## Thanks
 This mod uses code or concepts from other mods and software such as: 
 
-[SongBrowser](https://github.com/Silzoid/SongBrowser) (Song Downloading, Favorite system, Song deliting, Song Search, Fast Refresh, Playlist system, Random song, EitherHand fix)
+[SongBrowser](https://github.com/Silzoid/SongBrowser) (Song Downloading, Favorite system, Song deliting, Song Search, Fast Refresh, Playlist system, Random song, EitherHand fix, Song Request support)
 
 [NotReaper](https://github.com/octoberU/NotReaper/tree/2021-upgrade) (Target Icons for song data)
 
