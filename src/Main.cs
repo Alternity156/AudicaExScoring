@@ -449,6 +449,12 @@ namespace ExScoringMod
             }
         }
 
+        public override void OnLateUpdate()
+        {
+            VirtualSongList.Sync();
+            EnforceLaunchPanelBlank();
+        }
+
         /// <summary>
         /// Reloads the song list after songs were added to songs or downloads directories.
         /// Should be called while the user is in the main menu.

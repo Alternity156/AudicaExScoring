@@ -9,6 +9,8 @@ namespace ExScoringMod
     {
         public static GameObject intensityGraphObject;
         public static int ticksPerMeasure = 1920; // 480 ticks per beat * 4 beats
+        private static string lastBuiltSongId = null;
+        private static KataConfig.Difficulty lastBuiltDifficulty = (KataConfig.Difficulty)(-1);
 
         public static float[] CalculateIntensityData(string songId, KataConfig.Difficulty difficulty)
         {
@@ -153,6 +155,14 @@ namespace ExScoringMod
         {
             if (selectedSong == null) return;
 
+            KataConfig.Difficulty difficulty = KataConfig.I.GetDifficulty();
+
+            // Skip redundant rebuilds: same song + difficulty and the graph still exists.
+            if (intensityGraphObject != null
+                && selectedSong == lastBuiltSongId
+                && difficulty == lastBuiltDifficulty)
+                return;
+
             MelonLogger.Log("RefreshIntensityGraph called");
             MelonLogger.Log($"selectedSong: {selectedSong}");
 
@@ -162,10 +172,13 @@ namespace ExScoringMod
             CreateIntensityGraph(
                 launchPanelCenter.transform,
                 selectedSong,
-                KataConfig.I.GetDifficulty()
+                difficulty
             );
 
             RefreshHeatmap();
+
+            lastBuiltSongId = selectedSong;
+            lastBuiltDifficulty = difficulty;
         }
     }
 }

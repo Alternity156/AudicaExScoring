@@ -31,6 +31,12 @@ namespace ExScoringMod
             if (existing != null)
             {
                 currentSongSelectionIndicator = existing.gameObject;
+
+                // Keep the indicator below the row's Canvas (canvas = 0, indicator = -1)
+                MeshRenderer existingRenderer = existing.GetComponent<MeshRenderer>();
+                if (existingRenderer != null)
+                    existingRenderer.sortingOrder = -1;
+
                 currentSongSelectionIndicator.SetActive(true);
                 return;
             }
@@ -44,7 +50,10 @@ namespace ExScoringMod
 
             MeshRenderer renderer = indicator.GetComponent<MeshRenderer>();
             if (renderer != null)
+            {
                 renderer.material.color = new Color(1f, 1f, 1f, 1f);
+                renderer.sortingOrder = -1; // draw beneath the row Canvas (sortingOrder 0)
+            }
 
             currentSongSelectionIndicator = indicator;
             currentSongSelectionIndicator.SetActive(true);
@@ -297,10 +306,15 @@ namespace ExScoringMod
                 int layer = launchPanelCenterTitleLabel.gameObject.layer;
                 AlbumArt.CreateAlbumArtCanvas(parent, layer);
             }
+
+            if (string.IsNullOrEmpty(selectedSong))
+                SetLaunchPanelContentVisible(false);
         }
 
         public static void UpdateLaunchPanelInfo()
         {
+            SetLaunchPanelContentVisible(true);
+
             CueStatsData stats = GetCueStats(SongDataHolder.I.songData, KataConfig.I.mDifficulty);
 
             GameObject launchPanelCenterArtistLabel = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center/ArtistLabel");
@@ -423,71 +437,22 @@ namespace ExScoringMod
 
         private static System.Collections.IEnumerator AutoSelectSongCoroutine()
         {
-            SongSelect songSelect = null;
-            Il2CppSystem.Collections.Generic.List<SongSelectItem> buttons = null;
-
-            float timeout = 3f;
-            float elapsed = 0f;
-
-            while (elapsed < timeout)
+            float timeout = 3f, elapsed = 0f;
+            while (elapsed < timeout && !VirtualSongList.IsActive)
             {
                 yield return new WaitForSeconds(0.1f);
                 elapsed += 0.1f;
-
-                var songSelectObj = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect");
-                if (songSelectObj == null) continue;
-
-                songSelect = songSelectObj.GetComponent<SongSelect>();
-                if (songSelect == null) continue;
-
-                buttons = songSelect.mSongButtons;
-                if (buttons != null && buttons.Count > 0) break;
             }
+            if (!VirtualSongList.IsActive) yield break;
 
-            if (buttons == null || buttons.Count == 0) yield break;
-
-            SongSelectItem targetItem = null;
-
-            if (selectedSong != null)
+            if (string.IsNullOrEmpty(selectedSong))
             {
-                for (int i = 0; i < buttons.Count; i++)
-                {
-                    var item = buttons[i];
-                    if (item != null && item.mSongData != null && item.mSongData.songID == selectedSong)
-                    {
-                        targetItem = item;
-                        break;
-                    }
-                }
+                SetLaunchPanelContentVisible(false);
+                yield break;
             }
 
-            if (targetItem == null)
-            {
-                for (int i = 0; i < buttons.Count; i++)
-                {
-                    var item = buttons[i];
-                    if (item != null && item.mSongData != null)
-                    {
-                        targetItem = item;
-                        break;
-                    }
-                }
-            }
-
-            if (targetItem == null) yield break;
-
-            isAutoSelecting = true;
-            try
-            {
-                targetItem.OnSelect();
-                UpdateLaunchPanelInfo();
-            }
-            finally
-            {
-                isAutoSelecting = false;
-            }
-
-            menuState = MenuState.State.SongPage;
+            yield return null;
+            FolderRowManager.RevealAndSelect(selectedSong);
         }
     }
 }

@@ -1,137 +1,61 @@
-﻿using System.Collections;
-using Il2CppSystem.Collections.Generic;
-using MelonLoader;
-using UnityEngine;
+﻿using System.Collections.Generic;
 
 namespace ExScoringMod
 {
+    /// <summary>
+    /// PHASE 3 — Random Song now operates on the songs currently in view (the open folder),
+    /// reading them from VirtualSongList and selecting via VirtualSongList.ScrollToAndSelect.
+    /// The old mSongButtons scan + absolute SnapTo path is gone.
+    /// </summary>
     internal static class RandomSong
     {
-        private static int historySize = 10;
-
-        private static List<string> currentSongs = new List<string>();
-        private static List<string> currentSongsFull = new List<string>();
-        private static List<string> recentlySelected = new List<string>();
-
-        public static void UpdateAvailableSongs(List<string> songs, bool extras)
-        {
-            if (!extras)
-            {
-                // First call (main songs) — start fresh
-                currentSongsFull = new List<string>();
-            }
-
-            // Add all songs from this call
-            for (int i = 0; i < songs.Count; i++)
-            {
-                if (!currentSongsFull.Contains(songs[i]))
-                    currentSongsFull.Add(songs[i]);
-            }
-
-            if (extras)
-            {
-                // Second call (extras) — now we have the full list
-                FillSongList();
-
-                if (currentSongsFull.Count == 0)
-                    RandomSongButton.Disable();
-                else
-                    RandomSongButton.Enable();
-            }
-        }
+        private const int historySize = 10;
+        private static readonly List<string> recentlySelected = new List<string>();
+        private static readonly System.Random rand = new System.Random();
 
         public static void SelectRandomSong()
         {
-            if (currentSongsFull.Count == 0)
-                return;
+            var view = VirtualSongList.CurrentViewSongIDs;
+            if (view == null || view.Count == 0) return;
 
-            if (currentSongs.Count == 0)
+            // Prefer songs that haven't been picked recently.
+            var candidates = new List<string>();
+            for (int i = 0; i < view.Count; i++)
+                if (!recentlySelected.Contains(view[i]))
+                    candidates.Add(view[i]);
+
+            // All visible songs were picked recently → reset history and use the whole view.
+            if (candidates.Count == 0)
             {
                 recentlySelected.Clear();
-                FillSongList();
+                for (int i = 0; i < view.Count; i++) candidates.Add(view[i]);
             }
 
-            int songCount = currentSongs.Count;
-            System.Random rand = new System.Random();
-            int idx = rand.Next(0, songCount);
-            string songID = currentSongs[idx];
-            SongList.SongData data = SongList.I.GetSong(songID);
-            if (data != null)
-            {
-                currentSongs.RemoveAt(idx);
-                if (recentlySelected.Count > historySize)
-                {
-                    recentlySelected.RemoveAt(0);
-                }
-                recentlySelected.Add(songID);
+            string songID = candidates[rand.Next(candidates.Count)];
 
-                ExScoring.selectedSong = songID;
-                MelonCoroutines.Start(ScrollToAndSelect(songID));
-            }
+            recentlySelected.Add(songID);
+            if (recentlySelected.Count > historySize) recentlySelected.RemoveAt(0);
+
+            ExScoring.selectedSong = songID;
+            VirtualSongList.ScrollToAndSelect(songID);
         }
 
-        private static IEnumerator ScrollToAndSelect(string songID)
+        /// <summary>
+        /// Enable the Random Song button only when the open folder has songs in view.
+        /// Called by FolderRowManager after every view change.
+        /// </summary>
+        public static void UpdateButtonState()
         {
-            var songSelectObj = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect");
-            if (songSelectObj == null) yield break;
-
-            SongSelect songSelect = songSelectObj.GetComponent<SongSelect>();
-            if (songSelect == null) yield break;
-
-            var buttons = songSelect.mSongButtons;
-            if (buttons == null || buttons.Count == 0) yield break;
-
-            int targetIndex = -1;
-            SongSelectItem targetItem = null;
-
-            for (int i = 0; i < buttons.Count; i++)
-            {
-                var item = buttons[i];
-                if (item != null && item.mSongData != null && item.mSongData.songID == songID)
-                {
-                    targetIndex = i;
-                    targetItem = item;
-                    break;
-                }
-            }
-
-            if (targetItem == null) yield break;
-
-            // Scroll the list to the target song
-            ShellScrollable scrollable = songSelectObj.GetComponent<ShellScrollable>();
-            if (scrollable != null)
-            {
-                scrollable.SnapTo(targetIndex);
-            }
-
-            yield return new WaitForSeconds(0.1f);
-
-            ExScoring.isAutoSelecting = true;
-            try
-            {
-                targetItem.OnSelect();
-                ExScoring.UpdateLaunchPanelInfo();
-            }
-            finally
-            {
-                ExScoring.isAutoSelecting = false;
-            }
-
-            ExScoring.menuState = MenuState.State.SongPage;
+            var view = VirtualSongList.CurrentViewSongIDs;
+            if (view != null && view.Count > 0) RandomSongButton.Enable();
+            else RandomSongButton.Disable();
         }
 
-        private static void FillSongList()
-        {
-            currentSongs = new List<string>();
-
-            for (int i = 0; i < currentSongsFull.Count; i++)
-            {
-                string songID = currentSongsFull[i];
-                if (!recentlySelected.Contains(songID))
-                {
-                    currentSongs.Add(songID);
-                }
-            }
-        }
+        /// <summary>
+        /// Vestigial. In folder mode the game's full id list is suppressed, so this no longer
+        /// feeds Random Song (selection comes from the in-view songs). Kept so the existing
+        /// GetSongIDs hook call still compiles; button state is owned by UpdateButtonState.
+        /// </summary>
+        public static void UpdateAvailableSongs(Il2CppSystem.Collections.Generic.List<string> songs, bool extras) { }
     }
 }

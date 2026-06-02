@@ -199,6 +199,7 @@
     <Compile Include="src\DifficultyCalculator.cs" />
     <Compile Include="src\EitherHandFix.cs" />
     <Compile Include="src\FolderRowManager.cs" />
+    <Compile Include="src\LaunchPanelVisibility.cs" />
     <Compile Include="src\PlaylistConfig.cs" />
     <Compile Include="src\PlaylistCreatePanel.cs" />
     <Compile Include="src\PlaylistDownloadManager.cs" />
@@ -285,6 +286,7 @@
     <Compile Include="csvorbis\StaticCodeBook.cs" />
     <Compile Include="csvorbis\Time0.cs" />
     <Compile Include="csvorbis\VorbisFile.cs" />
+    <Compile Include="src\VirtualSongList.cs" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>

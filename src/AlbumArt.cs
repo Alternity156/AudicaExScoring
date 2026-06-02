@@ -25,6 +25,7 @@ namespace ExScoringMod
         private static RawImage rawImage;
         private static Texture2D currentTexture;
         private static Texture2D defaultTexture;
+        private static string lastArtSongId = null;
 
         // Zlib-compressed raw RGBA pixel data (128x128, bottom-up), base64 encoded
         private static readonly string DefaultArtBase64 =
@@ -667,6 +668,9 @@ namespace ExScoringMod
                 return;
             }
 
+            if (songID == lastArtSongId) return;
+            lastArtSongId = songID;
+
             // Clean up the previous song texture (but not the default).
             DestroyCurrentTexture();
 
@@ -713,6 +717,8 @@ namespace ExScoringMod
                 canvasObject = null;
                 rawImage = null;
             }
+
+            lastArtSongId = null;
         }
 
         // ── Helpers ──────────────────────────────────────────────────────
