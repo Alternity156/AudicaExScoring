@@ -5,6 +5,7 @@ I am currently implementing SongBrowser features that most players expect to be 
 
 ## Optional Dependencies
 [SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience)
+
 [SongRequest](https://github.com/Silzoid/SongRequest) (Requires [TwitchConnectorMod](https://github.com/steglasaurous/twitch-connector-mod)) Full twitch song request support through the folder system.
 
 ## EX Scoring
