@@ -29,12 +29,20 @@ namespace ExScoringMod
         public Action onHit;      // action: callback when shot
         public string actionId;   // action: optional id for selection highlighting
         public string downloadUrl; // downloadable song: maudica download URL
+        public int starDiff;      // star header: (int)KataConfig.Difficulty (gold uses Expert); ignored when starTier==0
+        public int starTier;      // star header: 1..5 = N stars of starDiff, 6 = gold; 0 = pips only (no filled stars)
+        public bool starHeader;   // true = render star icons (incl. pips-only); false = text title
 
         /// <summary>Default folder-header grey. Action rows override via their own color.</summary>
         public static readonly Color FolderColor = new Color(0.18f, 0.18f, 0.18f, 1f);
 
         public static ViewRow Header(string folder, int count, string subLabelOverride = null)
             => new ViewRow { kind = ViewRowKind.FolderHeader, folderName = folder, songCount = count, color = FolderColor, subLabel = subLabelOverride };
+
+        /// <summary>A folder header that displays the game's star icons instead of a text title.
+        /// starTier 1..5 lights that many of starDiff's colored stars; 6 lights the gold set; 0 shows pips only.</summary>
+        public static ViewRow StarHeader(string folder, int count, int starDiff, int starTier)
+            => new ViewRow { kind = ViewRowKind.FolderHeader, folderName = folder, songCount = count, color = FolderColor, starDiff = starDiff, starTier = starTier, starHeader = true };
 
         public static ViewRow SongRow(string id)
             => new ViewRow { kind = ViewRowKind.Song, songID = id };
@@ -155,6 +163,11 @@ namespace ExScoringMod
             public GunButton button;
             public Material quadMat;   // recolored per bind
             public bool inUse;
+
+            // Star-display reuse (star-sort headers). Cached once at creation; toggled per bind.
+            public GameObject starDisplay;                 // Canvas/StarDisplay (kept off except on star headers)
+            public GameObject starPips;                    // StarDisplay/star_pips (the 5 empty slots)
+            public Dictionary<string, GameObject> starObjs; // name -> StarDisplay/stars/<child>
         }
 
         private static readonly List<SongPoolItem> songPool = new List<SongPoolItem>();
@@ -564,10 +577,23 @@ namespace ExScoringMod
                 // Per-row color (folder grey, or the action row's own color).
                 if (hi.quadMat != null) hi.quadMat.color = row.color;
 
+                // Default: star icons off (header pool is shared with text folders / action rows).
+                if (hi.starDisplay != null) hi.starDisplay.SetActive(false);
+
                 if (row.kind == ViewRowKind.FolderHeader)
                 {
-                    if (hi.title != null) hi.title.text = row.folderName;
-                    if (hi.artist != null) hi.artist.text = row.subLabel ?? $"{row.songCount} song{(row.songCount != 1 ? "s" : "")}";
+                    if (row.starHeader && hi.starDisplay != null && hi.starObjs != null)
+                    {
+                        // Star-icon header: no text title, count on the second line, lit star icons (pips only when tier==0).
+                        if (hi.title != null) hi.title.text = "";
+                        if (hi.artist != null) hi.artist.text = row.subLabel ?? $"{row.songCount} song{(row.songCount != 1 ? "s" : "")}";
+                        ApplyStarIcons(hi, row.starDiff, row.starTier);
+                    }
+                    else
+                    {
+                        if (hi.title != null) hi.title.text = row.folderName;
+                        if (hi.artist != null) hi.artist.text = row.subLabel ?? $"{row.songCount} song{(row.songCount != 1 ? "s" : "")}";
+                    }
 
                     if (hi.button != null)
                     {
@@ -801,7 +827,40 @@ namespace ExScoringMod
             DisableBloom(clone);
             GunButton button = StyleFolderQuad(clone, out Material quadMat);
 
-            return new HeaderPoolItem { go = clone, title = title, artist = artist, button = button, quadMat = quadMat, inUse = false };
+            // Cache the StarDisplay subtree so star-sort headers can light icons later.
+            // HideCanvasElements left StarDisplay inactive; we re-enable it only on star headers.
+            GameObject starDisplay = null, starPips = null;
+            Dictionary<string, GameObject> starObjs = null;
+            Transform sd = FindChild(clone.transform, "StarDisplay");
+            if (sd != null)
+            {
+                starDisplay = sd.gameObject;
+                Transform pips = FindChild(sd, "star_pips");
+                if (pips != null) starPips = pips.gameObject;
+                Transform starsRoot = FindChild(sd, "stars");
+                if (starsRoot != null)
+                {
+                    starObjs = new Dictionary<string, GameObject>();
+                    for (int i = 0; i < starsRoot.childCount; i++)
+                    {
+                        Transform c = starsRoot.GetChild(i);
+                        if (!starObjs.ContainsKey(c.name)) starObjs.Add(c.name, c.gameObject);
+                    }
+                }
+            }
+
+            return new HeaderPoolItem
+            {
+                go = clone,
+                title = title,
+                artist = artist,
+                button = button,
+                quadMat = quadMat,
+                inUse = false,
+                starDisplay = starDisplay,
+                starPips = starPips,
+                starObjs = starObjs
+            };
         }
 
         private static void DestroyPool()
@@ -879,6 +938,43 @@ namespace ExScoringMod
                 gunButton.onHitEvent = new UnityEvent();
             }
             return gunButton;
+        }
+
+        /// <summary>Light the star icons on a star-sort header: enable the StarDisplay, show the 5
+        /// background pips, then turn on starDiff's first `tier` stars (or all 5 gold stars when tier==6).</summary>
+        private static void ApplyStarIcons(HeaderPoolItem hi, int starDiff, int tier)
+        {
+            hi.starDisplay.SetActive(true);
+            if (hi.starPips != null) hi.starPips.SetActive(true);
+
+            // Reset every star child off, then light the ones we want.
+            foreach (var kv in hi.starObjs) kv.Value.SetActive(false);
+
+            if (tier <= 0) return; // pips only (Unplayed)
+
+            if (tier >= 6)
+            {
+                for (int n = 1; n <= 5; n++)
+                    if (hi.starObjs.TryGetValue($"star_gold_{n:00}", out var g)) g.SetActive(true);
+                return;
+            }
+
+            string prefix = "star_" + DiffPrefix(starDiff) + "_";
+            int count = tier > 5 ? 5 : tier;
+            for (int n = 1; n <= count; n++)
+                if (hi.starObjs.TryGetValue($"{prefix}{n:00}", out var s)) s.SetActive(true);
+        }
+
+        /// <summary>GameObject name prefix for each difficulty's star set (Normal uses "medium").</summary>
+        private static string DiffPrefix(int diff)
+        {
+            switch ((KataConfig.Difficulty)diff)
+            {
+                case KataConfig.Difficulty.Easy: return "easy";
+                case KataConfig.Difficulty.Normal: return "medium";
+                case KataConfig.Difficulty.Hard: return "hard";
+                default: return "expert";
+            }
         }
 
         private static Transform FindChild(Transform parent, string childName)

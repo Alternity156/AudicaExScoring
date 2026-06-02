@@ -26,6 +26,43 @@ namespace ExScoringMod
         private static string currentPlaylist = null;
         private static readonly Stack<float> scrollStack = new Stack<float>();
 
+        // ── Sort mode (drives which folder set BuildRootView produces) ─────────
+        internal enum SortMode { Default, AToZ, ZToA, MostStars, LeastStars, MostPlayed, LeastPlayed, MostRecent }
+        private static SortMode currentSort = SortMode.Default;
+
+        /// <summary>
+        /// Called from the ChangeSort postfix. Maps the game's Sort to our view mode.
+        /// Unimplemented sorts (played/recent) fall back to Default for now.
+        /// Switching modes collapses any open folder and leaves playlist nav, since
+        /// generated folders (letters / star tiers) only exist at the root level.
+        /// </summary>
+        public static void SetSort(SongSelect.Sort gameSort)
+        {
+            SortMode mode;
+            switch (gameSort)
+            {
+                case SongSelect.Sort.AToZ: mode = SortMode.AToZ; break;
+                case SongSelect.Sort.ZToA: mode = SortMode.ZToA; break;
+                case SongSelect.Sort.MostStars: mode = SortMode.MostStars; break;
+                case SongSelect.Sort.LeastStars: mode = SortMode.LeastStars; break;
+                case SongSelect.Sort.MostPlayed: mode = SortMode.MostPlayed; break;
+                case SongSelect.Sort.LeastPlayed: mode = SortMode.LeastPlayed; break;
+                case SongSelect.Sort.MostRecent: mode = SortMode.MostRecent; break;
+                default: mode = SortMode.Default; break;
+            }
+
+            if (mode == currentSort) return;
+            currentSort = mode;
+
+            ResetNav();                          // generated folders only exist at root
+            SongFolderManager.openFolder = null; // collapse on mode switch
+
+            MelonLogger.Log($"[FolderRowManager] Sort -> {currentSort}");
+
+            if (VirtualSongList.IsActive)
+                Apply();
+        }
+
         // ── Entry points (called from Hooks / search / favorites) ─────────────
 
         /// <summary>
@@ -38,6 +75,7 @@ namespace ExScoringMod
             if (SongFolderManager.availableFolders == null || SongFolderManager.availableFolders.Count == 0)
                 return;
 
+            ClearStarCache(); // scores may have changed since last entry; recompute lazily on demand
             WireHandler();
             Apply();
         }
@@ -233,7 +271,7 @@ namespace ExScoringMod
             // lives in the requests folder AND in Unsorted, and GetFolder would send us to the Unsorted copy.
             if (VirtualSongList.IndexOf(songID) < 0)
             {
-                string folder = SongFolderManager.GetFolder(songID);
+                string folder = CurrentFolderFor(songID);
                 if (folder != null && SongFolderManager.openFolder != folder)
                 {
                     SongFolderManager.openFolder = folder;
@@ -268,8 +306,24 @@ namespace ExScoringMod
             }
         }
 
-        /// <summary>Level 0: every folder header (open folder's songs inlined) + a Playlists row.</summary>
+        /// <summary>Root view dispatcher: Default folders, or generated letter folders.</summary>
         private static List<ViewRow> BuildRootView()
+        {
+            switch (currentSort)
+            {
+                case SortMode.AToZ: return BuildAlphaView(reversed: false);
+                case SortMode.ZToA: return BuildAlphaView(reversed: true);
+                case SortMode.MostStars: return BuildStarsView(reversed: false);
+                case SortMode.LeastStars: return BuildStarsView(reversed: true);
+                case SortMode.MostPlayed: return BuildPlaysView(reversed: false);
+                case SortMode.LeastPlayed: return BuildPlaysView(reversed: true);
+                case SortMode.MostRecent: return BuildRecentView();
+                default: return BuildDefaultRootView();
+            }
+        }
+
+        /// <summary>Level 0: every folder header (open folder's songs inlined) + a Playlists row.</summary>
+        private static List<ViewRow> BuildDefaultRootView()
         {
             var rows = new List<ViewRow>();
             if (SongFolderManager.availableFolders == null) return rows;
@@ -331,6 +385,17 @@ namespace ExScoringMod
 
         private static List<string> GetFolderSongs(string folder)
         {
+            switch (currentSort)
+            {
+                case SortMode.AToZ:
+                case SortMode.ZToA: return GetAlphaFolderSongs(folder);
+                case SortMode.MostStars:
+                case SortMode.LeastStars: return GetStarFolderSongs(folder);
+                case SortMode.MostPlayed:
+                case SortMode.LeastPlayed: return GetPlayFolderSongs(folder);
+                case SortMode.MostRecent: return GetRecentFolderSongs(folder);
+            }
+
             var result = new List<string>();
 
             if (folder == SongFolderManager.FolderSongRequests)
@@ -359,6 +424,536 @@ namespace ExScoringMod
                 }
             }
             return result;
+        }
+
+        // ── Alphabetical view (A-Z / Z-A) ─────────────────────────────────────
+
+        /// <summary>Bucket key for a title: uppercase first letter, or "#" for digits/symbols/empty.</summary>
+        private static string AlphaBucket(string trimmedTitle)
+        {
+            if (string.IsNullOrEmpty(trimmedTitle)) return "#";
+            char c = trimmedTitle[0];
+            return char.IsLetter(c) ? char.ToUpperInvariant(c).ToString() : "#";
+        }
+
+        /// <summary>
+        /// Group every visible song by its title's first character. Buckets are ordered
+        /// "#", A..Z (reversed wholesale for Z-A). Songs within each bucket are always
+        /// sorted by title ascending, case-insensitive — only the folder order flips.
+        /// </summary>
+        private static List<KeyValuePair<string, List<string>>> BuildAlphaGroups(bool reversed)
+        {
+            var tmp = new Dictionary<string, List<KeyValuePair<string, string>>>(); // key -> (title, id)
+
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd == null || sd.hidden) continue;
+
+                string title = sd.title ?? "";
+                string key = AlphaBucket(title.TrimStart());
+
+                if (!tmp.TryGetValue(key, out var list))
+                {
+                    list = new List<KeyValuePair<string, string>>();
+                    tmp[key] = list;
+                }
+                list.Add(new KeyValuePair<string, string>(title, sd.songID));
+            }
+
+            var keys = new List<string>(tmp.Keys);
+            keys.Sort(StringComparer.Ordinal); // "#" (0x23) sorts before A..Z
+            if (reversed) keys.Reverse();
+
+            var groups = new List<KeyValuePair<string, List<string>>>();
+            foreach (string k in keys)
+            {
+                var entries = tmp[k];
+                entries.Sort((a, b) => string.Compare(a.Key, b.Key, StringComparison.OrdinalIgnoreCase));
+
+                var ids = new List<string>(entries.Count);
+                foreach (var e in entries) ids.Add(e.Value);
+                groups.Add(new KeyValuePair<string, List<string>>(k, ids));
+            }
+            return groups;
+        }
+
+        /// <summary>Letter-folder view: a header per non-empty bucket (with count), open bucket's songs inlined.</summary>
+        private static List<ViewRow> BuildAlphaView(bool reversed)
+        {
+            var rows = new List<ViewRow>();
+            var groups = BuildAlphaGroups(reversed);
+            string open = SongFolderManager.openFolder;
+
+            foreach (var kv in groups)
+            {
+                rows.Add(ViewRow.Header(kv.Key, kv.Value.Count));
+                if (kv.Key == open)
+                    foreach (string id in kv.Value)
+                        rows.Add(ViewRow.SongRow(id));
+            }
+
+            MelonLogger.Log($"[FolderRowManager] BuildAlphaView ({(reversed ? "Z-A" : "A-Z")}): " +
+                $"{groups.Count} letter folder(s), open={open ?? "none"}");
+            return rows;
+        }
+
+        /// <summary>Songs in one letter bucket, in display (ascending) order.</summary>
+        private static List<string> GetAlphaFolderSongs(string letter)
+        {
+            foreach (var kv in BuildAlphaGroups(false))
+                if (kv.Key == letter) return kv.Value;
+            return new List<string>();
+        }
+
+        /// <summary>The folder a song lives in under the active sort (Default folder, letter, or star bucket).</summary>
+        public static string CurrentFolderFor(string songID)
+        {
+            if (currentSort == SortMode.Default)
+                return SongFolderManager.GetFolder(songID);
+
+            if (currentSort == SortMode.MostStars || currentSort == SortMode.LeastStars)
+            {
+                EnsureStarCache();
+                return StarBucketLabel(starCache.TryGetValue(songID, out int e) ? e : -1);
+            }
+
+            if (currentSort == SortMode.MostPlayed || currentSort == SortMode.LeastPlayed)
+            {
+                EnsurePlayCache();
+                return PlayLabel(playCache.TryGetValue(songID, out int pc) ? pc : 0);
+            }
+
+            if (currentSort == SortMode.MostRecent)
+            {
+                EnsureRecentCache();
+                return RecentLabel(recentCache.TryGetValue(songID, out int da) ? da : -1);
+            }
+
+            if (SongList.I != null && SongList.I.songs != null)
+            {
+                for (int i = 0; i < SongList.I.songs.Count; i++)
+                {
+                    var sd = SongList.I.songs[i];
+                    if (sd != null && !sd.hidden && sd.songID == songID)
+                        return AlphaBucket((sd.title ?? "").TrimStart());
+                }
+            }
+            return null;
+        }
+
+        // ── Star view (MostStars / LeastStars) ─────────────────────────────────
+        //
+        // Buckets by each song's best result (HighScoreRecords.GetHighScore + StarThresholds):
+        // a single "Gold Stars" bucket (tier 6, Expert), then "{N} Stars ({difficulty})" for 1..5
+        // per difficulty, then "Unplayed". Headers reuse the game's star icons (see VirtualSongList).
+        //
+        // Encoding in starCache: -1 = unplayed; otherwise (int)difficulty * 100 + tier (tier 1..6).
+        private static Dictionary<string, int> starCache;
+        private static readonly Dictionary<int, string> diffNameCache = new Dictionary<int, string>();
+
+        /// <summary>Drop the cached star tiers, play counts and recency (e.g. on song-select entry, after a play).</summary>
+        public static void ClearStarCache()
+        {
+            starCache = null;
+            diffNameCache.Clear();
+            playCache = null;
+            recentCache = null;
+        }
+
+        /// <summary>Compute every visible song's star tier once. Lazy: only runs when a star view is needed.</summary>
+        private static void EnsureStarCache()
+        {
+            if (starCache != null) return;
+            starCache = new Dictionary<string, int>();
+
+            var st = StarThresholds.I;
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd == null || sd.hidden) continue;
+                string id = sd.songID;
+
+                int enc = -1;
+                try
+                {
+                    var best = HighScoreRecords.GetHighScore(id);
+                    if (best != null && best.score > 0)
+                    {
+                        int raw = 1;
+                        if (st != null)
+                            raw = UnityEngine.Mathf.FloorToInt(st.GetStarCount(id, best.difficulty, best.score));
+                        if (raw >= 1) // a real result; raw < 1 (no stars) stays "unplayed"
+                            enc = (int)best.difficulty * 100 + (raw > 6 ? 6 : raw);
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    MelonLogger.Log($"[FolderRowManager] star calc failed for {id}: {ex.Message}");
+                }
+                starCache[id] = enc;
+            }
+
+            MelonLogger.Log($"[FolderRowManager] Star cache built: {starCache.Count} songs");
+        }
+
+        private static string StarLabel(int tier) => tier == 6 ? "Gold Stars" : (tier == 1 ? "1 Star" : tier + " Stars");
+
+        /// <summary>Localized difficulty name (cached). Falls back to the enum name.</summary>
+        private static string DiffName(int diff)
+        {
+            if (diffNameCache.TryGetValue(diff, out string cached)) return cached;
+            string name = null;
+            try { name = KataConfig.GetDifficultyName((KataConfig.Difficulty)diff); }
+            catch { }
+            if (string.IsNullOrEmpty(name)) name = ((KataConfig.Difficulty)diff).ToString();
+            diffNameCache[diff] = name;
+            return name;
+        }
+
+        /// <summary>Canonical bucket label for an encoded tier. Must match between grouping and lookups.</summary>
+        private static string StarBucketLabel(int enc)
+        {
+            if (enc == -1) return "Unplayed";
+            int tier = enc % 100, diff = enc / 100;
+            if (tier == 6) return "Gold Stars";                 // gold == Expert: one merged bucket
+            return StarLabel(tier) + " (" + DiffName(diff) + ")";
+        }
+
+        /// <summary>
+        /// Group songs into ordered star buckets. MostStars order: Gold, then Expert 5..1,
+        /// Hard 5..1, Normal 5..1, Easy 5..1, then Unplayed. Reversed flips the whole list.
+        /// Songs within a bucket are alphabetical by title.
+        /// </summary>
+        private static List<KeyValuePair<string, List<string>>> BuildStarGroups(bool reversed)
+        {
+            EnsureStarCache();
+
+            var byLabel = new Dictionary<string, List<KeyValuePair<string, string>>>(); // label -> (title, id)
+            var rank = new Dictionary<string, long>();                                   // label -> sort key (higher = nearer top)
+
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd == null || sd.hidden) continue;
+                string id = sd.songID, title = sd.title ?? "";
+
+                int enc = starCache.TryGetValue(id, out int e) ? e : -1;
+                string label = StarBucketLabel(enc);
+
+                long sortKey;
+                if (enc == -1) sortKey = long.MinValue;          // Unplayed last in MostStars
+                else
+                {
+                    int tier = enc % 100, diff = enc / 100;
+                    sortKey = tier == 6 ? long.MaxValue          // Gold above everything
+                                        : ((long)diff * 10 + tier); // difficulty desc, then stars desc
+                }
+
+                if (!byLabel.TryGetValue(label, out var list))
+                {
+                    list = new List<KeyValuePair<string, string>>();
+                    byLabel[label] = list;
+                }
+                list.Add(new KeyValuePair<string, string>(title, id));
+                rank[label] = sortKey;
+            }
+
+            var labels = new List<string>(byLabel.Keys);
+            labels.Sort((a, b) => rank[b].CompareTo(rank[a])); // descending
+            if (reversed) labels.Reverse();
+
+            var result = new List<KeyValuePair<string, List<string>>>();
+            foreach (string lbl in labels)
+            {
+                var entries = byLabel[lbl];
+                entries.Sort((a, b) => string.Compare(a.Key, b.Key, StringComparison.OrdinalIgnoreCase));
+
+                var ids = new List<string>(entries.Count);
+                foreach (var kv in entries) ids.Add(kv.Value);
+                result.Add(new KeyValuePair<string, List<string>>(lbl, ids));
+            }
+            return result;
+        }
+
+        /// <summary>Star-bucket view: a header per non-empty bucket (star icons via StarHeader, text for Unplayed),
+        /// with the open bucket's songs inlined.</summary>
+        private static List<ViewRow> BuildStarsView(bool reversed)
+        {
+            var rows = new List<ViewRow>();
+            var groups = BuildStarGroups(reversed);
+            string open = SongFolderManager.openFolder;
+
+            foreach (var kv in groups)
+            {
+                string label = kv.Key;
+                int count = kv.Value.Count;
+
+                if (label == "Unplayed" || kv.Value.Count == 0)
+                {
+                    rows.Add(ViewRow.StarHeader(label, count, 0, 0)); // pips only, no filled stars
+                }
+                else
+                {
+                    int enc = starCache.TryGetValue(kv.Value[0], out int e) ? e : -1;
+                    int tier = enc % 100, diff = enc / 100;
+                    rows.Add(ViewRow.StarHeader(label, count, diff, tier));
+                }
+
+                if (label == open)
+                    foreach (string id in kv.Value)
+                        rows.Add(ViewRow.SongRow(id));
+            }
+
+            MelonLogger.Log($"[FolderRowManager] BuildStarsView ({(reversed ? "Least" : "Most")}Stars): " +
+                $"{groups.Count} bucket(s), open={open ?? "none"}");
+            return rows;
+        }
+
+        /// <summary>Songs in one star bucket, in display (alphabetical) order.</summary>
+        private static List<string> GetStarFolderSongs(string folder)
+        {
+            foreach (var kv in BuildStarGroups(false))
+                if (kv.Key == folder) return kv.Value;
+            return new List<string>();
+        }
+
+        // ── Play-count view (MostPlayed / LeastPlayed) ─────────────────────────
+        //
+        // Buckets by each song's exact play count (SongPlayHistory.GetRecentPlayHistory.playCount):
+        // "Played N times" / "Played once" / "Never Played". Plain text headers (no icons).
+        private static Dictionary<string, int> playCache;
+
+        /// <summary>Compute every visible song's play count once. Lazy: only runs when a play view is needed.</summary>
+        private static void EnsurePlayCache()
+        {
+            if (playCache != null) return;
+            playCache = new Dictionary<string, int>();
+
+            var hist = SongPlayHistory.I;
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd == null || sd.hidden) continue;
+                string id = sd.songID;
+
+                int count = 0;
+                try
+                {
+                    var rec = hist != null ? hist.GetRecentPlayHistory(id) : null;
+                    if (rec != null && rec.playCount > 0) count = rec.playCount;
+                }
+                catch (System.Exception ex)
+                {
+                    MelonLogger.Log($"[FolderRowManager] play count failed for {id}: {ex.Message}");
+                }
+                playCache[id] = count;
+            }
+
+            MelonLogger.Log($"[FolderRowManager] Play cache built: {playCache.Count} songs");
+        }
+
+        private static string PlayLabel(int count) =>
+            count <= 0 ? "Never Played" : (count == 1 ? "Played once" : $"Played {count} times");
+
+        /// <summary>
+        /// Group songs into ordered play-count buckets. MostPlayed: highest count first, Never Played last.
+        /// Reversed flips the whole list. Songs within a bucket are alphabetical by title.
+        /// </summary>
+        private static List<KeyValuePair<string, List<string>>> BuildPlayGroups(bool reversed)
+        {
+            EnsurePlayCache();
+
+            var byLabel = new Dictionary<string, List<KeyValuePair<string, string>>>(); // label -> (title, id)
+            var rank = new Dictionary<string, int>();                                    // label -> play count (sort key)
+
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd == null || sd.hidden) continue;
+                string id = sd.songID, title = sd.title ?? "";
+
+                int count = playCache.TryGetValue(id, out int c) ? c : 0;
+                string label = PlayLabel(count);
+
+                if (!byLabel.TryGetValue(label, out var list))
+                {
+                    list = new List<KeyValuePair<string, string>>();
+                    byLabel[label] = list;
+                }
+                list.Add(new KeyValuePair<string, string>(title, id));
+                rank[label] = count; // count 0 (Never Played) naturally sorts lowest -> last in MostPlayed
+            }
+
+            var labels = new List<string>(byLabel.Keys);
+            labels.Sort((a, b) => rank[b].CompareTo(rank[a])); // descending by play count
+            if (reversed) labels.Reverse();
+
+            var result = new List<KeyValuePair<string, List<string>>>();
+            foreach (string lbl in labels)
+            {
+                var entries = byLabel[lbl];
+                entries.Sort((a, b) => string.Compare(a.Key, b.Key, StringComparison.OrdinalIgnoreCase));
+
+                var ids = new List<string>(entries.Count);
+                foreach (var kv in entries) ids.Add(kv.Value);
+                result.Add(new KeyValuePair<string, List<string>>(lbl, ids));
+            }
+            return result;
+        }
+
+        /// <summary>Play-count view: a text header per non-empty bucket, open bucket's songs inlined.</summary>
+        private static List<ViewRow> BuildPlaysView(bool reversed)
+        {
+            var rows = new List<ViewRow>();
+            var groups = BuildPlayGroups(reversed);
+            string open = SongFolderManager.openFolder;
+
+            foreach (var kv in groups)
+            {
+                rows.Add(ViewRow.Header(kv.Key, kv.Value.Count));
+                if (kv.Key == open)
+                    foreach (string id in kv.Value)
+                        rows.Add(ViewRow.SongRow(id));
+            }
+
+            MelonLogger.Log($"[FolderRowManager] BuildPlaysView ({(reversed ? "Least" : "Most")}Played): " +
+                $"{groups.Count} bucket(s), open={open ?? "none"}");
+            return rows;
+        }
+
+        /// <summary>Songs in one play-count bucket, in display (alphabetical) order.</summary>
+        private static List<string> GetPlayFolderSongs(string folder)
+        {
+            foreach (var kv in BuildPlayGroups(false))
+                if (kv.Key == folder) return kv.Value;
+            return new List<string>();
+        }
+
+        // ── Recency view (MostRecent) ──────────────────────────────────────────
+        //
+        // Buckets by how long ago each song was last played (RecentSongHistory.lastPlayDate, stored as
+        // .NET DateTime ticks). Graduated: Today, Yesterday, exact days up to a month, then 30-day months,
+        // then 365-day years; Never Played pinned at the bottom. Plain text headers. Single sort (no reverse).
+        private static Dictionary<string, int> recentCache; // songID -> whole days since last play; -1 = never
+
+        /// <summary>Compute every visible song's "days since last play" once. Lazy.</summary>
+        private static void EnsureRecentCache()
+        {
+            if (recentCache != null) return;
+            recentCache = new Dictionary<string, int>();
+
+            var hist = SongPlayHistory.I;
+            DateTime today = DateTime.Now.Date;
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd == null || sd.hidden) continue;
+                string id = sd.songID;
+
+                int daysAgo = -1; // never played
+                try
+                {
+                    var rec = hist != null ? hist.GetRecentPlayHistory(id) : null;
+                    if (rec != null && rec.playCount > 0 && rec.lastPlayDate > 0)
+                    {
+                        DateTime dt = DateTime.FromBinary(rec.lastPlayDate);
+                        int d = (today - dt.Date).Days;
+                        daysAgo = d < 0 ? 0 : d; // clamp future timestamps (clock skew) to Today
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    MelonLogger.Log($"[FolderRowManager] recency failed for {id}: {ex.Message}");
+                }
+                recentCache[id] = daysAgo;
+            }
+
+            MelonLogger.Log($"[FolderRowManager] Recent cache built: {recentCache.Count} songs");
+        }
+
+        /// <summary>Graduated recency label: days, then 30-day months, then 365-day years.</summary>
+        private static string RecentLabel(int daysAgo)
+        {
+            if (daysAgo < 0) return "Never Played";
+            if (daysAgo == 0) return "Today";
+            if (daysAgo == 1) return "Yesterday";
+            if (daysAgo < 30) return $"{daysAgo} days ago";
+            if (daysAgo < 365) { int m = daysAgo / 30; return m == 1 ? "1 month ago" : $"{m} months ago"; }
+            int y = daysAgo / 365;
+            return y == 1 ? "1 year ago" : $"{y} years ago";
+        }
+
+        /// <summary>Group songs into ordered recency buckets, most recent first, Never Played last.
+        /// Songs within a bucket are alphabetical by title.</summary>
+        private static List<KeyValuePair<string, List<string>>> BuildRecentGroups()
+        {
+            EnsureRecentCache();
+
+            var byLabel = new Dictionary<string, List<KeyValuePair<string, string>>>(); // label -> (title, id)
+            var rank = new Dictionary<string, int>();                                    // label -> days (sort key, ascending)
+
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd == null || sd.hidden) continue;
+                string id = sd.songID, title = sd.title ?? "";
+
+                int daysAgo = recentCache.TryGetValue(id, out int d) ? d : -1;
+                string label = RecentLabel(daysAgo);
+                int key = daysAgo < 0 ? int.MaxValue : daysAgo; // Never Played sorts last
+
+                if (!byLabel.TryGetValue(label, out var list))
+                {
+                    list = new List<KeyValuePair<string, string>>();
+                    byLabel[label] = list;
+                    rank[label] = key;
+                }
+                else if (key < rank[label]) rank[label] = key; // most-recent member represents the bucket
+                list.Add(new KeyValuePair<string, string>(title, id));
+            }
+
+            var labels = new List<string>(byLabel.Keys);
+            labels.Sort((a, b) => rank[a].CompareTo(rank[b])); // ascending days = most recent first
+
+            var result = new List<KeyValuePair<string, List<string>>>();
+            foreach (string lbl in labels)
+            {
+                var entries = byLabel[lbl];
+                entries.Sort((a, b) => string.Compare(a.Key, b.Key, StringComparison.OrdinalIgnoreCase));
+
+                var ids = new List<string>(entries.Count);
+                foreach (var kv in entries) ids.Add(kv.Value);
+                result.Add(new KeyValuePair<string, List<string>>(lbl, ids));
+            }
+            return result;
+        }
+
+        /// <summary>Recency view: a text header per non-empty bucket, open bucket's songs inlined.</summary>
+        private static List<ViewRow> BuildRecentView()
+        {
+            var rows = new List<ViewRow>();
+            var groups = BuildRecentGroups();
+            string open = SongFolderManager.openFolder;
+
+            foreach (var kv in groups)
+            {
+                rows.Add(ViewRow.Header(kv.Key, kv.Value.Count));
+                if (kv.Key == open)
+                    foreach (string id in kv.Value)
+                        rows.Add(ViewRow.SongRow(id));
+            }
+
+            MelonLogger.Log($"[FolderRowManager] BuildRecentView (MostRecent): {groups.Count} bucket(s), open={open ?? "none"}");
+            return rows;
+        }
+
+        /// <summary>Songs in one recency bucket, in display (alphabetical) order.</summary>
+        private static List<string> GetRecentFolderSongs(string folder)
+        {
+            foreach (var kv in BuildRecentGroups())
+                if (kv.Key == folder) return kv.Value;
+            return new List<string>();
         }
 
         // ── Song Requests folder (optional SongRequest integration) ───────────────

@@ -869,6 +869,19 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// All eight SetSort_* buttons funnel through ChangeSort. After the game records its
+        /// sListSort, tell the folder system which view to build (Default / A-Z / Z-A).
+        /// </summary>
+        [HarmonyPatch(typeof(SongSelect), "ChangeSort", new Type[] { typeof(SongSelect.Sort) })]
+        private static class SongSelectChangeSortPatch
+        {
+            private static void Postfix(SongSelect.Sort newSort)
+            {
+                FolderRowManager.SetSort(newSort);
+            }
+        }
+
+        /// <summary>
         /// Sets up the song-list notification and folder defaults when the song select page loads.
         /// </summary>
         [HarmonyPatch(typeof(SongSelect), "OnEnable", new Type[0])]
