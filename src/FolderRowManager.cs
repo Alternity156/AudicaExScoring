@@ -119,7 +119,9 @@ namespace ExScoringMod
                 Apply();
             }
 
-            VirtualSongList.ScrollToAndSelect(songID);
+            // Restore: keep the user's prior scroll if the song is already visible there,
+            // otherwise center it.
+            VirtualSongList.ScrollToAndSelect(songID, true);
         }
 
         private static void WireHandler()

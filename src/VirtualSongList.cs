@@ -61,6 +61,8 @@ namespace ExScoringMod
         private static ShellScrollable scroller;
         private static Transform scrollParent;
         private static GameObject hiddenHolder;
+        private static float savedScroll = 0f; // scroll position remembered across leave/return
+        private static int generation = 0; // bumped on every SetView/Teardown; select coroutines bail on mismatch
 
         // ── The view (shared source of truth) ────────────────────────────────
         private static readonly List<ViewRow> view = new List<ViewRow>();
@@ -119,8 +121,10 @@ namespace ExScoringMod
             if (!scrollParent.gameObject.activeSelf)
                 scrollParent.gameObject.SetActive(true);
 
-            // Preserve scroll position across a rebuild where possible.
-            float prevScroll = scroller.GetScrollIndex();
+            // Preserve scroll position. While already active (e.g. a folder toggle) the live
+            // scroller position is meaningful. On a fresh (re)entry the live scroller was zeroed
+            // in Teardown, so restore the position we saved when leaving.
+            float prevScroll = active ? scroller.GetScrollIndex() : savedScroll;
 
             view.Clear();
             viewSongIDs.Clear();
@@ -143,6 +147,7 @@ namespace ExScoringMod
             EnsurePools();
 
             active = true;
+            generation++; // a new view invalidates select coroutines targeting the old one
 
             float maxScroll = Mathf.Max(0f, view.Count - scroller.displayCount);
             scroller.SnapTo(Mathf.Clamp(prevScroll, 0f, maxScroll), true);
@@ -202,27 +207,62 @@ namespace ExScoringMod
         /// Scroll the view to a song and select it. Replaces the old mSongButtons-based
         /// scroll+OnSelect used by AutoSelect / RandomSong (wired up in Phase 3).
         /// </summary>
-        public static void ScrollToAndSelect(string songID)
+        public static void ScrollToAndSelect(string songID) => ScrollToAndSelect(songID, false);
+
+        /// <summary>
+        /// Select songID, scrolling to center it. If preserveIfVisible is true and the row is
+        /// already within the current window, the scroll position is left untouched (used by the
+        /// leave/return restore so an in-view song keeps your exact prior position).
+        /// </summary>
+        private static int selectSeq = 0; // newest-wins: each select bumps this; older coroutines bail
+
+        public static void ScrollToAndSelect(string songID, bool preserveIfVisible)
         {
+            int idx0 = IndexOf(songID);
             if (!active) return;
-            int idx = IndexOf(songID);
-            if (idx < 0) { MelonLogger.Log($"[VList] ScrollToAndSelect: '{songID}' not in current view."); return; }
-            MelonCoroutines.Start(ScrollToAndSelectCo(songID, idx));
+            if (idx0 < 0) { MelonLogger.Log($"[VList] ScrollToAndSelect: '{songID}' not in current view."); return; }
+            int mySeq = ++selectSeq;
+            MelonCoroutines.Start(ScrollToAndSelectCo(songID, idx0, preserveIfVisible, generation, mySeq));
         }
 
-        private static IEnumerator ScrollToAndSelectCo(string songID, int viewIndex)
+        private static bool IsRowInWindow(int viewIndex)
         {
-            float maxScroll = Mathf.Max(0f, view.Count - scroller.displayCount);
-            float target = Mathf.Clamp(viewIndex - scroller.displayCount / 2f, 0f, maxScroll);
-            scroller.SnapTo(target, true);
+            float top = scroller.GetScrollIndex();
+            float bottom = top + scroller.displayCount - 1;
+            return viewIndex >= top && viewIndex <= bottom;
+        }
 
-            // Wait a couple frames so the scroller activates the row and Sync binds it.
-            yield return null;
-            Sync();
-            yield return null;
+        private static IEnumerator ScrollToAndSelectCo(string songID, int viewIndex, bool preserveIfVisible, int gen, int seq)
+        {
+            // Decide whether to scroll. If restoring and the row is already visible at the current
+            // (restored) position, don't move — keeps the user's exact prior scroll. Otherwise
+            // center the row.
+            bool doScroll = !(preserveIfVisible && IsRowInWindow(viewIndex));
+            if (doScroll)
+            {
+                float maxScroll = Mathf.Max(0f, view.Count - scroller.displayCount);
+                float target = Mathf.Clamp(viewIndex - scroller.displayCount / 2f, 0f, maxScroll);
+                scroller.SnapTo(target, true);
+                scroller.UpdateScroll(-1);
+            }
 
-            var item = GetBoundItem(songID);
-            if (item == null) { MelonLogger.Log($"[VList] ScrollToAndSelect: '{songID}' did not bind."); yield break; }
+            // Wait for the row to bind (placeholders/scroller settle over a few frames on re-entry).
+            const int maxFrames = 30;
+            SongSelectItem item = null;
+            for (int f = 0; f < maxFrames; f++)
+            {
+                yield return null;
+                // Bail if: torn down, the view was rebuilt under us (stale session — the guard
+                // against a pre-leave/return coroutine resuming mid-rebuild), or a newer select
+                // superseded this one (rapid Random Song presses — newest wins).
+                if (!active || gen != generation || seq != selectSeq) yield break;
+                Sync();
+                item = GetBoundItem(songID);
+                if (item != null) break;
+            }
+
+            if (item == null) { MelonLogger.Log($"[VList] ScrollToAndSelect: '{songID}' did not bind after {maxFrames} frames."); yield break; }
+            if (gen != generation || seq != selectSeq) yield break;
 
             SelectBoundItem(songID, item);
         }
@@ -235,14 +275,16 @@ namespace ExScoringMod
         public static void SelectInView(string songID)
         {
             if (!active || IndexOf(songID) < 0) return;
-            MelonCoroutines.Start(SelectInViewCo(songID));
+            MelonCoroutines.Start(SelectInViewCo(songID, generation));
         }
 
-        private static IEnumerator SelectInViewCo(string songID)
+        private static IEnumerator SelectInViewCo(string songID, int gen)
         {
             yield return null;
+            if (!active || gen != generation) yield break;
             Sync();
             yield return null;
+            if (!active || gen != generation) yield break;
 
             var item = GetBoundItem(songID);
             if (item == null) { ScrollToAndSelect(songID); yield break; } // not actually visible → scroll to it
@@ -320,12 +362,36 @@ namespace ExScoringMod
         public static void Teardown()
         {
             active = false;
+            generation++; // invalidate any in-flight select coroutines from this session
 
             ReleaseAllBindings(); // pooled visuals (incl. the just-selected one) go back to hiddenHolder, inactive
             ClearPlaceholders();  // destroys only the empty placeholder GOs and empties mRows
 
-            // Reset the scroll position. The game's ShowSongList runs right after this (building an
-            // empty list), and a stale scroll index against zero rows was the source of the NRE.
+            // CRITICAL: SongSelectItem.Init() registered our pooled items into songSelect.mSongButtons.
+            // The game's ShowSongList (which runs right after this teardown, from the patch prefix)
+            // DESTROYS every item in that list as part of its rebuild — which would destroy our
+            // pooled GameObjects and crash BindRow on .transform next frame. Remove ours first.
+            if (songSelect != null && songSelect.mSongButtons != null)
+            {
+                try
+                {
+                    for (int i = 0; i < songPool.Count; i++)
+                        if (songPool[i] != null && songPool[i].ssi != null)
+                            songSelect.mSongButtons.Remove(songPool[i].ssi);
+                }
+                catch (Exception e) { MelonLogger.Log("[VList] Teardown mSongButtons purge failed: " + e.Message); }
+            }
+
+            // Remember where we were so re-entry can restore it (SetView reads savedScroll).
+            // We still zero the LIVE scroller below: the game's empty ShowSongList rebuild runs
+            // right after and a stale live index against zero rows was a source of NREs.
+            if (scroller != null)
+            {
+                try { savedScroll = scroller.GetScrollIndex(); }
+                catch { savedScroll = 0f; }
+            }
+
+            // Reset the live scroll position for the game's imminent empty rebuild.
             if (scroller != null)
             {
                 scroller.mIndex = 0f;
@@ -354,6 +420,14 @@ namespace ExScoringMod
                 int slot = AcquireSongSlot();
                 if (slot < 0) { MelonLogger.Log($"[VList] Song pool exhausted at row {viewIndex}."); return; }
                 var pi = songPool[slot];
+
+                // The game's ShowSongList can destroy items we registered via Init. If this slot's
+                // GameObject was destroyed, rebuild it before use (touching .transform would throw).
+                if (!Alive(pi.go) || (pi.ssi != null && !Alive(pi.ssi)))
+                {
+                    RevivePoolItem(slot);
+                    pi = songPool[slot];
+                }
 
                 pi.go.transform.SetParent(ph.transform, false);
                 pi.go.transform.localPosition = Vector3.zero;
@@ -407,6 +481,13 @@ namespace ExScoringMod
                 if (slot < 0) { MelonLogger.Log($"[VList] Header pool exhausted at row {viewIndex}."); return; }
                 var hi = headerPool[slot];
 
+                if (!Alive(hi.go))
+                {
+                    headerPool[slot] = CreateHeaderPoolItem(songSelect.songSelectItemPrefab.gameObject, slot);
+                    hi = headerPool[slot];
+                    MelonLogger.Log($"[VList] Revived destroyed header pool slot {slot}.");
+                }
+
                 hi.go.transform.SetParent(ph.transform, false);
                 hi.go.transform.localPosition = Vector3.zero;
                 hi.go.transform.localRotation = Quaternion.identity;
@@ -436,7 +517,7 @@ namespace ExScoringMod
             if (b.isHeader)
             {
                 var hi = headerPool[b.slot];
-                if (hi.go != null)
+                if (Alive(hi.go))
                 {
                     hi.go.SetActive(false);
                     hi.go.transform.SetParent(hiddenHolder.transform, false);
@@ -446,7 +527,7 @@ namespace ExScoringMod
             else
             {
                 var pi = songPool[b.slot];
-                if (pi.go != null)
+                if (Alive(pi.go))
                 {
                     pi.go.SetActive(false);
                     pi.go.transform.SetParent(hiddenHolder.transform, false);
@@ -515,24 +596,42 @@ namespace ExScoringMod
             var prefabGO = songSelect.songSelectItemPrefab.gameObject;
 
             while (songPool.Count < target)
-            {
-                var clone = UnityEngine.Object.Instantiate(prefabGO, hiddenHolder.transform);
-                clone.name = "VList_SongPool_" + songPool.Count;
-                clone.SetActive(false);
-                songPool.Add(new SongPoolItem
-                {
-                    go = clone,
-                    ssi = clone.GetComponent<SongSelectItem>(),
-                    inUse = false,
-                    boundSong = null
-                });
-            }
+                songPool.Add(CreateSongPoolItem(prefabGO, songPool.Count));
 
             while (headerPool.Count < target)
             {
                 var hi = CreateHeaderPoolItem(prefabGO, headerPool.Count);
                 headerPool.Add(hi);
             }
+        }
+
+        private static SongPoolItem CreateSongPoolItem(GameObject prefabGO, int index)
+        {
+            var clone = UnityEngine.Object.Instantiate(prefabGO, hiddenHolder.transform);
+            clone.name = "VList_SongPool_" + index;
+            clone.SetActive(false);
+            return new SongPoolItem
+            {
+                go = clone,
+                ssi = clone.GetComponent<SongSelectItem>(),
+                inUse = false,
+                boundSong = null
+            };
+        }
+
+        /// <summary>
+        /// IL2CPP-safe "is this object still alive" check. A destroyed Il2Cpp object's managed
+        /// wrapper is non-null but compares equal to null via the Unity == override; touching its
+        /// .transform throws. Use this before reusing any pooled GameObject.
+        /// </summary>
+        private static bool Alive(UnityEngine.Object o) => o != null;
+
+        /// <summary>Rebuild a song pool slot whose GameObject was destroyed (e.g. by the game).</summary>
+        private static void RevivePoolItem(int slot)
+        {
+            var prefabGO = songSelect.songSelectItemPrefab.gameObject;
+            songPool[slot] = CreateSongPoolItem(prefabGO, slot);
+            MelonLogger.Log($"[VList] Revived destroyed song pool slot {slot}.");
         }
 
         private static HeaderPoolItem CreateHeaderPoolItem(GameObject prefabGO, int index)
