@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using MelonLoader;
 using UnityEngine;
@@ -8,8 +9,15 @@ namespace ExScoringMod
 {
     public static class PlaylistEndlessManager
     {
-        private static Il2CppSystem.Collections.Generic.List<SongSelectItem> songs;
+        private static List<SongList.SongData> queue = new List<SongList.SongData>();
         private static int index = 0;
+
+        /// <summary>Feed the marathon the exact songs to play (in order). Set before starting.</summary>
+        public static void SetQueue(List<SongList.SongData> songs)
+        {
+            queue = songs ?? new List<SongList.SongData>();
+        }
+
         private static float volumeFadeTime = 3f;
         private static float originalVolume = PlayerPreferences.I.MusicLevel.mVal;
         private static bool fadeInProgress = false;
@@ -26,22 +34,26 @@ namespace ExScoringMod
         {
             MenuState.I.GoToSongPage();
             ResetIndex();
-            SongSelect select = null;
-            while (select is null)
+
+            if (queue == null || queue.Count == 0)
             {
-                select = GameObject.FindObjectOfType<SongSelect>();
-                yield return new WaitForSecondsRealtime(0.2f);
-            }
-            if (!CanPlay(select))
-            {
+                MelonLogger.Log("[Marathon] No songs in queue.");
                 PlaylistManager.state = PlaylistManager.PlaylistState.None;
                 yield break;
+            }
+
+            // Give the song page a moment to come up before launching the first song.
+            float waited = 0f;
+            while (GameObject.FindObjectOfType<SongSelect>() == null && waited < 3f)
+            {
+                waited += 0.2f;
+                yield return new WaitForSecondsRealtime(0.2f);
             }
 
             previousNoFail = PlayerPreferences.I.NoFail.mVal;
             PlayerPreferences.I.NoFail.mVal = PlaylistConfig.NoFail;
             pendingReset = true;
-            if (PlaylistConfig.Shuffle) songs.Shuffle();
+            if (PlaylistConfig.Shuffle) queue.Shuffle();
 
             SetNextSong();
             MelonCoroutines.Start(ILaunch());
@@ -222,33 +234,15 @@ namespace ExScoringMod
 
         private static void SetNextSong()
         {
-            SongDataHolder.I.songData = songs[index].mSongData;
+            SongDataHolder.I.songData = queue[index];
             index++;
-            if (index == songs.Count)
+            if (index == queue.Count)
             {
                 PlaylistManager.state = PlaylistManager.PlaylistState.None;
             }
         }
 
-        private static bool CanPlay(SongSelect select)
-        {
-            if (select is null)
-            {
-                MelonLogger.Log("[WARNING] SongSelect not found");
-                return false;
-            }
-            songs = new Il2CppSystem.Collections.Generic.List<SongSelectItem>();
-            songs = select.GetSongButtons();
-            songs.RemoveAt(0);
-            if (songs.Count == 0)
-            {
-                MelonLogger.Log("[WARNING] No songs in playlist");
-                return false;
-            }
-            return true;
-        }
-
-        private static void Shuffle<T>(this Il2CppSystem.Collections.Generic.List<T> list)
+        private static void Shuffle<T>(this List<T> list)
         {
             System.Random random = new System.Random();
             int n = list.Count;

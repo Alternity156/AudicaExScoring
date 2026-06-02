@@ -339,8 +339,35 @@ namespace ExScoringMod
             UpdateDeleteButtonEnabled();
             AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.Menu);
 
+            // These get re-activated by the game's LaunchPanel.OnEnable (notably on the first song
+            // after a fresh launch). They are never part of the redesigned panel, so keep them hidden.
+            Transform launchCenter = launchPanelCenterTitleLabel.transform.parent;
+            HideLaunchPanelElement(launchCenter, "Modifiers"); // capital: button w/ children
+            HideLaunchPanelElement(launchCenter, "modifiers"); // lowercase: separate leaf object
+            HideLaunchPanelElement(launchCenter, "MapperAlert");
+
             if (songDataLoaderInstalled)
                 AlbumArt.UpdateAlbumArt(SongDataHolder.I.songData.songID);
+        }
+
+        /// <summary>Recursively find a descendant by name (incl. inactive) under root and deactivate it.</summary>
+        private static void HideLaunchPanelElement(Transform root, string name)
+        {
+            if (root == null) return;
+            Transform t = FindDescendant(root, name);
+            if (t != null && t.gameObject.activeSelf) t.gameObject.SetActive(false);
+        }
+
+        private static Transform FindDescendant(Transform parent, string name)
+        {
+            for (int i = 0; i < parent.childCount; i++)
+            {
+                Transform c = parent.GetChild(i);
+                if (c.name == name) return c;
+                Transform r = FindDescendant(c, name);
+                if (r != null) return r;
+            }
+            return null;
         }
 
         public static void SetupDifficultyIndicators()

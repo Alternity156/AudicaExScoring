@@ -11,7 +11,6 @@ namespace ExScoringMod
         public static SortedDictionary<string, Playlist> playlists { get; private set; }
         public static Playlist selectedPlaylist { get; private set; }
         public static Playlist playlistToEdit { get; private set; }
-        public static FilterPanel.Filter playlistFilter { get; set; }
         public static PlaylistState state { get; set; }
         public static List<SongList.SongData> internalSongList { get; private set; }
         public static Song[] apiSongList { get; set; }
@@ -48,15 +47,6 @@ namespace ExScoringMod
         {
             if (playlistToEdit is null) return;
             playlistToEdit.MoveSongDown(song);
-        }
-
-        public static void OnFilterApplied()
-        {
-            if (selectedPlaylist is null)
-            {
-                PlaylistManager.state = PlaylistManager.PlaylistState.Selecting;
-                MenuState.I.GoToSettingsPage();
-            }
         }
 
         public static void SavePlaylist(string playlistName, bool fromEdit)
@@ -155,7 +145,6 @@ namespace ExScoringMod
             PlaylistUtil.Popup(songName + " added to " + playlistName);
             playlists[playlistName].AddSong(songName);
             SavePlaylist(playlistName, false);
-            AddPlaylistButton.songToAdd = "";
         }
 
         public static void RemoveSongFromPlaylist(string songName)
@@ -166,6 +155,19 @@ namespace ExScoringMod
                 return;
             }
             playlists[playlistToEdit.name].RemoveSong(songName);
+        }
+
+        /// <summary>Remove a song (filename stem) from a named playlist and persist the change.</summary>
+        public static void RemoveSongFromPlaylistByName(string playlistName, string songStem)
+        {
+            if (!playlists.ContainsKey(playlistName))
+            {
+                MelonLogger.Log("Playlist " + playlistName + " couldn't be found.");
+                return;
+            }
+            PlaylistUtil.Popup(songStem + " removed from " + playlistName);
+            playlists[playlistName].RemoveSong(songStem);
+            SavePlaylist(playlistName, false);
         }
 
         public static void DeletePlaylist()

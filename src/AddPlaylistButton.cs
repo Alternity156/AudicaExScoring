@@ -1,12 +1,15 @@
 ﻿using System;
-using System.Collections;
 using System.IO;
-using MelonLoader;
 using TMPro;
 using UnityEngine;
 
 namespace ExScoringMod
 {
+    /// <summary>
+    /// The launch-panel playlist button. Reads "Add to Playlist" for a normal song (opens the
+    /// transient playlist picker) and "Remove from Playlist" for a song shown inside a playlist.
+    /// In-game (Pause/Fail/EndGame/PracticeModeOver) variants were removed.
+    /// </summary>
     internal static class AddPlaylistButton
     {
         private static GameObject playlistButton;
@@ -16,92 +19,82 @@ namespace ExScoringMod
         private static Vector3 playlistButtonMenuRotation = new Vector3(0f, 0f, 0f);
         private static Vector3 playlistButtonLabelScale = new Vector3(1.5f, 1.5f, 1.5f);
 
-        private static Vector3 playlistButtonInGameUIPosition = new Vector3(5f, 17f, 0f);
-        private static Vector3 playlistButtonInGameUIRotation = new Vector3(0f, 0f, 0f);
-
-        public static string songToAdd;
-
         public static void CreatePlaylistButton(ButtonUtils.ButtonLocation location = ButtonUtils.ButtonLocation.Menu)
         {
+            if (location != ButtonUtils.ButtonLocation.Menu) return; // in-game add buttons removed
             if (PlaylistManager.state == PlaylistManager.PlaylistState.Endless) return;
 
-            if (location == ButtonUtils.ButtonLocation.Menu && playlistButton != null)
+            if (playlistButton != null)
             {
-                UpdateLabel();
-                playlistButton.SetActive(true);
+                // Context-aware label (Add vs Remove) so song-page re-setup doesn't clobber it.
+                UpdateForSelection();
+                if (!MarathonSetup.Active) playlistButton.SetActive(true);
                 return;
             }
 
-            string name = "InGameUI/ShellPage_EndGameContinue/page/ShellPanel_Center/exit";
-            Vector3 localPosition = playlistButtonInGameUIPosition;
-            Vector3 rotation = playlistButtonInGameUIRotation;
-            Action listener = new Action(() => { OnIngamePlaylistButtonShot(); });
-            if (location == ButtonUtils.ButtonLocation.Failed)
-            {
-                name = "InGameUI/ShellPage_Failed/page/ShellPanel_Center/exit";
-            }
-            else if (location == ButtonUtils.ButtonLocation.Pause)
-            {
-                name = "InGameUI/ShellPage_Pause/page/ShellPanel_Center/exit";
-            }
-            else if (location == ButtonUtils.ButtonLocation.PracticeModeOver)
-            {
-                name = "InGameUI/ShellPage_PracticeModeOver/page/ShellPanel_Center/exit";
-            }
-            else if (location == ButtonUtils.ButtonLocation.Menu)
-            {
-                name = "menu/ShellPage_Launch/page/ShellPanel_Center/NoFailPracticeToggle/PracticeToggle";
-                listener = new Action(() => { OnPlaylistButtonShot(); });
-                localPosition = playlistButtonMenuPosition;
-                rotation = playlistButtonMenuRotation;
-            }
-
-            var refButton = GameObject.Find(name);
+            var refButton = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center/NoFailPracticeToggle/PracticeToggle");
             if (refButton == null) return;
 
-            GameObject button = GameObject.Instantiate(refButton, refButton.transform.parent.transform);
-            if (location == ButtonUtils.ButtonLocation.Menu)
-            {
-                playlistButton = button;
-                button.transform.localScale = playlistButtonMenuScale;
-            }
-            ButtonUtils.InitButton(button, "Add to Playlist", listener, localPosition, rotation);
-            if (location == ButtonUtils.ButtonLocation.Menu)
-            {
-                TextMeshPro label = button.GetComponentInChildren<TextMeshPro>();
-                if (label != null)
-                    label.transform.localScale = playlistButtonLabelScale;
-            }
+            playlistButton = GameObject.Instantiate(refButton, refButton.transform.parent.transform);
+            playlistButton.transform.localScale = playlistButtonMenuScale;
+            ButtonUtils.InitButton(playlistButton, "Add to Playlist",
+                new Action(() => OnPlaylistButtonShot()), playlistButtonMenuPosition, playlistButtonMenuRotation);
+
+            TextMeshPro label = playlistButton.GetComponentInChildren<TextMeshPro>();
+            if (label != null) label.transform.localScale = playlistButtonLabelScale;
+
+            UpdateForSelection();
         }
 
         private static void OnPlaylistButtonShot()
         {
-            SelectPlaylist();
+            string context = FolderRowManager.CurrentPlaylistContext;
+            if (context != null)
+            {
+                RemoveSelectedFromPlaylist(context);
+                return;
+            }
+
+            // Add: open the transient picker for the selected song.
+            string stem = SelectedSongStem();
+            if (stem != null) FolderRowManager.EnterAddPicker(stem);
         }
 
-        private static void OnIngamePlaylistButtonShot()
+        /// <summary>Updates the launch-panel button label for the current selection's context.</summary>
+        public static void UpdateForSelection()
         {
-            MelonCoroutines.Start(GoToSelectPlaylist());
+            if (playlistButton == null) return;
+            string context = FolderRowManager.CurrentPlaylistContext;
+            ButtonUtils.UpdateButtonLabel(playlistButton, context != null ? "Remove from Playlist" : "Add to Playlist");
         }
 
-        private static IEnumerator GoToSelectPlaylist()
+        public static void Hide()
         {
-            InGameUI.I.ReturnToSongList();
-            yield return new WaitForSecondsRealtime(.5f);
-            SelectPlaylist();
+            if (playlistButton != null) playlistButton.SetActive(false);
         }
 
-        private static void SelectPlaylist()
+        public static void Show()
         {
-            songToAdd = Path.GetFileName(SongDataHolder.I.songData.zipPath);
-            songToAdd = songToAdd.Substring(0, songToAdd.Length - 7);
-            PlaylistManager.state = PlaylistManager.PlaylistState.Adding;
-            MenuState.I.GoToSettingsPage();
+            if (playlistButton != null) playlistButton.SetActive(true);
+            UpdateForSelection();
         }
 
-        private static void UpdateLabel()
+        private static void RemoveSelectedFromPlaylist(string playlistName)
         {
-            ButtonUtils.UpdateButtonLabel(playlistButton, "Add to Playlist");
+            string stem = SelectedSongStem();
+            if (stem == null) return;
+
+            PlaylistManager.RemoveSongFromPlaylistByName(playlistName, stem);
+            FolderRowManager.RefreshAfterPlaylistEdit();
+        }
+
+        /// <summary>Filename stem (no ".audica") of the currently selected song, or null.</summary>
+        private static string SelectedSongStem()
+        {
+            if (ExScoring.selectedSongData == null) return null;
+            string stem = Path.GetFileName(ExScoring.selectedSongData.zipPath);
+            if (stem.EndsWith(".audica")) stem = stem.Substring(0, stem.Length - ".audica".Length);
+            return stem;
         }
     }
 }

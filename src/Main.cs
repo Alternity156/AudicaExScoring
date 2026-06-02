@@ -258,8 +258,8 @@ namespace ExScoringMod
                 MelonLogger.Log($"[SongCount] API response length: {www.text?.Length}");
                 int newSongCount = MelonLoader.TinyJSON.JSON.Load(www.text).Make<NewAPISongList>().count;
                 MelonLogger.Log($"[SongCount] API count: {newSongCount}, LastSongCount: {Config.LastSongCount}");
-                MelonLogger.Log($"[SongCount] notificationPanel null? {FilterPanel.notificationPanel == null}");
-                if (FilterPanel.notificationPanel != null)
+                MelonLogger.Log($"[SongCount] notificationPanel null? {SongListNotification.notificationPanel == null}");
+                if (SongListNotification.notificationPanel != null)
                 {
                     if (Config.LastSongCount == 0)
                     {
@@ -268,7 +268,7 @@ namespace ExScoringMod
                     }
                     else if (Config.LastSongCount == newSongCount)
                     {
-                        FilterPanel.SetNotificationText("There are no new songs available");
+                        SongListNotification.SetText("There are no new songs available");
                         MelonLogger.Log("[SongCount] No new songs");
                     }
                     else
@@ -277,7 +277,7 @@ namespace ExScoringMod
                         bool isSingular = diff == 1;
                         string pre = isSingular ? "is " : "are ";
                         string noun = isSingular ? "song" : "songs";
-                        FilterPanel.SetNotificationText("There " + pre + diff.ToString() + " new " + noun + " available");
+                        SongListNotification.SetText("There " + pre + diff.ToString() + " new " + noun + " available");
                         MelonLogger.Log($"[SongCount] {diff} new songs");
                     }
                     Config.UpdateSongCount(newSongCount);
@@ -453,6 +453,7 @@ namespace ExScoringMod
         {
             VirtualSongList.Sync();
             EnforceLaunchPanelBlank();
+            MarathonSetup.Enforce();
         }
 
         /// <summary>

@@ -30,9 +30,15 @@ namespace ExScoringMod
         [HarmonyPatch(typeof(LaunchPanel), "Play")]
         public static class PlayPatch
         {
-            public static void Prefix()
+            public static bool Prefix()
             {
                 suppressShellPageAnimations = false;
+
+                // In marathon setup, Play starts the marathon instead of the selected song.
+                if (MarathonSetup.TryStartFromPlay())
+                    return false;
+
+                return true;
             }
         }
 
@@ -161,6 +167,11 @@ namespace ExScoringMod
         {
             public static void Postfix(ref bool __result)
             {
+                if (MarathonSetup.Active)
+                {
+                    __result = false; // no launch-screen preview during marathon setup
+                    return;
+                }
                 if (menuState == MenuState.State.SongPage)
                 {
                     __result = true;
@@ -208,6 +219,9 @@ namespace ExScoringMod
                 // Folder rows have no song data — ignore them
                 if (__instance.mSongData == null) return;
 
+                // Picking a song exits marathon setup and restores the launch panel.
+                MarathonSetup.CancelIfActive();
+
                 selectedSong = __instance.mSongData.songID;
                 maxPossibleExScore = GetMaxPossibleExScore(selectedSong);
                 selectedSongData = __instance.mSongData;
@@ -229,6 +243,7 @@ namespace ExScoringMod
                 UpdateLaunchPanelInfo();
                 UpdateSongSelectionIndicator(__instance);
                 RefreshIntensityGraph();
+                AddPlaylistButton.UpdateForSelection();
             }
         }
 
@@ -632,34 +647,8 @@ namespace ExScoringMod
 
             private static void Postfix(OptionsMenu __instance, OptionsMenu.Page page)
             {
-                if (page == OptionsMenu.Page.Main)
-                {
-                    PlaylistCreatePanel.SetMenu(__instance);
-                    PlaylistSelectPanel.SetMenu(__instance);
-                    PlaylistEditPanel.SetMenu(__instance);
-                    PlaylistEndlessPanel.SetMenu(__instance);
-
-                    if (PlaylistManager.state == PlaylistManager.PlaylistState.Selecting ||
-                        PlaylistManager.state == PlaylistManager.PlaylistState.Adding)
-                    {
-                        PlaylistSelectPanel.GoToPanel();
-                    }
-                    else if (PlaylistManager.state == PlaylistManager.PlaylistState.Endless)
-                    {
-                        PlaylistEndlessPanel.GoToPanel();
-                    }
-                }
-                else if (page == OptionsMenu.Page.Misc)
-                {
-                    if (PlaylistManager.state == PlaylistManager.PlaylistState.Creating)
-                    {
-                        PlaylistCreatePanel.GoToPanel();
-                    }
-                    else if (PlaylistManager.state == PlaylistManager.PlaylistState.Editing)
-                    {
-                        PlaylistEditPanel.GoToPanel();
-                    }
-                }
+                // Old playlist settings-panel routing retired; the playlist UI now lives
+                // entirely in the in-world folder/list navigation.
             }
         }
 
@@ -672,34 +661,10 @@ namespace ExScoringMod
         {
             private static bool Prefix(OptionsMenu __instance)
             {
-                if (PlaylistManager.state == PlaylistManager.PlaylistState.Selecting ||
-                    PlaylistManager.state == PlaylistManager.PlaylistState.Adding)
-                {
-                    PlaylistSelectPanel.CancelSelect();
-                    return false;
-                }
-                else if (PlaylistManager.state == PlaylistManager.PlaylistState.Creating)
-                {
-                    PlaylistCreatePanel.CancelCreate();
-                    return false;
-                }
-                else if (PlaylistManager.state == PlaylistManager.PlaylistState.Editing)
-                {
-                    PlaylistEditPanel.CancelEdit();
-                    return false;
-                }
-                else if (PlaylistManager.state == PlaylistManager.PlaylistState.Endless)
-                {
-                    PlaylistEndlessPanel.CancelEndless();
-                    return false;
-                }
-                else
-                {
-                    if (SongDownloaderUI.songItemPanel != null)
-                        SongDownloaderUI.songItemPanel.SetPageActive(false);
-                    if (SongDownloader.needRefresh)
-                        ReloadSongList(false);
-                }
+                if (SongDownloaderUI.songItemPanel != null)
+                    SongDownloaderUI.songItemPanel.SetPageActive(false);
+                if (SongDownloader.needRefresh)
+                    ReloadSongList(false);
                 return true;
             }
         }
@@ -749,25 +714,13 @@ namespace ExScoringMod
                                 break;
                         }
                     }
-                    else if (PlaylistManager.state == PlaylistManager.PlaylistState.Creating)
+                    else if (PlaylistNav.Creating)
                     {
                         switch (label)
                         {
-                            case "done":
-                                __instance.Hide();
-                                shouldShowKeyboard = false;
-                                break;
-                            case "clear":
-                                PlaylistCreatePanel.newName = "";
-                                break;
-                            default:
-                                PlaylistCreatePanel.newName += label;
-                                break;
-                        }
-
-                        if (PlaylistCreatePanel.playlistText != null)
-                        {
-                            PlaylistCreatePanel.playlistText.text = PlaylistCreatePanel.newName;
+                            case "done": PlaylistNav.FinishCreate(); break;
+                            case "clear": PlaylistNav.SetCreateName(""); break;
+                            default: PlaylistNav.AppendCreateName(label); break;
                         }
                     }
                     else
@@ -816,14 +769,9 @@ namespace ExScoringMod
                         SongSearch.query = SongSearch.query.Substring(0, SongSearch.query.Length - 1);
                         SongSearch.UpdateLiveText();
                     }
-                    else if (PlaylistManager.state == PlaylistManager.PlaylistState.Creating)
+                    else if (PlaylistNav.Creating)
                     {
-                        if (PlaylistCreatePanel.newName == "" || PlaylistCreatePanel.newName is null)
-                            return false;
-                        PlaylistCreatePanel.newName = PlaylistCreatePanel.newName.Substring(0, PlaylistCreatePanel.newName.Length - 1);
-
-                        if (PlaylistCreatePanel.playlistText != null)
-                            PlaylistCreatePanel.playlistText.text = PlaylistCreatePanel.newName;
+                        PlaylistNav.BackspaceCreateName();
                     }
                     else
                     {
@@ -855,12 +803,9 @@ namespace ExScoringMod
                         SongSearch.query += " ";
                         SongSearch.UpdateLiveText();
                     }
-                    else if (PlaylistManager.state == PlaylistManager.PlaylistState.Creating)
+                    else if (PlaylistNav.Creating)
                     {
-                        PlaylistCreatePanel.newName += " ";
-
-                        if (PlaylistCreatePanel.playlistText != null)
-                            PlaylistCreatePanel.playlistText.text = PlaylistCreatePanel.newName;
+                        PlaylistNav.AppendCreateName(" ");
                     }
                     else
                     {
@@ -888,7 +833,7 @@ namespace ExScoringMod
                 {
                     SongDownloader.StartNewSongSearch();
                     PlaylistManager.OnApplicationStart();
-                    FilterPanel.OnApplicationStart();
+                    FavoritesStore.Load();
                     SongDownloadTracker.StartSongListUpdate();
                 }
             }
@@ -899,14 +844,13 @@ namespace ExScoringMod
         // ══════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// Applies the active custom filter to the song list results.
+        /// Removes deleted songs and hands the full song set to the folder system to organize.
         /// </summary>
         [HarmonyPatch(typeof(SongSelect), "GetSongIDs", new Type[] { typeof(bool) })]
         private static class SongSelectGetSongIDsPatch
         {
             private static void Postfix(SongSelect __instance, ref bool extras, ref Il2CppSystem.Collections.Generic.List<string> __result)
             {
-                FilterPanel.ApplyFilter(__instance, ref extras, ref __result);
                 if (deletedSongs.Count > 0)
                 {
                     foreach (var deletedSong in deletedSongs)
@@ -915,13 +859,9 @@ namespace ExScoringMod
                     }
                 }
 
-                // When no custom filter is active, inject ALL songs so the folder
-                // system has every song available to organize, regardless of the
-                // built-in Main/Extras filter.
-                if (!FilterPanel.IsFiltering("search") && !FilterPanel.IsFiltering("playlists"))
-                {
-                    FolderRowManager.InjectAllSongs(__result);
-                }
+                // Inject ALL songs so the folder system has every song available to organize,
+                // regardless of the built-in Main/Extras filter.
+                FolderRowManager.InjectAllSongs(__result);
 
                 RandomSong.UpdateAvailableSongs(__result, extras);
                 MelonLogger.Log($"[RandomSong] UpdateAvailableSongs called: extras={extras}, count={__result.Count}");
@@ -929,14 +869,14 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Initializes the filter panel and creates buttons when the song select page loads.
+        /// Sets up the song-list notification and folder defaults when the song select page loads.
         /// </summary>
         [HarmonyPatch(typeof(SongSelect), "OnEnable", new Type[0])]
         private static class SongSelectOnEnablePatch
         {
             private static void Postfix(SongSelect __instance)
             {
-                FilterPanel.Initialize();
+                SongListNotification.Setup();
                 PlaylistManager.PopulatePlaylistsSongNames();
                 PlaylistManager.DownloadMissingSongs();
                 MelonCoroutines.Start(UpdateLastSongCount());
@@ -962,37 +902,9 @@ namespace ExScoringMod
         {
             private static bool Prefix(SongListControls __instance)
             {
-                FilterPanel.DisableCustomFilters();
                 // Redirect to FilterMain so ShowSongList takes the single-phase path
                 __instance.FilterMain();
                 return false; // skip original FilterAll
-            }
-        }
-
-        /// <summary>
-        /// Disables custom filters when the user clicks "Main" in the song list.
-        /// </summary>
-        [HarmonyPatch(typeof(SongListControls), "FilterMain", new Type[0])]
-        private static class SongListControlsFilterMainPatch
-        {
-            private static void Prefix(SongListControls __instance)
-            {
-                FilterPanel.DisableCustomFilters();
-            }
-        }
-
-        /// <summary>
-        /// Forces default sort when playlist filter is active to preserve playlist order.
-        /// </summary>
-        [HarmonyPatch(typeof(SongSelect), "ChangeSort", new Type[] { typeof(SongSelect.Sort) })]
-        private static class SongSelectChangeSortPatch
-        {
-            private static void Prefix(SongSelect __instance, ref SongSelect.Sort newSort)
-            {
-                if (FilterPanel.IsFiltering("playlists"))
-                {
-                    newSort = SongSelect.Sort.Default;
-                }
             }
         }
 
@@ -1008,7 +920,6 @@ namespace ExScoringMod
                 {
                     SongSearchField.CreateField();
                     RefreshButton.CreateRefreshButton();
-                    SelectPlaylistButton.CreatePlaylistButton();
                     RandomSongButton.CreateRandomSongButton();
                     PlaylistEndlessManager.ResetIndex();
                 }
@@ -1097,27 +1008,23 @@ namespace ExScoringMod
                 {
                     CreateDeleteButton(ButtonUtils.ButtonLocation.Failed);
                     CreateFavoriteButton(ButtonUtils.ButtonLocation.Failed);
-                    AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.Failed);
                     PlaylistEndlessSkipButton.CreateSkipButton(ButtonUtils.ButtonLocation.Failed);
                 }
                 else if (state == InGameUI.State.PausePage)
                 {
                     CreateDeleteButton(ButtonUtils.ButtonLocation.Pause);
                     CreateFavoriteButton(ButtonUtils.ButtonLocation.Pause);
-                    AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.Pause);
                     PlaylistEndlessSkipButton.CreateSkipButton(ButtonUtils.ButtonLocation.Pause);
                 }
                 else if (state == InGameUI.State.EndGameContinuePage)
                 {
                     CreateDeleteButton(ButtonUtils.ButtonLocation.EndGame);
                     CreateFavoriteButton(ButtonUtils.ButtonLocation.EndGame);
-                    AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.EndGame);
                 }
                 else if (state == InGameUI.State.PracticeModeOverPage)
                 {
                     CreateDeleteButton(ButtonUtils.ButtonLocation.PracticeModeOver);
                     CreateFavoriteButton(ButtonUtils.ButtonLocation.PracticeModeOver);
-                    AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.PracticeModeOver);
                 }
             }
         }

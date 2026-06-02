@@ -10,21 +10,36 @@ using UnityEngine.Events;
 
 namespace ExScoringMod
 {
-    public enum ViewRowKind { FolderHeader, Song }
+    public enum ViewRowKind { FolderHeader, Song, Action }
 
-    /// <summary>A single row in the song-list view: either a folder header or a song.</summary>
+    /// <summary>
+    /// A single row in the song-list view: a folder header, a song, or an action button
+    /// (Back / Create / Marathon / Delete / Playlists). Headers and actions share the header
+    /// pool's styled, shootable button; songs use the song pool.
+    /// </summary>
     public struct ViewRow
     {
         public ViewRowKind kind;
         public string folderName; // header
         public int songCount;     // header
         public string songID;     // song
+        public string label;      // action: button text
+        public string subLabel;   // action: optional second line
+        public Color color;       // header + action: quad color (applied at bind time)
+        public Action onHit;      // action: callback when shot
+        public string actionId;   // action: optional id for selection highlighting
+
+        /// <summary>Default folder-header grey. Action rows override via their own color.</summary>
+        public static readonly Color FolderColor = new Color(0.18f, 0.18f, 0.18f, 1f);
 
         public static ViewRow Header(string folder, int count)
-            => new ViewRow { kind = ViewRowKind.FolderHeader, folderName = folder, songCount = count };
+            => new ViewRow { kind = ViewRowKind.FolderHeader, folderName = folder, songCount = count, color = FolderColor };
 
         public static ViewRow SongRow(string id)
             => new ViewRow { kind = ViewRowKind.Song, songID = id };
+
+        public static ViewRow ActionRow(string label, Color color, Action onHit, string subLabel = null, string actionId = null)
+            => new ViewRow { kind = ViewRowKind.Action, label = label, color = color, onHit = onHit, subLabel = subLabel, actionId = actionId };
     }
 
     /// <summary>
@@ -56,6 +71,38 @@ namespace ExScoringMod
         /// keeping VirtualSongList independent of the folder logic.
         /// </summary>
         public static Action<string> FolderToggleHandler;
+
+        /// <summary>
+        /// Id of the action row that should show the selection highlight (e.g. "marathon"). When
+        /// set, song rows suppress their own selection indicator so only the action looks selected.
+        /// </summary>
+        public static string SelectedActionId;
+
+        /// <summary>Set (or clear with null) the selected action row, refreshing visible indicators.</summary>
+        public static void SetSelectedAction(string id)
+        {
+            SelectedActionId = id;
+            RefreshSelectionIndicators();
+        }
+
+        /// <summary>Live-update the visible text of the bound action row with the given id (e.g. while typing).</summary>
+        public static void UpdateActionRowText(string actionId, string label, string subLabel)
+        {
+            if (string.IsNullOrEmpty(actionId)) return;
+            foreach (var kv in rowBindings)
+            {
+                if (!kv.Value.isHeader) continue;
+                int idx = kv.Key;
+                if (idx < 0 || idx >= view.Count) continue;
+                var row = view[idx];
+                if (row.kind != ViewRowKind.Action || row.actionId != actionId) continue;
+
+                var hi = headerPool[kv.Value.slot];
+                if (hi.title != null) hi.title.text = label ?? "";
+                if (hi.artist != null) hi.artist.text = subLabel ?? "";
+                return;
+            }
+        }
 
         private static SongSelect songSelect;
         private static ShellScrollable scroller;
@@ -90,6 +137,7 @@ namespace ExScoringMod
             public TextMeshProUGUI title;
             public TextMeshProUGUI artist;
             public GunButton button;
+            public Material quadMat;   // recolored per bind
             public bool inUse;
         }
 
@@ -102,7 +150,6 @@ namespace ExScoringMod
         private static readonly List<int> tmpRelease = new List<int>();
 
         private const int PoolBuffer = 6;
-        private static readonly Color FolderRowColor = new Color(0.18f, 0.18f, 0.18f, 1f);
 
         // ══════════════════════════════════════════════════════════════════════
         //  CORE (the keeper — Phase 2/3 build on this)
@@ -112,7 +159,14 @@ namespace ExScoringMod
         /// Replace the current view with a new ordered row list. Rebuilds placeholders to match,
         /// reusing the pools. This is the push entry point FolderRowManager will call in Phase 2.
         /// </summary>
-        public static void SetView(List<ViewRow> rows)
+        public static void SetView(List<ViewRow> rows) => SetView(rows, null);
+
+        /// <summary>
+        /// Replace the view, scrolling to <paramref name="targetScroll"/> if given. Navigation
+        /// level changes pass an explicit target (0 to drill in, the saved index to back out),
+        /// since the live scroll position is meaningless across two different lists.
+        /// </summary>
+        public static void SetView(List<ViewRow> rows, float? targetScroll)
         {
             if (!EnsureRefs()) return;
 
@@ -124,7 +178,7 @@ namespace ExScoringMod
             // Preserve scroll position. While already active (e.g. a folder toggle) the live
             // scroller position is meaningful. On a fresh (re)entry the live scroller was zeroed
             // in Teardown, so restore the position we saved when leaving.
-            float prevScroll = active ? scroller.GetScrollIndex() : savedScroll;
+            float prevScroll = targetScroll ?? (active ? scroller.GetScrollIndex() : savedScroll);
 
             view.Clear();
             viewSongIDs.Clear();
@@ -152,6 +206,8 @@ namespace ExScoringMod
             float maxScroll = Mathf.Max(0f, view.Count - scroller.displayCount);
             scroller.SnapTo(Mathf.Clamp(prevScroll, 0f, maxScroll), true);
             scroller.UpdateScroll(-1);
+
+            MelonLogger.Log($"[VList] SetView: {view.Count} rows, scroll={Mathf.Clamp(prevScroll, 0f, maxScroll):0.0}/{maxScroll:0.0}, displayCount={scroller.displayCount:0.0}");
 
             Sync();
         }
@@ -193,6 +249,9 @@ namespace ExScoringMod
 
         public static int IndexOf(string songID)
             => songToViewIndex.TryGetValue(songID, out int i) ? i : -1;
+
+        /// <summary>Current scroll index (0 when inactive). Used to snapshot per-level scroll.</summary>
+        public static float GetScroll() => (active && scroller != null) ? scroller.GetScrollIndex() : 0f;
 
         /// <summary>The pooled SongSelectItem currently displaying songID, or null if off-screen.</summary>
         public static SongSelectItem GetBoundItem(string songID)
@@ -460,22 +519,15 @@ namespace ExScoringMod
                     pi.ssi.button.SetInteractable(true);
                 }
 
-                // Selection indicator follows the SONG, not the GameObject.
+                // Selection indicator follows the SONG, not the GameObject (suppressed while an
+                // action row is selected).
                 if (pi.ssi != null)
-                {
-                    if (row.songID == ExScoring.selectedSong)
-                        ExScoring.UpdateSongSelectionIndicator(pi.ssi);
-                    else
-                    {
-                        var stale = pi.ssi.transform.Find("SelectedIndicator");
-                        if (stale != null) stale.gameObject.SetActive(false);
-                    }
-                }
+                    ApplySongIndicator(pi, row);
 
                 pi.inUse = true;
                 rowBindings[viewIndex] = new Binding { isHeader = false, slot = slot };
             }
-            else // FolderHeader
+            else // FolderHeader or Action — both use the header pool's styled button
             {
                 int slot = AcquireHeaderSlot();
                 if (slot < 0) { MelonLogger.Log($"[VList] Header pool exhausted at row {viewIndex}."); return; }
@@ -493,20 +545,95 @@ namespace ExScoringMod
                 hi.go.transform.localRotation = Quaternion.identity;
                 hi.go.SetActive(true);
 
-                if (hi.title != null) hi.title.text = row.folderName;
-                if (hi.artist != null) hi.artist.text = $"{row.songCount} song{(row.songCount != 1 ? "s" : "")}";
+                // Per-row color (folder grey, or the action row's own color).
+                if (hi.quadMat != null) hi.quadMat.color = row.color;
 
-                // Rewire the toggle for this folder.
-                if (hi.button != null)
+                if (row.kind == ViewRowKind.FolderHeader)
                 {
-                    string captured = row.folderName;
-                    hi.button.onHitEvent = new UnityEvent();
-                    hi.button.onHitEvent.AddListener(new Action(() => FolderToggleHandler?.Invoke(captured)));
+                    if (hi.title != null) hi.title.text = row.folderName;
+                    if (hi.artist != null) hi.artist.text = $"{row.songCount} song{(row.songCount != 1 ? "s" : "")}";
+
+                    if (hi.button != null)
+                    {
+                        string captured = row.folderName;
+                        hi.button.onHitEvent = new UnityEvent();
+                        hi.button.onHitEvent.AddListener(new Action(() => FolderToggleHandler?.Invoke(captured)));
+                    }
+                }
+                else // Action
+                {
+                    if (hi.title != null) hi.title.text = row.label ?? "";
+                    if (hi.artist != null) hi.artist.text = row.subLabel ?? "";
+
+                    if (hi.button != null)
+                    {
+                        Action cb = row.onHit;
+                        hi.button.onHitEvent = new UnityEvent();
+                        hi.button.onHitEvent.AddListener(new Action(() => cb?.Invoke()));
+                    }
                 }
 
                 hi.inUse = true;
                 rowBindings[viewIndex] = new Binding { isHeader = true, slot = slot };
+                ApplyHeaderIndicator(hi, row);
             }
+        }
+
+        // ── Selection indicators ───────────────────────────────────────────────
+
+        /// <summary>Re-apply selection highlights to all currently-bound rows.</summary>
+        public static void RefreshSelectionIndicators()
+        {
+            foreach (var kv in rowBindings)
+            {
+                int idx = kv.Key;
+                if (idx < 0 || idx >= view.Count) continue;
+                var b = kv.Value;
+                if (b.isHeader) ApplyHeaderIndicator(headerPool[b.slot], view[idx]);
+                else ApplySongIndicator(songPool[b.slot], view[idx]);
+            }
+        }
+
+        /// <summary>Song selection highlight — shown for the selected song unless an action is selected.</summary>
+        private static void ApplySongIndicator(SongPoolItem pi, ViewRow row)
+        {
+            if (pi.ssi == null) return;
+            if (SelectedActionId == null && row.songID == ExScoring.selectedSong)
+            {
+                ExScoring.UpdateSongSelectionIndicator(pi.ssi);
+            }
+            else
+            {
+                var stale = pi.ssi.transform.Find("SelectedIndicator");
+                if (stale != null) stale.gameObject.SetActive(false);
+            }
+        }
+
+        /// <summary>Action/header selection highlight — shown when the row's actionId is selected.</summary>
+        private static void ApplyHeaderIndicator(HeaderPoolItem hi, ViewRow row)
+        {
+            bool sel = !string.IsNullOrEmpty(row.actionId) && row.actionId == SelectedActionId;
+            Transform existing = hi.go.transform.Find("SelectedIndicator");
+
+            if (!sel)
+            {
+                if (existing != null) existing.gameObject.SetActive(false);
+                return;
+            }
+
+            if (existing == null)
+            {
+                if (ExScoring.difficultyIndicatorSource == null) return;
+                var ind = UnityEngine.Object.Instantiate(ExScoring.difficultyIndicatorSource, hi.go.transform);
+                ind.name = "SelectedIndicator";
+                ind.transform.localPosition = new Vector3(0f, 0f, -0.05f);
+                ind.transform.localRotation = Quaternion.identity;
+                ind.transform.localScale = new Vector3(3.625f, 1.5f, 1f); // match song-row indicator
+                var r = ind.GetComponent<MeshRenderer>();
+                if (r != null) { r.material.color = new Color(1f, 1f, 1f, 1f); r.sortingOrder = -1; }
+                existing = ind.transform;
+            }
+            existing.gameObject.SetActive(true);
         }
 
         private static void ReleaseBinding(int viewIndex)
@@ -656,9 +783,9 @@ namespace ExScoringMod
             HideDecorations(clone);
             HideCanvasElements(clone);
             DisableBloom(clone);
-            GunButton button = StyleFolderQuad(clone);
+            GunButton button = StyleFolderQuad(clone, out Material quadMat);
 
-            return new HeaderPoolItem { go = clone, title = title, artist = artist, button = button, inUse = false };
+            return new HeaderPoolItem { go = clone, title = title, artist = artist, button = button, quadMat = quadMat, inUse = false };
         }
 
         private static void DestroyPool()
@@ -707,8 +834,9 @@ namespace ExScoringMod
             }
         }
 
-        private static GunButton StyleFolderQuad(GameObject row)
+        private static GunButton StyleFolderQuad(GameObject row, out Material mat)
         {
+            mat = null;
             Transform quad = FindChild(row.transform, "Quad");
             if (quad == null) return null;
 
@@ -718,7 +846,7 @@ namespace ExScoringMod
                 Shader sh = Shader.Find("Unlit/Color") ?? Shader.Find("Standard");
                 if (sh != null)
                 {
-                    var mat = new Material(sh) { color = FolderRowColor };
+                    mat = new Material(sh) { color = ViewRow.FolderColor };
                     renderer.material = mat;
                 }
             }

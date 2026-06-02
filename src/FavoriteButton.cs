@@ -80,7 +80,7 @@ namespace ExScoringMod
         {
             if (selectedSong == null) return;
 
-            FilterPanel.AddFavorite(selectedSong);
+            FavoritesStore.AddFavorite(selectedSong);
             UpdateFavoriteIndicator();
         }
 
@@ -92,7 +92,7 @@ namespace ExScoringMod
         {
             if (favoriteIndicator == null) return;
 
-            bool isFav = selectedSong != null && FilterPanel.IsFavorite(selectedSong);
+            bool isFav = selectedSong != null && FavoritesStore.IsFavorite(selectedSong);
             favoriteIndicator.SetActive(isFav);
         }
 
@@ -135,7 +135,7 @@ namespace ExScoringMod
             {
                 if (SongDataHolder.I == null || SongDataHolder.I.songData == null) return;
                 string songID = System.IO.Path.GetFileNameWithoutExtension(SongDataHolder.I.songData.zipPath);
-                FilterPanel.AddFavorite(songID);
+                FavoritesStore.AddFavorite(songID);
             }), localPosition, rotation);
         }
     }

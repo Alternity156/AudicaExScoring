@@ -75,6 +75,22 @@ namespace ExScoringMod
             SongSearch.UpdateLiveText();
         }
 
+        /// <summary>
+        /// Show the keyboard WITHOUT entering song-search mode. Input routing then falls to whatever
+        /// other context is active (e.g. playlist creation), gated by shouldShowKeyboard.
+        /// </summary>
+        public static void ShowGeneric()
+        {
+            EnsureCopy();
+            if (keyboardCopy == null) return;
+
+            keyboardCopy.SetActive(true);
+            var ke = keyboardCopy.GetComponent<KeyboardEntry>();
+            if (ke != null) ke.Show();
+
+            ExScoring.shouldShowKeyboard = true;
+        }
+
         public static void Hide()
         {
             ExScoring.shouldShowKeyboard = false;
