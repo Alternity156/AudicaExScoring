@@ -624,7 +624,6 @@ namespace ExScoringMod
                     settingsButtonCount++;
                     if (settingsButtonCount == 9)
                     {
-                        SongDownloaderUI.AddPageButton(__instance, 0);
                         SongSearchScreen.SetMenu(__instance);
                     }
                 }
@@ -642,30 +641,12 @@ namespace ExScoringMod
             {
                 shouldShowKeyboard = false;
                 settingsButtonCount = 0;
-                SongDownloader.searchString = "";
             }
 
             private static void Postfix(OptionsMenu __instance, OptionsMenu.Page page)
             {
                 // Old playlist settings-panel routing retired; the playlist UI now lives
                 // entirely in the in-world folder/list navigation.
-            }
-        }
-
-        /// <summary>
-        /// Handles cleanup when backing out of settings pages.
-        /// Routes to the correct cancel handler based on current state.
-        /// </summary>
-        [HarmonyPatch(typeof(OptionsMenu), "BackOut", new Type[0])]
-        private static class OptionsMenuBackOutPatch
-        {
-            private static bool Prefix(OptionsMenu __instance)
-            {
-                if (SongDownloaderUI.songItemPanel != null)
-                    SongDownloaderUI.songItemPanel.SetPageActive(false);
-                if (SongDownloader.needRefresh)
-                    ReloadSongList(false);
-                return true;
             }
         }
 
@@ -725,25 +706,7 @@ namespace ExScoringMod
                     }
                     else
                     {
-                        switch (label)
-                        {
-                            case "done":
-                                __instance.Hide();
-                                shouldShowKeyboard = false;
-                                SongDownloader.StartNewSongSearch();
-                                break;
-                            case "clear":
-                                SongDownloader.searchString = "";
-                                break;
-                            default:
-                                SongDownloader.searchString += label;
-                                break;
-                        }
-
-                        if (SongDownloaderUI.searchText != null)
-                        {
-                            SongDownloaderUI.searchText.text = SongDownloader.searchString;
-                        }
+                        return true;
                     }
 
                     return false;
@@ -775,12 +738,7 @@ namespace ExScoringMod
                     }
                     else
                     {
-                        if (SongDownloader.searchString == "" || SongDownloader.searchString == null)
-                            return false;
-                        SongDownloader.searchString = SongDownloader.searchString.Substring(0, SongDownloader.searchString.Length - 1);
-
-                        if (SongDownloaderUI.searchText != null)
-                            SongDownloaderUI.searchText.text = SongDownloader.searchString;
+                        return true;
                     }
                     return false;
                 }
@@ -809,10 +767,7 @@ namespace ExScoringMod
                     }
                     else
                     {
-                        SongDownloader.searchString += " ";
-
-                        if (SongDownloaderUI.searchText != null)
-                            SongDownloaderUI.searchText.text = SongDownloader.searchString;
+                        return true;
                     }
                     return false;
                 }
@@ -831,7 +786,6 @@ namespace ExScoringMod
             {
                 if (state == StartupLogo.State.Done)
                 {
-                    SongDownloader.StartNewSongSearch();
                     PlaylistManager.OnApplicationStart();
                     FavoritesStore.Load();
                     SongDownloadTracker.StartSongListUpdate();

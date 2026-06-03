@@ -16,10 +16,7 @@ namespace ExScoringMod
         internal static string apiUrl = "https://maudica.com/api/maps?per_page=14";
         internal static string downloadUrlFormat = "https://maudica.com/maps/{0}/download";
         internal static string previewUrlFormat = "https://maudica.com/maps/{0}/preview";
-        internal static APISongList songlist;
-        internal static string searchString = "";
         internal static bool needRefresh = false;
-        internal static int page = 1;
         internal static HashSet<string> downloadedFileNames = new HashSet<string>();
         internal static HashSet<string> failedDownloads = new HashSet<string>();
 
@@ -188,45 +185,6 @@ namespace ExScoringMod
             }
 
             yield return null;
-        }
-
-        internal static void StartNewSongSearch()
-        {
-            page = 1;
-            StartNewPageSearch();
-        }
-
-        internal static void StartNewPageSearch()
-        {
-            SongDownloaderUI.ResetScrollPosition();
-            MelonCoroutines.Start(DoSongWebSearch(searchString, (query, result) => {
-                songlist = result;
-                if (SongDownloaderUI.songItemPanel != null)
-                {
-                    SongDownloaderUI.AddSongItems(SongDownloaderUI.songItemMenu, songlist);
-                }
-            }, SongDownloaderUI.difficultyFilter, SongDownloaderUI.popularity, page, false));
-        }
-
-        internal static void NextPage()
-        {
-            if (page > songlist.total_pages)
-                page = songlist.total_pages;
-            else if (page < 1)
-                page = 1;
-            else
-                page++;
-        }
-
-        internal static void PreviousPage()
-        {
-            if (page == 1) return;
-            if (page > songlist.total_pages)
-                page = songlist.total_pages;
-            else if (page < 1)
-                page = 1;
-            else
-                page--;
         }
 
         internal static string DifficultyToNewAPIValue(DifficultyFilter diff)

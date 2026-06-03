@@ -1,5 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.Text.RegularExpressions;
+using MelonLoader;
 using TMPro;
 
 namespace ExScoringMod
@@ -11,6 +12,16 @@ namespace ExScoringMod
         public static bool searchInProgress = false;
         public static TextMeshPro liveText = null;
         public static string placeholder = "Search...";
+
+        // ── maudica web search state ──────────────────────────────────────────
+        public static List<Song> webResults = new List<Song>();
+        public static bool webLoading = false;
+        public static bool webError = false;
+        private static int webPage = 1;
+        private static int webTotalPages = 1;
+        private static int webGeneration = 0; // bumped per new search; stale callbacks bail
+
+        public static bool HasMoreWebPages => webPage < webTotalPages;
 
         public static void Search()
         {
@@ -57,9 +68,48 @@ namespace ExScoringMod
             query = q;
             Search();
 
+            // Fresh maudica search (page 1). Invalidate any in-flight fetch.
+            webResults.Clear();
+            webPage = 1;
+            webTotalPages = 1;
+            webError = false;
+            StartWebFetch(q, 1, ++webGeneration);
+
             SongFolderManager.SetSearchFolder($"Search Results ({q})");
             SongFolderManager.openFolder = SongFolderManager.searchFolderName;
             FolderRowManager.RefreshList();
+        }
+
+        /// <summary>Kicks off a maudica web search for one page; appends results on callback.</summary>
+        private static void StartWebFetch(string q, int page, int gen)
+        {
+            webLoading = true;
+            MelonCoroutines.Start(SongDownloader.DoSongWebSearch(q, (search, result) =>
+            {
+                if (gen != webGeneration) return; // superseded by a newer search
+
+                webLoading = false;
+                if (result != null && result.songs != null)
+                {
+                    webTotalPages = result.total_pages < 1 ? 1 : result.total_pages;
+                    foreach (var s in result.songs)
+                        if (s != null) webResults.Add(s);
+                }
+                else
+                {
+                    webError = true;
+                }
+
+                FolderRowManager.RefreshList();
+            }, DifficultyFilter.All, false, page, false));
+        }
+
+        /// <summary>Fetch and append the next maudica page (used by the "Load more" row).</summary>
+        public static void LoadMoreWeb()
+        {
+            if (webLoading || !HasMoreWebPages || string.IsNullOrEmpty(query)) return;
+            webPage++;
+            StartWebFetch(query, webPage, webGeneration);
         }
 
         /// <summary>
@@ -67,6 +117,12 @@ namespace ExScoringMod
         /// </summary>
         public static void ClearSearch()
         {
+            webResults.Clear();
+            webLoading = false;
+            webError = false;
+            webPage = 1;
+            webTotalPages = 1;
+            webGeneration++;   // invalidate any in-flight fetch
             searchResult.Clear();
             query = "";
 

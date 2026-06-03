@@ -36,8 +36,8 @@ namespace ExScoringMod
         /// <summary>Default folder-header grey. Action rows override via their own color.</summary>
         public static readonly Color FolderColor = new Color(0.18f, 0.18f, 0.18f, 1f);
 
-        public static ViewRow Header(string folder, int count, string subLabelOverride = null)
-            => new ViewRow { kind = ViewRowKind.FolderHeader, folderName = folder, songCount = count, color = FolderColor, subLabel = subLabelOverride };
+        public static ViewRow Header(string folder, int count, string subLabelOverride = null, Color? color = null)
+            => new ViewRow { kind = ViewRowKind.FolderHeader, folderName = folder, songCount = count, color = color ?? FolderColor, subLabel = subLabelOverride };
 
         /// <summary>A folder header that displays the game's star icons instead of a text title.
         /// starTier 1..5 lights that many of starDiff's colored stars; 6 lights the gold set; 0 shows pips only.</summary>

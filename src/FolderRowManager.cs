@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using MelonLoader;
+using UnityEngine;
 
 namespace ExScoringMod
 {
@@ -29,6 +30,12 @@ namespace ExScoringMod
         // ── Sort mode (drives which folder set BuildRootView produces) ─────────
         internal enum SortMode { Default, AToZ, ZToA, MostStars, LeastStars, MostPlayed, LeastPlayed, MostRecent }
         private static SortMode currentSort = SortMode.Default;
+
+        // ── Search folder maudica integration ─────────────────────────────────
+        private static readonly UnityEngine.Color SR_LoadMoreColor = new UnityEngine.Color(0.22f, 0.22f, 0.30f, 1f);
+        private static readonly HashSet<string> searchDownloading = new HashSet<string>();
+        private static readonly Dictionary<string, int> searchLastPct = new Dictionary<string, int>();
+        private static bool searchDownloadingAll;
 
         /// <summary>
         /// Called from the ChangeSort postfix. Maps the game's Sort to our view mode.
@@ -322,6 +329,29 @@ namespace ExScoringMod
             }
         }
 
+        /// <summary>
+        /// Per-folder header color. Hardcoded/virtual folders use the lighter playlist grey;
+        /// custom subfolders fall back to the default folder grey. Add cases here to give a
+        /// specific folder its own color later.
+        /// </summary>
+        private static Color FolderColorFor(string folder)
+        {
+            switch (folder)
+            {
+                case SongFolderManager.FolderFavorites:
+                case SongFolderManager.FolderAudica:
+                case SongFolderManager.FolderAudicaDLC:
+                case SongFolderManager.FolderCustom:      // "Unsorted"
+                case SongFolderManager.FolderSongRequests:
+                    return PlaylistNav.PlaylistRowColor;
+                default:
+                    // Search-results folder (dynamic name) also gets the new color.
+                    if (folder == SongFolderManager.searchFolderName)
+                        return PlaylistNav.PlaylistRowColor;
+                    return ViewRow.FolderColor;
+            }
+        }
+
         /// <summary>Level 0: every folder header (open folder's songs inlined) + a Playlists row.</summary>
         private static List<ViewRow> BuildDefaultRootView()
         {
@@ -355,21 +385,23 @@ namespace ExScoringMod
                     string sub = missing > 0
                         ? $"{total} song{(total != 1 ? "s" : "")} ({missing} missing)"
                         : null; // null → header falls back to the default "{count} songs"
-                    rows.Add(ViewRow.Header(folder, total, sub));
+                    rows.Add(ViewRow.Header(folder, total, sub, FolderColorFor(folder)));
                 }
                 else
                 {
                     int count =
                         folder == SongFolderManager.FolderFavorites ? favCount :
-                        folder == SongFolderManager.searchFolderName ? searchCount :
+                        folder == SongFolderManager.searchFolderName ? (searchCount + GetSearchDownloadables().Count) :
                         (counts.TryGetValue(folder, out int c) ? c : 0);
-                    rows.Add(ViewRow.Header(folder, count));
+                    rows.Add(ViewRow.Header(folder, count, color: FolderColorFor(folder)));
                 }
 
                 if (folder == open)
                 {
                     if (folder == SongFolderManager.FolderSongRequests)
                         AppendSongRequestRows(rows);
+                    else if (folder == SongFolderManager.searchFolderName)
+                        AppendSearchRows(rows);
                     else
                         foreach (string id in GetFolderSongs(folder))
                             rows.Add(ViewRow.SongRow(id));
@@ -1243,6 +1275,147 @@ namespace ExScoringMod
             yield return null;
             yield return null;
             yield return null;
+            RefreshList();
+        }
+
+        /// <summary>maudica results that aren't already installed locally, deduped by id.</summary>
+        private static List<Song> GetSearchDownloadables()
+        {
+            var result = new List<Song>();
+            if (SongSearch.webResults == null) return result;
+
+            var seen = new HashSet<string>();
+            foreach (var s in SongSearch.webResults)
+            {
+                if (s == null) continue;
+                string id = s.song_id ?? "";
+                if (id.Length > 0 && !seen.Add(id)) continue;                          // dupe within web list
+                if (FindLocalRequestSong(s.title, s.artist, s.author, s.song_id) != null) continue; // already installed
+                result.Add(s);
+            }
+            return result;
+        }
+
+        /// <summary>
+        /// Rows for the open search folder: a "Download all" action (top), installed matches as
+        /// normal song rows, not-installed maudica matches as downloadable rows, and a "Load more"
+        /// row at the bottom while more pages remain.
+        /// </summary>
+        private static void AppendSearchRows(List<ViewRow> rows)
+        {
+            var downloadable = GetSearchDownloadables();
+
+            // "Download all" pinned at the top (mirrors Song Requests).
+            if (downloadable.Count > 0 || searchDownloadingAll)
+                rows.Add(ViewRow.ActionRow("Download all", SR_DownloadAllColor, OnDownloadAllSearch,
+                         searchDownloadingAll ? "Downloading..." : $"{downloadable.Count} song{(downloadable.Count != 1 ? "s" : "")}",
+                         "search_downloadall"));
+
+            // Installed matches as normal, playable song rows.
+            if (SongSearch.searchResult != null)
+                foreach (string id in SongSearch.searchResult)
+                    rows.Add(ViewRow.SongRow(id));
+
+            // Not-installed maudica matches as downloadable rows.
+            foreach (var s in downloadable)
+                rows.Add(ViewRow.DownloadableSongRow(s.song_id, s.title, s.artist, s.author, s.download_url,
+                         SR_DownloadableColor, () => OnDownloadSearchSong(s)));
+
+            // "Load more" at the very bottom while more maudica pages remain (or a page is loading).
+            if (SongSearch.HasMoreWebPages || SongSearch.webLoading)
+                rows.Add(ViewRow.ActionRow(
+                    SongSearch.webLoading ? "Loading..." : "Load more",
+                    SR_LoadMoreColor, OnLoadMoreSearch, null, "search_loadmore"));
+        }
+
+        private static void OnLoadMoreSearch()
+        {
+            SongSearch.LoadMoreWeb();
+            RefreshList(); // show "Loading..." now; the fetch callback refreshes again
+        }
+
+        private static void OnDownloadSearchSong(Song s)
+        {
+            if (searchDownloadingAll || s == null) return;
+            string id = s.song_id;
+            if (string.IsNullOrEmpty(id)) return;
+            if (!searchDownloading.Add(id)) return; // already downloading
+
+            searchLastPct[id] = -1;
+            VirtualSongList.UpdateActionRowText(id, s.title, "Downloading... 0%");
+            MelonCoroutines.Start(SongDownloader.DownloadSong(
+                id, s.download_url,
+                (sid, ok) => OnSearchDownloadComplete(s, ok),
+                (sid, pct) => OnSearchDownloadProgress(s, pct)));
+        }
+
+        private static void OnSearchDownloadProgress(Song s, float pct)
+        {
+            string id = s.song_id;
+            int p = (int)(pct * 100f);
+            if (p < 0) p = 0;
+            if (p > 100) p = 100;
+            if (searchLastPct.TryGetValue(id, out int last) && last == p) return;
+            searchLastPct[id] = p;
+            VirtualSongList.UpdateActionRowText(id, s.title, $"Downloading... {p}%");
+        }
+
+        private static void OnSearchDownloadComplete(Song s, bool success)
+        {
+            string id = s.song_id;
+            searchDownloading.Remove(id);
+            searchLastPct.Remove(id);
+
+            if (!success)
+            {
+                VirtualSongList.UpdateActionRowText(id, s.title, "Download failed - tap to retry");
+                return;
+            }
+
+            ExScoring.ReloadSongList(false);
+            MelonCoroutines.Start(RefreshSearchAfterReload());
+        }
+
+        private static IEnumerator RefreshSearchAfterReload()
+        {
+            // Let ReloadSongList's async post-process settle, then re-match locals so the new
+            // song shows as a normal (playable) row and drops out of the downloadable list.
+            yield return null;
+            yield return null;
+            yield return null;
+            SongSearch.Search();
+            RefreshList();
+        }
+
+        private static void OnDownloadAllSearch()
+        {
+            if (searchDownloadingAll) return;
+            MelonCoroutines.Start(DownloadAllSearchCo());
+        }
+
+        private static IEnumerator DownloadAllSearchCo()
+        {
+            searchDownloadingAll = true;
+
+            var entries = GetSearchDownloadables();
+            int total = entries.Count, done = 0;
+            foreach (var s in entries)
+            {
+                done++;
+                VirtualSongList.UpdateActionRowText("search_downloadall", "Download all", $"Downloading {done}/{total}...");
+
+                bool finished = false;
+                MelonCoroutines.Start(SongDownloader.DownloadSong(
+                    s.song_id, s.download_url, (id, ok) => { finished = true; }, null));
+                while (!finished) yield return null; // sequential — one at a time
+            }
+
+            ExScoring.ReloadSongList(false);
+            searchDownloadingAll = false;
+            yield return null;
+            yield return null;
+            yield return null;
+            SongSearch.Search();
             RefreshList();
         }
     }

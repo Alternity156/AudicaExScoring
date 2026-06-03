@@ -234,7 +234,6 @@
     <Compile Include="src\SearchKeyboard.cs" />
     <Compile Include="src\SongDownloader.cs" />
     <Compile Include="src\SongDownloaderTracker.cs" />
-    <Compile Include="src\SongDownloaderUI.cs" />
     <Compile Include="src\SongFolderManager.cs" />
     <Compile Include="src\SongListNotification.cs" />
     <Compile Include="src\SongListUI.cs" />
