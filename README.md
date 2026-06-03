@@ -1,7 +1,7 @@
 ## WARNING
 This mod conflicts with ScorePercentage, HitScoreVisualizer, SongBrowser and Meeps Audica UI Enhancements.
 
-I am currently implementing SongBrowser features that most players expect to be functional in the game.
+Since this mod is a massive overhaul of the song list menu, I took it upon myself to include pretty much all the Song Browser features within this mod.
 
 ## Optional Dependencies
 [SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience) Required to show album art.
