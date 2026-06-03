@@ -4,7 +4,7 @@ This mod conflicts with ScorePercentage, HitScoreVisualizer, SongBrowser and Mee
 I am currently implementing SongBrowser features that most players expect to be functional in the game.
 
 ## Optional Dependencies
-[SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience)
+[SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience) Required to show album art.
 
 [SongRequest](https://github.com/Silzoid/SongRequest) (Requires [TwitchConnectorMod](https://github.com/steglasaurous/twitch-connector-mod)) Full twitch song request support through the folder system.
 
