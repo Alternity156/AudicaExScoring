@@ -244,6 +244,14 @@ namespace ExScoringMod
                 UpdateSongSelectionIndicator(__instance);
                 RefreshIntensityGraph();
                 AddPlaylistButton.UpdateForSelection();
+
+                var leaderboard = UnityEngine.Object.FindObjectOfType<LeaderboardDisplay>();
+                if (leaderboard != null)
+                    leaderboard.ViewTop();
+
+                var songInfo = UnityEngine.Object.FindObjectOfType<SongInfoPanel>();
+                if (songInfo != null)
+                    songInfo.OnEnable();
             }
         }
 

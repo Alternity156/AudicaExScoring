@@ -468,6 +468,7 @@ namespace ExScoringMod
         {
             VirtualSongList.Sync();
             EnforceLaunchPanelBlank();
+            SyncDisplayingDifficulty();
             MarathonSetup.Enforce();
         }
 

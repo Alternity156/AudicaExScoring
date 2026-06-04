@@ -12,8 +12,8 @@ namespace ExScoringMod
         private static GameObject field;
 
         // Tunable placement — adjust like the other *UISetup constants.
-        private static Vector3 fieldLocalPos = new Vector3(-5.98f, 13.0f, 0f);
-        private static Vector3 fieldLocalScale = new Vector3(1f, 1f, 1f);
+        private static Vector3 fieldLocalPos = new Vector3(-0.5f, 11.5f, 0f);
+        private static Vector3 fieldLocalScale = new Vector3(0.9f, 0.9f, 0.9f);
 
         public static void CreateField()
         {

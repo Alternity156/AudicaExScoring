@@ -85,7 +85,8 @@ namespace ExScoringMod
 
             songSelectObject.transform.localPosition = new Vector3(-5.98f, 8.91f, 0f);
             songSelectSortButtonObject.transform.localPosition = new Vector3(-10.17f, 2.26f, -0.46f);
-            songSelectScrollUpArrowObject.transform.localPosition = new Vector3(0f, 2.13f, -3.71f);
+            songSelectScrollUpArrowObject.transform.localPosition = new Vector3(0f, 0.75f, -3.71f);
+            songSelectScrollDownArrowObject.transform.localPosition = new Vector3(0f, -24.75f, -2.99f);
             songSelectSortMenuObject.transform.localPosition = new Vector3(-17.74f, 0.82f, -2.7913f);
 
             songSelectSortMenuObject.transform.localEulerAngles = new Vector3(0f, 330f, 0f);
@@ -127,7 +128,8 @@ namespace ExScoringMod
             GameObject launchPanelChooseDiffLabel = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center/choosediff");
             GameObject launchPanelPlayButton = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center/play");
 
-            launchPanelLeftObject.SetActive(false);
+            GameObject launchPanelRightObject = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Right");
+
             launchPanelBackButton.SetActive(false);
             launchPanelCenterContestInfoButton.SetActive(false);
             launchPanelCenterPanelFrameHighlightTop.SetActive(true);
@@ -136,6 +138,8 @@ namespace ExScoringMod
             launchPanelCenterCustomizeButton.SetActive(false);
             launchPanelModifiersButton.SetActive(false);
             launchPanelChooseDiffLabel.SetActive(false);
+
+            launchPanelLeftObject.transform.localPosition = new Vector3(-22.0736f, 14f, 14.567f);
 
             launchPanelCenterObject.transform.localPosition = new Vector3(9.18f, 6f, 24f);
             launchPanelCenterGlass.transform.localPosition = new Vector3(0f, 1.4f, 0.15f);
@@ -153,6 +157,8 @@ namespace ExScoringMod
             launchPanelDifficultyButtonHard.transform.localPosition = new Vector3(3.5f, -7.25f, 0f);
             launchPanelDifficultyButtonExpert.transform.localPosition = new Vector3(3.5f, -9.5f, 0f);
             launchPanelPlayButton.transform.localPosition = new Vector3(-3.45f, -4.8f, 0f);
+
+            launchPanelRightObject.transform.localPosition = new Vector3(22.0736f, 9.5f, 14.567f);
 
             launchPanelCenterGlass.transform.localScale = new Vector3(14.4f, 25f, 3f);
             launchPanelCenterPanelFrame.transform.localScale = new Vector3(0.7f, 1.8f, 1f);
@@ -315,6 +321,8 @@ namespace ExScoringMod
         {
             SetLaunchPanelContentVisible(true);
 
+            EnsureValidDifficultySelected();
+
             CueStatsData stats = GetCueStats(SongDataHolder.I.songData, KataConfig.I.mDifficulty);
 
             GameObject launchPanelCenterArtistLabel = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center/ArtistLabel");
@@ -337,6 +345,7 @@ namespace ExScoringMod
 
             UpdateFavoriteIndicator();
             UpdateDeleteButtonEnabled();
+            UpdateDifficultyButtonsEnabled();
             AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.Menu);
 
             // These get re-activated by the game's LaunchPanel.OnEnable (notably on the first song
@@ -418,9 +427,139 @@ namespace ExScoringMod
             for (int i = 0; i < diffs.Length; i++)
             {
                 GameObject button = GameObject.Find(basePath + diffs[i]);
+                if (button == null) continue;
                 Transform indicator = button.transform.Find("SelectedIndicator");
                 if (indicator != null)
                     indicator.gameObject.SetActive(difficulties[i] == difficulty);
+            }
+        }
+
+        /// <summary>True if the given song actually has cues for the given difficulty.</summary>
+        public static bool SongHasDifficulty(SongList.SongData songData, KataConfig.Difficulty difficulty)
+        {
+            if (songData == null) return false;
+            var cues = SongCues.GetCues(songData, difficulty);
+            return cues != null && cues.Length > 0;
+        }
+
+        /// <summary>
+        /// Dims difficulty buttons (label alpha only) and blocks selection for difficulties
+        /// the current song doesn't have, matching the disabled delete button style.
+        /// </summary>
+        public static void UpdateDifficultyButtonsEnabled()
+        {
+            if (SongDataHolder.I == null || SongDataHolder.I.songData == null) return;
+
+            string basePath = "menu/ShellPage_Launch/page/ShellPanel_Center/";
+            string[] diffs = new string[] { "ChooseDiff_easy", "ChooseDiff_normal", "ChooseDiff_hard", "ChooseDiff_expert" };
+            KataConfig.Difficulty[] difficulties = new KataConfig.Difficulty[] { KataConfig.Difficulty.Easy, KataConfig.Difficulty.Normal, KataConfig.Difficulty.Hard, KataConfig.Difficulty.Expert };
+
+            for (int i = 0; i < diffs.Length; i++)
+            {
+                GameObject button = GameObject.Find(basePath + diffs[i]);
+                if (button == null) continue;
+
+                bool available = SongHasDifficulty(SongDataHolder.I.songData, difficulties[i]);
+
+                Transform buttonChild = button.transform.Find("Button");
+                if (buttonChild != null)
+                {
+                    GunButton gunButton = buttonChild.GetComponent<GunButton>();
+                    if (gunButton != null) gunButton.SetInteractable(available);
+                }
+
+                TextMeshPro label = button.GetComponentInChildren<TextMeshPro>(true);
+                if (label != null) label.alpha = available ? 1.0f : 0.25f;
+            }
+        }
+
+        /// <summary>
+        /// If the currently selected difficulty isn't present on the current song, switch to the
+        /// closest available one (ties resolve to the easier side).
+        ///
+        /// Only the gameplay difficulty (mDifficulty) is set here, via the field directly rather
+        /// than SetDifficulty() (which triggers the game's song-list refresh). The displayed
+        /// difficulty is kept in sync separately, every frame, by SyncDisplayingDifficulty().
+        /// </summary>
+        public static void EnsureValidDifficultySelected()
+        {
+            if (SongDataHolder.I == null || SongDataHolder.I.songData == null) return;
+
+            KataConfig.Difficulty[] difficulties = new KataConfig.Difficulty[] { KataConfig.Difficulty.Easy, KataConfig.Difficulty.Normal, KataConfig.Difficulty.Hard, KataConfig.Difficulty.Expert };
+
+            bool[] available = new bool[difficulties.Length];
+            for (int i = 0; i < difficulties.Length; i++)
+                available[i] = SongHasDifficulty(SongDataHolder.I.songData, difficulties[i]);
+
+            KataConfig.Difficulty current = KataConfig.I.GetDifficulty();
+            int currentIndex = System.Array.IndexOf(difficulties, current);
+            if (currentIndex >= 0 && available[currentIndex]) return; // already valid
+
+            // Pick closest available; ascending iteration with strict '<' keeps the easier side on ties.
+            int best = -1;
+            int bestDist = int.MaxValue;
+            for (int i = 0; i < difficulties.Length; i++)
+            {
+                if (!available[i]) continue;
+                int dist = Mathf.Abs(i - currentIndex);
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    best = i;
+                }
+            }
+
+            if (best < 0) return; // song has no difficulties at all
+
+            KataConfig.Difficulty chosen = difficulties[best];
+
+            // Set the field the gameplay reads, NOT SetDifficulty() (which triggers ShowSongList).
+            // SyncDisplayingDifficulty() propagates this to mDisplayingForDifficulty next frame.
+            KataConfig.I.mDifficulty = chosen;
+
+            UpdateDifficultyIndicator(chosen);
+            RefreshIntensityGraph();
+        }
+
+        private static SongSelect cachedSongSelect;
+        private static KataConfig.Difficulty? lastIndicatorDifficulty = null;
+
+        /// <summary>
+        /// Keeps both the song list's displayed difficulty AND the difficulty-button selection
+        /// indicator in sync with the gameplay difficulty. The game tries to keep the displayed
+        /// difficulty matched itself by calling ShowSongList whenever they differ, but in folder
+        /// mode that refresh NREs and never reconciles, so a mismatch makes it re-request the
+        /// rebuild every frame (a hang). The indicator is driven here too because the one-time
+        /// update at correction time can run before the buttons exist. Both run from OnLateUpdate,
+        /// when the relevant objects are reliably present. Setting these does not trigger a refresh.
+        /// </summary>
+        public static void SyncDisplayingDifficulty()
+        {
+            if (string.IsNullOrEmpty(selectedSong)) { lastIndicatorDifficulty = null; return; }
+
+            var state = MenuState.GetState();
+            if (state != MenuState.State.SongPage && state != MenuState.State.LaunchPage)
+            {
+                lastIndicatorDifficulty = null;
+                return;
+            }
+
+            KataConfig.Difficulty diff = KataConfig.I.mDifficulty;
+
+            // Displayed difficulty (song-list scores/stars) — what stops the ShowSongList loop.
+            if (cachedSongSelect == null)
+            {
+                var obj = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect");
+                if (obj != null) cachedSongSelect = obj.GetComponent<SongSelect>();
+            }
+            if (cachedSongSelect != null && cachedSongSelect.mDisplayingForDifficulty != diff)
+                cachedSongSelect.mDisplayingForDifficulty = diff;
+
+            // Difficulty-button selection indicator — only re-applies on change (no per-frame Find churn).
+            if (lastIndicatorDifficulty != diff)
+            {
+                UpdateDifficultyIndicator(diff);
+                lastIndicatorDifficulty = diff;
             }
         }
 
