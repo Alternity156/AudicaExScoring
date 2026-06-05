@@ -146,6 +146,25 @@ namespace ExScoringMod
         // ── Placeholders: one cheap empty GO per view row ────────────────────
         private static readonly List<GameObject> placeholders = new List<GameObject>();
 
+        // Tier 1: idle empty placeholder GOs, parked inactive under hiddenHolder and reused across
+        // SetView calls. Kept SEPARATE from `placeholders` (which must stay exactly view-ordered and
+        // view.Count long for Sync/BindRow). Grows to the high-water mark and is never shrunk, so
+        // once the largest folder has been shown once, SetView allocates nothing.
+        private static readonly List<GameObject> placeholderPool = new List<GameObject>();
+
+        // Tier 2: background pre-grow of the placeholder pool. While running, `warming` is true and
+        // the coroutine grows the pool toward `warmTarget` a few hundred GOs per frame, off the hot
+        // path, so the first open of the biggest folder doesn't allocate on the main thread.
+        private static bool warming;
+        private static int warmTarget;
+
+        // Tier 3: background warm of the heavy item pools. The SongSelectItem prefab is ~3 ms per
+        // Instantiate, so building the full pool synchronously froze the first entry ~127 ms. Instead
+        // the coroutine creates a few per frame toward `poolTarget`; OnLateUpdate's Sync binds visible
+        // rows progressively as the pool fills, so the list pops in over a few frames with no spike.
+        private static bool poolWarming;
+        private static int poolTarget;
+
         // ── Pools ─────────────────────────────────────────────────────────────
         private sealed class SongPoolItem
         {
@@ -198,6 +217,7 @@ namespace ExScoringMod
         public static void SetView(List<ViewRow> rows, float? targetScroll)
         {
             if (!EnsureRefs()) return;
+            var swSetView = Stopwatch.StartNew();
 
             // The game's ShowSongList (skipped in folder mode) used to activate the list panel;
             // make sure it's visible.
@@ -239,6 +259,9 @@ namespace ExScoringMod
             MelonLogger.Log($"[VList] SetView: {view.Count} rows, scroll={Mathf.Clamp(prevScroll, 0f, maxScroll):0.0}/{maxScroll:0.0}, displayCount={scroller.displayCount:0.0}");
 
             Sync();
+
+            swSetView.Stop();
+            MelonLogger.Log($"[VList-PERF] SetView TOTAL {swSetView.Elapsed.TotalMilliseconds:0.0} ms ({view.Count} rows)");
         }
 
         /// <summary>
@@ -506,7 +529,11 @@ namespace ExScoringMod
             if (row.kind == ViewRowKind.Song)
             {
                 int slot = AcquireSongSlot();
-                if (slot < 0) { MelonLogger.Log($"[VList] Song pool exhausted at row {viewIndex}."); return; }
+                if (slot < 0)
+                {
+                    if (!poolWarming) MelonLogger.Log($"[VList] Song pool exhausted at row {viewIndex}.");
+                    return; // ALWAYS bail when there's no slot — never fall through to songPool[slot]
+                }
                 var pi = songPool[slot];
 
                 // The game's ShowSongList can destroy items we registered via Init. If this slot's
@@ -559,7 +586,11 @@ namespace ExScoringMod
             else // FolderHeader or Action — both use the header pool's styled button
             {
                 int slot = AcquireHeaderSlot();
-                if (slot < 0) { MelonLogger.Log($"[VList] Header pool exhausted at row {viewIndex}."); return; }
+                if (slot < 0)
+                {
+                    if (!poolWarming) MelonLogger.Log($"[VList] Header pool exhausted at row {viewIndex}.");
+                    return; // ALWAYS bail when there's no slot — never fall through to headerPool[slot]
+                }
                 var hi = headerPool[slot];
 
                 if (!Alive(hi.go))
@@ -729,31 +760,128 @@ namespace ExScoringMod
 
         private static void BuildPlaceholders()
         {
+            var sw = Stopwatch.StartNew();
+            int reused = 0, created = 0;
+
             for (int i = 0; i < view.Count; i++)
             {
-                var go = new GameObject("VList_Row_" + i);
+                GameObject go = RentPlaceholder(ref reused, ref created);
                 go.transform.SetParent(scrollParent, false);
                 go.transform.localPosition = Vector3.zero;
                 go.transform.localRotation = Quaternion.identity;
                 go.transform.localScale = Vector3.one;
+                go.SetActive(true); // scroller deactivates off-window rows in the UpdateScroll that follows
                 placeholders.Add(go);
                 scroller.AddRow(go);
             }
+
+            sw.Stop();
+            MelonLogger.Log($"[VList-PERF] BuildPlaceholders: {view.Count} rows " +
+                            $"(reused={reused}, created={created}, poolFree={placeholderPool.Count}) " +
+                            $"in {sw.Elapsed.TotalMilliseconds:0.0} ms");
+        }
+
+        /// <summary>Take an idle placeholder from the pool, or create one if the pool is empty
+        /// (or the pooled GO was destroyed out from under us).</summary>
+        private static GameObject RentPlaceholder(ref int reused, ref int created)
+        {
+            int last = placeholderPool.Count - 1;
+            if (last >= 0)
+            {
+                var go = placeholderPool[last];
+                placeholderPool.RemoveAt(last);
+                if (Alive(go)) { reused++; return go; }
+                MelonLogger.Log("[VList] Pooled placeholder was destroyed; creating a replacement.");
+            }
+
+            created++;
+            return new GameObject("VList_Row");
         }
 
         private static void ClearPlaceholders()
         {
-            // Our pooled visuals were already released to hiddenHolder, so clearing the
-            // scroller's rows only destroys the empty placeholders.
+            var sw = Stopwatch.StartNew();
+            EnsureHiddenHolder(); // the Teardown path doesn't call EnsureRefs; be defensive
+
+            // Empty the scroller's row list WITHOUT destroying the GOs (we reuse them next SetView).
             if (scroller != null)
             {
                 bool prev = scroller.destroyChildren;
-                scroller.destroyChildren = true;
+                scroller.destroyChildren = false;
                 try { scroller.ClearRows(); }
                 catch (Exception e) { MelonLogger.Log("[VList] ClearRows failed: " + e); }
                 scroller.destroyChildren = prev;
             }
+
+            // Return placeholders to the pool (deactivated, parked under hiddenHolder).
+            int returned = 0;
+            for (int i = 0; i < placeholders.Count; i++)
+            {
+                var go = placeholders[i];
+                if (!Alive(go)) continue;
+                go.SetActive(false);
+                go.transform.SetParent(hiddenHolder.transform, false);
+                placeholderPool.Add(go);
+                returned++;
+            }
             placeholders.Clear();
+
+            sw.Stop();
+            MelonLogger.Log($"[VList-PERF] ClearPlaceholders: returned {returned} to pool " +
+                            $"(poolFree={placeholderPool.Count}) in {sw.Elapsed.TotalMilliseconds:0.0} ms");
+        }
+
+        /// <summary>
+        /// Tier 2: pre-create empty placeholder GameObjects in the background so the first open of
+        /// the largest folder rents instead of allocating. Cheap empty GOs only — needs just the
+        /// hidden holder, no SongSelect refs. Safe to call on every song-page entry: no-ops once
+        /// capacity (free pool + in-use) already meets the target, and raises an in-flight warm's
+        /// target if a later call asks for more (e.g. a reload grew a folder).
+        /// </summary>
+        public static void WarmPlaceholderPool(int target)
+        {
+            if (target <= 0) return;
+            EnsureHiddenHolder();
+            if (placeholderPool.Count + placeholders.Count >= target) return;
+            warmTarget = Mathf.Max(warmTarget, target);
+            if (warming) return;
+            warming = true;
+            MelonCoroutines.Start(WarmPlaceholderPoolCo());
+        }
+
+        private static IEnumerator WarmPlaceholderPoolCo()
+        {
+            const int perFrame = 250; // empty GOs are cheap; lower this if a frame still spikes
+            int created = 0, frames = 0;
+            double workMs = 0;
+
+            try
+            {
+                while (placeholderPool.Count + placeholders.Count < warmTarget)
+                {
+                    var sw = Stopwatch.StartNew();
+                    int batch = 0;
+                    while (batch < perFrame && placeholderPool.Count + placeholders.Count < warmTarget)
+                    {
+                        var go = new GameObject("VList_Row");
+                        go.SetActive(false);
+                        go.transform.SetParent(hiddenHolder.transform, false);
+                        placeholderPool.Add(go);
+                        batch++; created++;
+                    }
+                    sw.Stop();
+                    workMs += sw.Elapsed.TotalMilliseconds;
+                    frames++;
+                    yield return null;
+                }
+            }
+            finally
+            {
+                warming = false;
+            }
+
+            MelonLogger.Log($"[VList-PERF] WarmPlaceholderPool: pre-created {created} over {frames} frame(s), " +
+                            $"{workMs:0.0} ms total work (poolFree={placeholderPool.Count}, target={warmTarget})");
         }
 
         // ── Pools (created once per activation, reused across SetView calls) ────
@@ -761,17 +889,52 @@ namespace ExScoringMod
         private static void EnsurePools()
         {
             int target = Mathf.CeilToInt(scroller.displayCount) + PoolBuffer;
+            poolTarget = Mathf.Max(poolTarget, target);
 
+            if (songPool.Count >= poolTarget && headerPool.Count >= poolTarget) return;
+            if (poolWarming) return; // a warm is already filling toward poolTarget
+            poolWarming = true;
+            MelonCoroutines.Start(EnsurePoolsCo());
+        }
+
+        private static IEnumerator EnsurePoolsCo()
+        {
+            const int perFrame = 4; // ~3 ms each; don't go below 2 (auto-select waits ~30 frames)
             var prefabGO = songSelect.songSelectItemPrefab.gameObject;
+            int created = 0, frames = 0;
+            double workMs = 0;
 
-            while (songPool.Count < target)
-                songPool.Add(CreateSongPoolItem(prefabGO, songPool.Count));
-
-            while (headerPool.Count < target)
+            try
             {
-                var hi = CreateHeaderPoolItem(prefabGO, headerPool.Count);
-                headerPool.Add(hi);
+                while (songPool.Count < poolTarget || headerPool.Count < poolTarget)
+                {
+                    var sw = Stopwatch.StartNew();
+                    int batch = 0;
+                    while (batch < perFrame && (songPool.Count < poolTarget || headerPool.Count < poolTarget))
+                    {
+                        // Fill the smaller pool first so both grow together — the visible window may
+                        // be all headers (collapsed root) or include songs (open folder).
+                        if (songPool.Count <= headerPool.Count && songPool.Count < poolTarget)
+                            songPool.Add(CreateSongPoolItem(prefabGO, songPool.Count));
+                        else if (headerPool.Count < poolTarget)
+                            headerPool.Add(CreateHeaderPoolItem(prefabGO, headerPool.Count));
+                        else if (songPool.Count < poolTarget)
+                            songPool.Add(CreateSongPoolItem(prefabGO, songPool.Count));
+                        batch++; created++;
+                    }
+                    sw.Stop();
+                    workMs += sw.Elapsed.TotalMilliseconds;
+                    frames++;
+                    yield return null; // OnLateUpdate's Sync binds newly-servable rows each frame
+                }
             }
+            finally
+            {
+                poolWarming = false; // never let a thrown frame strand the warm flag
+            }
+
+            MelonLogger.Log($"[VList-PERF] EnsurePools(async): created {created} over {frames} frame(s), " +
+                            $"{workMs:0.0} ms work (song={songPool.Count}, header={headerPool.Count}, target={poolTarget})");
         }
 
         private static SongPoolItem CreateSongPoolItem(GameObject prefabGO, int index)

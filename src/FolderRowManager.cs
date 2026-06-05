@@ -85,6 +85,10 @@ namespace ExScoringMod
             ClearStarCache(); // scores may have changed since last entry; recompute lazily on demand
             WireHandler();
             Apply();
+
+            // Tier 2: warm the placeholder pool toward the largest view we might show, in the
+            // background, so the first open of the biggest folder is allocation-free.
+            VirtualSongList.WarmPlaceholderPool(EstimateMaxViewSize());
         }
 
         /// <summary>Shot a folder header: toggle it open/closed and rebuild the view.</summary>
@@ -413,6 +417,34 @@ namespace ExScoringMod
                 $"row0 = {(rows.Count > 0 ? rows[0].kind + " '" + (rows[0].label ?? rows[0].folderName) + "'" : "none")}");
 
             return rows;
+        }
+
+        /// <summary>
+        /// Estimate the largest row count any single view could reach: root header/action rows plus
+        /// the biggest single folder's songs (only one folder is open at a time). Sizes the Tier 2
+        /// pre-grow. Over-estimates slightly on purpose; if a view ever exceeds it, Tier 1's lazy
+        /// growth still covers the difference.
+        /// </summary>
+        private static int EstimateMaxViewSize()
+        {
+            if (SongList.I == null || SongList.I.songs == null) return 0;
+
+            var counts = new Dictionary<string, int>();
+            int favCount = 0;
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd == null || sd.hidden) continue;
+                string f = SongFolderManager.GetFolder(sd.songID);
+                if (f != null) counts[f] = counts.TryGetValue(f, out int c) ? c + 1 : 1;
+                if (FavoritesStore.IsFavorite(sd.songID)) favCount++;
+            }
+
+            int maxFolder = favCount;
+            foreach (var kv in counts) if (kv.Value > maxFolder) maxFolder = kv.Value;
+
+            int headerRows = (SongFolderManager.availableFolders?.Count ?? 0) + 12; // folders + action-row slack
+            return headerRows + maxFolder + 16; // extra slack for search/request rows
         }
 
         private static List<string> GetFolderSongs(string folder)
