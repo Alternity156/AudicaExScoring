@@ -34,3 +34,5 @@ This mod uses code or concepts from other mods and software such as:
 [NotReaper](https://github.com/octoberU/NotReaper/tree/2021-upgrade) (Target Icons for song data)
 
 [Meeps Audica UI Enhancements](https://github.com/MeepsKitten/Meeps-Audica-UI-Enhancements) (Album Art)
+
+[ModSettings](https://github.com/octoberU/ModSettings) (Settings menu cloning)

@@ -200,8 +200,10 @@
     <Compile Include="src\EitherHandFix.cs" />
     <Compile Include="src\FavoriteStore.cs" />
     <Compile Include="src\FolderRowManager.cs" />
+    <Compile Include="src\GlobalOptions.cs" />
     <Compile Include="src\LaunchPanelVisibility.cs" />
     <Compile Include="src\MarathonSetup.cs" />
+    <Compile Include="src\OptionsMenuClone.cs" />
     <Compile Include="src\PlaylistConfig.cs" />
     <Compile Include="src\PlaylistDownloadManager.cs" />
     <Compile Include="src\PlaylistEndlessManager.cs" />

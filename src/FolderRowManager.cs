@@ -22,7 +22,7 @@ namespace ExScoringMod
         private static bool handlerWired = false;
 
         // ── Navigation level (playlists) ──────────────────────────────────────
-        internal enum NavLevel { Root, PlaylistList, PlaylistContents, AddPicker }
+        internal enum NavLevel { Root, PlaylistList, PlaylistContents, AddPicker, GlobalOptions }
         private static NavLevel level = NavLevel.Root;
         private static string currentPlaylist = null;
         private static readonly Stack<float> scrollStack = new Stack<float>();
@@ -146,6 +146,16 @@ namespace ExScoringMod
             VirtualSongList.SetView(BuildView(), 0f);
         }
 
+        public static void EnterGlobalOptions()
+        {
+            MarathonSetup.CancelIfActive();
+            PlaylistNav.ClearTransient();
+            scrollStack.Push(VirtualSongList.GetScroll());
+            level = NavLevel.GlobalOptions;
+            VirtualSongList.SelectedActionId = null;
+            VirtualSongList.SetView(BuildView(), 0f);
+        }
+
         public static void EnterPlaylistContents(string playlistName)
         {
             MarathonSetup.CancelIfActive();
@@ -166,6 +176,7 @@ namespace ExScoringMod
             PlaylistNav.ClearTransient();
             if (level == NavLevel.PlaylistContents) { level = NavLevel.PlaylistList; currentPlaylist = null; }
             else if (level == NavLevel.PlaylistList) { level = NavLevel.Root; }
+            else if (level == NavLevel.GlobalOptions) { GlobalOptions.HidePanel(); level = NavLevel.Root; }
             else return;
 
             float restore = scrollStack.Count > 0 ? scrollStack.Pop() : 0f;
@@ -313,6 +324,7 @@ namespace ExScoringMod
                 case NavLevel.PlaylistList: return PlaylistNav.BuildPlaylistListView();
                 case NavLevel.PlaylistContents: return PlaylistNav.BuildPlaylistContentsView(currentPlaylist);
                 case NavLevel.AddPicker: return PlaylistNav.BuildAddPickerView();
+                case NavLevel.GlobalOptions: return GlobalOptions.BuildView();
                 default: return BuildRootView();
             }
         }
@@ -377,6 +389,7 @@ namespace ExScoringMod
 
             // Entry into the playlist system (drills into Level 1) — pinned to the top.
             int plCount = PlaylistManager.playlists != null ? PlaylistManager.playlists.Count : 0;
+            rows.Add(ViewRow.ActionRow("Options", GlobalOptions.OptionsRowColor, EnterGlobalOptions));
             rows.Add(ViewRow.ActionRow("Playlists", PlaylistNav.PlaylistRowColor,
                 EnterPlaylistList, $"{plCount} playlist{(plCount != 1 ? "s" : "")}"));
 
