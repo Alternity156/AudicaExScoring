@@ -1,7 +1,11 @@
 ## WARNING
-This mod conflicts with ScorePercentage, HitScoreVisualizer, SongBrowser and Meeps Audica UI Enhancements.
+This mod conflicts with ScorePercentage, SongBrowser, Meeps Audica UI Enhancements.
 
 Since this mod is a massive overhaul of the song list menu, I took it upon myself to include pretty much all the Song Browser features within this mod.
+
+This mod aslo includes some other mods for convenience and menu placement. I don't think owning these mods should cause problems, but it is redundant to have them alonside this mod. These mods are settings based mods that enhance gameplay in some way.
+
+ParticleKiller
 
 ## Optional Dependencies
 [SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience) Required to show album art.
@@ -36,3 +40,5 @@ This mod uses code or concepts from other mods and software such as:
 [Meeps Audica UI Enhancements](https://github.com/MeepsKitten/Meeps-Audica-UI-Enhancements) (Album Art)
 
 [ModSettings](https://github.com/octoberU/ModSettings) (Settings menu cloning)
+
+[ParticleKiller](https://github.com/octoberU/ParticleKiller) (Full mod support)

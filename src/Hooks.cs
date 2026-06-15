@@ -73,6 +73,9 @@ namespace ExScoringMod
             {
                 MelonLogger.Log($"SetState: {menuState} -> {state}");
 
+                if (menuState == MenuState.State.SongPage && state != MenuState.State.SongPage)
+                    GlobalOptions.ForceTeardown();
+
                 if (menuState == MenuState.State.Launched && state != MenuState.State.Launched)
                 {
                     ResetExScore();
@@ -123,9 +126,8 @@ namespace ExScoringMod
             // before touching any of its objects. On the normal MainPage -> SongPage
             // path the menu is already up, so this loop falls through immediately and
             // the setup runs synchronously this frame.
-            GameObject launchPage;
             int safety = 0;
-            while ((launchPage = GameObject.Find("menu/ShellPage_Launch")) == null)
+            while (GameObject.Find("menu")?.transform.Find("ShellPage_Launch") == null)
             {
                 if (menuState != MenuState.State.SongPage || ++safety > 600)
                 {
@@ -147,15 +149,16 @@ namespace ExScoringMod
             LaunchPanelUISetup();
             suppressShellPageAnimations = true;
 
-            if (lastState == MenuState.State.MainPage)
+            if (GlobalOptions.HasPendingRestore)
             {
-                // Selecting a song triggers OnSelect, which refreshes the panel labels.
+                GlobalOptions.RestoreIfPending();
+            }
+            else if (lastState == MenuState.State.MainPage)
+            {
                 AutoSelectSong();
             }
             else
             {
-                // Return-from-gameplay path: nothing re-selects the song, so refresh
-                // the launch panel labels (including target counts) explicitly.
                 UpdateLaunchPanelInfo();
             }
 
@@ -645,10 +648,20 @@ namespace ExScoringMod
         [HarmonyPatch(typeof(OptionsMenu), "ShowPage", new Type[] { typeof(OptionsMenu.Page) })]
         private static class OptionsMenuShowPagePatch
         {
-            private static void Prefix(OptionsMenu __instance, OptionsMenu.Page page)
+            private static bool Prefix(OptionsMenu __instance, OptionsMenu.Page page)
             {
                 shouldShowKeyboard = false;
                 settingsButtonCount = 0;
+
+                if (OptionsMenuClone.Menu != null &&
+                    __instance.Pointer == OptionsMenuClone.Menu.Pointer &&
+                    !OptionsMenuClone.allowShowPage)
+                {
+                    MelonLogger.Log($"[ShowPage CLONE] BLOCKED page={page}");
+                    return false;
+                }
+
+                return true;
             }
 
             private static void Postfix(OptionsMenu __instance, OptionsMenu.Page page)
@@ -1022,27 +1035,36 @@ namespace ExScoringMod
             }
         }
 
-        /// <summary>
-        /// After the song list is loaded/refreshed, populate playlists and enable the back button.
-        /// </summary>
-        [HarmonyPatch(typeof(SongList), "SongListLoaded", new Type[0])]
-        private static class SongListSongListLoadedPatch
-        {
-            private static void Postfix()
-            {
-                SongFolderManager.Rebuild(mainSongDirectory);
-                PlaylistManager.PopulatePlaylistsSongNames();
-                PlaylistManager.EnableBackButton();
-
-                // Force Main filter on initial load so ShowSongList uses the
-                // single-phase path (no headers). Our folder system handles all organization.
-                if (SongFolderManager.availableFolders != null && SongFolderManager.availableFolders.Count > 0)
-                {
-                    var slc = UnityEngine.GameObject.FindObjectOfType<SongListControls>();
-                    if (slc != null)
-                        slc.FilterMain();
-                }
-            }
-        }
+        // ──────────────────────────────────────────────────────────────────
+        //  DISABLED: targeted SongList.SongListLoaded, which does not exist in
+        //  Audica 1.0.2.1. The real member is the callback object
+        //  SongList.OnSongListLoaded (.On(Action) / .mDone), not a method, so
+        //  HarmonyLib 2.x threw "Undefined target method" and aborted PatchAll
+        //  for the entire ExScoring assembly, silently breaking every patch.
+        //
+        //  Disabled to let PatchAll complete. Most of this body is already
+        //  covered by SongSelectOnEnablePatch (PopulatePlaylistsSongNames +
+        //  FilterMain on page entry). TODO (Option B follow-up): re-home the
+        //  two unique calls below onto SongList.OnSongListLoaded.On(...):
+        //      SongFolderManager.Rebuild(mainSongDirectory);
+        //      PlaylistManager.EnableBackButton();
+        //
+        // [HarmonyPatch(typeof(SongList), "SongListLoaded", new Type[0])]
+        // private static class SongListSongListLoadedPatch
+        // {
+        //     private static void Postfix()
+        //     {
+        //         SongFolderManager.Rebuild(mainSongDirectory);
+        //         PlaylistManager.PopulatePlaylistsSongNames();
+        //         PlaylistManager.EnableBackButton();
+        //
+        //         if (SongFolderManager.availableFolders != null && SongFolderManager.availableFolders.Count > 0)
+        //         {
+        //             var slc = UnityEngine.GameObject.FindObjectOfType<SongListControls>();
+        //             if (slc != null)
+        //                 slc.FilterMain();
+        //         }
+        //     }
+        // }
     }
 }

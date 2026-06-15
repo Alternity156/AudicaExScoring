@@ -194,6 +194,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="src\ParticleKillerConfig.cs" />
     <Compile Include="src\AddPlaylistButton.cs" />
     <Compile Include="src\AlbumArt.cs" />
     <Compile Include="src\DifficultyCalculator.cs" />
@@ -204,6 +205,7 @@
     <Compile Include="src\LaunchPanelVisibility.cs" />
     <Compile Include="src\MarathonSetup.cs" />
     <Compile Include="src\OptionsMenuClone.cs" />
+    <Compile Include="src\OptionsMenuFunctions.cs" />
     <Compile Include="src\PlaylistConfig.cs" />
     <Compile Include="src\PlaylistDownloadManager.cs" />
     <Compile Include="src\PlaylistEndlessManager.cs" />

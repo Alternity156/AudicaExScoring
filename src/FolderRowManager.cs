@@ -193,6 +193,7 @@ namespace ExScoringMod
         }
 
         public static bool InPlaylistNav => level != NavLevel.Root;
+        public static bool InGlobalOptions => level == NavLevel.GlobalOptions;
 
         // ── Transient Add-to-Playlist picker ──────────────────────────────────
         private static string pendingAddStem = null;

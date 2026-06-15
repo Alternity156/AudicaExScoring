@@ -565,20 +565,17 @@ namespace ExScoringMod
 
         public static void ShowLaunchPanel()
         {
-            // Activate the panel
-            GameObject launchPageObj = GameObject.Find("menu/ShellPage_Launch");
+            Transform t = GameObject.Find("menu")?.transform.Find("ShellPage_Launch");
+            if (t == null) return;
+            GameObject launchPageObj = t.gameObject;
             launchPageObj.SetActive(true);
 
-            // Play appear animation
             ShellPage shellPage = launchPageObj.GetComponent<ShellPage>();
-
             if (!suppressShellPageAnimations)
             {
                 shellPage.mAnimation.clip = shellPage.appearAnim;
                 shellPage.mAnimation.Play();
             }
-
-            // Set ShellPage to active and interactable state
             shellPage.mActive = true;
             shellPage.mInteractable = true;
             shellPage.mTransitioning = false;
@@ -587,11 +584,11 @@ namespace ExScoringMod
         public static void HideLaunchPanel()
         {
             GameObject launchPageObj = GameObject.Find("menu/ShellPage_Launch");
+            if (launchPageObj == null) return; // inactive or gone — nothing to hide
             ShellPage shellPage = launchPageObj.GetComponent<ShellPage>();
 
             shellPage.mActive = false;
             shellPage.mInteractable = false;
-
             shellPage.mAnimation.clip = shellPage.hideAnim;
             shellPage.mAnimation.Play();
         }

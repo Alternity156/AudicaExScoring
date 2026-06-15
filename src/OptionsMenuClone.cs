@@ -14,6 +14,7 @@ namespace ExScoringMod
         private const string SettingsCenterPath = "ShellPage_Settings/page/ShellPanel_Center";
         private const string LaunchCenterPath = "ShellPage_Launch/page/ShellPanel_Center";
 
+        internal static bool allowShowPage = false;
         private static GameObject cloneRoot;
         internal static ShellPage SongShellPage;
         internal static OptionsMenu Menu;
@@ -72,10 +73,13 @@ namespace ExScoringMod
         public static void Hide() { if (cloneRoot != null) cloneRoot.SetActive(false); }
 
         /// <summary>Reset to a blank custom page, set the title, then let the category emit rows.</summary>
+        // in OptionsMenuClone.Draw, at the top and bottom
         public static void Draw(string title, Action build)
         {
             if (Menu == null) return;
+            allowShowPage = true;
             Menu.ShowPage(OptionsMenu.Page.Customization);
+            allowShowPage = false;
             Wipe();
             if (Menu.screenTitle != null) Menu.screenTitle.text = title ?? "";
             build?.Invoke();
@@ -90,7 +94,7 @@ namespace ExScoringMod
             {
                 Transform child = t.GetChild(i);
                 if (child.gameObject.name.Contains("(Clone)"))
-                    GameObject.Destroy(child.gameObject);
+                    GameObject.DestroyImmediate(child.gameObject); // Destroy is end-of-frame; DestroyImmediate clears them now
             }
             Menu.mRows.Clear();
             Menu.scrollable.ClearRows();
@@ -99,30 +103,27 @@ namespace ExScoringMod
             Menu.scrollable.destroyChildren = true;
         }
 
-        // ── Control wrappers (single column) ──────────────────────────────────
+        // ── Create-only (returns the control's GameObject, does NOT add a row) ──
 
-        public static void AddHeader(int col, string text)
+        public static GameObject CreateHeader(int col, string text)
         {
-            var h = Menu.AddHeader(col, text);
-            Menu.scrollable.AddRow(h);
+            return Menu.AddHeader(col, text);
         }
 
-        public static void AddToggle(int col, string label, Func<bool> get, Action<bool> set, string hover = null)
+        public static GameObject CreateToggle(int col, string label, Func<bool> get, Action<bool> set, string hover = null)
         {
             var omb = Menu.AddButton(col, label,
                 new Action(() => { set(!get()); }),
                 new Func<bool>(() => get()),
                 hover ?? label);
 
-            var gb = omb.button;                 // GunButton field on OptionsMenuButton
+            var gb = omb.button;
             if (gb != null)
             {
                 if (SongShellPage != null) gb.mShellPage = SongShellPage;
                 gb.SetInteractable(true);
             }
 
-            // AddButton's displayName doesn't fill the hover-help for checkbox buttons,
-            // so populate it directly: give it text and clear the force-disable.
             var help = omb.help;
             if (help != null)
             {
@@ -130,12 +131,12 @@ namespace ExScoringMod
                 help.forceDisable = false;
             }
 
-            Menu.scrollable.AddRow(omb.gameObject);
+            return omb.gameObject;
         }
 
-        public static void AddSlider(int col, string label, Func<float> get, Action<float> set,
-                                     float min, float max, float step, float def,
-                                     string format = "N0", string hover = null)
+        public static GameObject CreateSlider(int col, string label, Func<float> get, Action<float> set,
+                                              float min, float max, float step, float def,
+                                              string format = "N0", string hover = null)
         {
             var sl = Menu.AddSlider(col, label, format,
                 new Action<float>((amount) =>
@@ -148,7 +149,80 @@ namespace ExScoringMod
                 new Action(() => set(def)),
                 hover ?? label,
                 new Func<float, string>((v) => v.ToString(format)));
-            Menu.scrollable.AddRow(sl.gameObject);
+            return sl.gameObject;
         }
+
+        public static GameObject CreateSlider(int col, string label, Func<float> get, Action<float> set,
+                                              float min, float max, float step, float def,
+                                              Func<float, string> displayFormatter, string hover = null)
+        {
+            var sl = Menu.AddSlider(col, label, "N0",
+                new Action<float>((amount) =>
+                {
+                    float v = get() + amount * step;
+                    if (v > max) v = max; else if (v < min) v = min;
+                    set(v);
+                }),
+                new Func<float>(() => get()),
+                new Action(() => set(def)),
+                hover ?? label,
+                new Func<float, string>((v) => displayFormatter(v)));
+            return sl.gameObject;
+        }
+
+        public static GameObject CreateCycle(int col, string label, string[] options,
+                                             Func<int> get, Action<int> set, int def = 0, string hover = null)
+        {
+            int n = options != null ? options.Length : 0;
+            var sl = Menu.AddSlider(col, label, "0",
+                new Action<float>((amount) =>
+                {
+                    if (n == 0) return;
+                    int dir = amount > 0f ? 1 : (amount < 0f ? -1 : 0);
+                    int idx = ((get() + dir) % n + n) % n;
+                    set(idx);
+                }),
+                new Func<float>(() => get()),
+                new Action(() => set(def)),
+                hover ?? label,
+                new Func<float, string>((v) =>
+                {
+                    if (n == 0) return "";
+                    int idx = ((Mathf.RoundToInt(v) % n) + n) % n;
+                    return options[idx];
+                }));
+            return sl.gameObject;
+        }
+
+        // ── Row adders ──
+
+        public static void AddRow(GameObject single)
+        {
+            Menu.scrollable.AddRow(single);
+        }
+
+        public static void AddRow(GameObject left, GameObject right)
+        {
+            var list = new Il2CppSystem.Collections.Generic.List<GameObject>();
+            list.Add(left);
+            if (right != null) list.Add(right);
+            Menu.scrollable.AddRow(list);
+        }
+
+        // ── Single-row convenience (unchanged signatures) ──
+
+        public static void AddHeader(int col, string text)
+            => AddRow(CreateHeader(col, text));
+
+        public static void AddToggle(int col, string label, Func<bool> get, Action<bool> set, string hover = null)
+            => AddRow(CreateToggle(col, label, get, set, hover));
+
+        public static void AddSlider(int col, string label, Func<float> get, Action<float> set,
+                                     float min, float max, float step, float def, string format = "N0", string hover = null)
+            => AddRow(CreateSlider(col, label, get, set, min, max, step, def, format, hover));
+
+        public static void AddCycle(int col, string label, string[] options,
+                                    Func<int> get, Action<int> set, int def = 0, string hover = null)
+            => AddRow(CreateCycle(col, label, options, get, set, def, hover));
     }
 }
