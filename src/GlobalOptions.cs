@@ -201,6 +201,17 @@ namespace ExScoringMod
                     v => v.ToString("N0") + "%");
                 OptionsMenuClone.AddRow(hapticsSlider);
             }),
+            new OptionsCategory("opt_test", "Wide Slider Test", () =>
+        {
+            var testHeader = OptionsMenuClone.CreateHeader(0, "Wide Slider Test");
+            OptionsMenuClone.AddRow(testHeader);
+
+            float testValue = 50f;
+            OptionsMenuClone.AddWideSlider("Test Wide Slider",
+                () => testValue,
+                v => { testValue = v; },
+                0f, 100f, 1f, 50f, "N0");
+        }),
         };
 
         // ── Song-list view (Back + categories) ────────────────────────────────

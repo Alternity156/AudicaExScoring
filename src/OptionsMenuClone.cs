@@ -194,6 +194,63 @@ namespace ExScoringMod
             return sl.gameObject;
         }
 
+        public static GameObject CreateWideSlider(string label, Func<float> get, Action<float> set,
+                                          float min, float max, float step, float def,
+                                          string format = "N0", string hover = null)
+        {
+            var sl = Menu.AddSlider(0, label, format,
+                new Action<float>((amount) =>
+                {
+                    float v = get() + amount * step;
+                    if (v > max) v = max; else if (v < min) v = min;
+                    set(v);
+                }),
+                new Func<float>(() => get()),
+                new Action(() => set(def)),
+                hover ?? label,
+                new Func<float, string>((v) => v.ToString(format)));
+
+            var go = sl.gameObject;
+            MelonCoroutines.Start(ApplyWideSliderLayout(go));
+            return go;
+        }
+
+        private static System.Collections.IEnumerator ApplyWideSliderLayout(GameObject go)
+        {
+            yield return null;
+
+            if (go == null) yield break;
+
+            Transform panelT = go.transform.Find("panel");
+            Transform labelT = go.transform.Find("label");
+            Transform leftT = go.transform.Find("left");
+            Transform rightT = go.transform.Find("right");
+            Transform resetT = go.transform.Find("reset");
+
+            if (panelT != null)
+            {
+                panelT.localPosition = new Vector3(4.2f, panelT.localPosition.y, panelT.localPosition.z);
+                panelT.localScale = new Vector3(1.95f, panelT.localScale.y, panelT.localScale.z);
+            }
+
+            if (leftT != null)
+                leftT.localPosition = new Vector3(0.4f, leftT.localPosition.y, leftT.localPosition.z);
+
+            if (rightT != null)
+                rightT.localPosition = new Vector3(8.0f, rightT.localPosition.y, rightT.localPosition.z);
+
+            if (resetT != null)
+                resetT.localPosition = new Vector3(4.2f, resetT.localPosition.y, resetT.localPosition.z);
+
+            if (labelT != null)
+            {
+                labelT.localPosition = new Vector3(4.2f, labelT.localPosition.y, labelT.localPosition.z);
+                var rt = labelT.GetComponent<RectTransform>();
+                if (rt != null)
+                    rt.sizeDelta = new Vector2(8.0f, rt.sizeDelta.y);
+            }
+        }
+
         // ── Row adders ──
 
         public static void AddRow(GameObject single)
@@ -224,5 +281,10 @@ namespace ExScoringMod
         public static void AddCycle(int col, string label, string[] options,
                                     Func<int> get, Action<int> set, int def = 0, string hover = null)
             => AddRow(CreateCycle(col, label, options, get, set, def, hover));
+
+        public static void AddWideSlider(string label, Func<float> get, Action<float> set,
+                                 float min, float max, float step, float def,
+                                 string format = "N0", string hover = null)
+            => AddRow(CreateWideSlider(label, get, set, min, max, step, def, format, hover));
     }
 }
