@@ -121,6 +121,7 @@ namespace ExScoringMod
             new OptionsCategory("opt_gameplay", "Gameplay Options", () =>
             {
                 OptionsMenuFunctions.GetAimAssist();
+                OptionsMenuFunctions.GetTimingWindow();
                 OptionsMenuFunctions.GetTargetSpeedMultiplier();
                 OptionsMenuFunctions.GetMeleeSpeedMultiplier();
                 OptionsMenuFunctions.GetDartPreGlowAmount();
@@ -139,7 +140,12 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.aimAssist = v / 100f; OptionsMenuFunctions.SetAimAssist(v / 100f); },
                     0f, 100f, 1f, 100f,
                     v => v.ToString("N0") + "%");
-                OptionsMenuClone.AddRow(aimAssistSlider);
+                var timingWindowSlider = OptionsMenuClone.CreateSlider(1, "Timing Window",
+                    () => OptionsMenuFunctions.timingWindow * 100f,
+                    v => { OptionsMenuFunctions.timingWindow = v / 100f; OptionsMenuFunctions.SetTimingWindow(v / 100f); },
+                    5f, 100f, 1f, 100f,
+                    v => v.ToString("N0") + "%");
+                OptionsMenuClone.AddRow(aimAssistSlider, timingWindowSlider);
 
                 var speedHeader = OptionsMenuClone.CreateHeader(0, "Speed");
                 OptionsMenuClone.AddRow(speedHeader);

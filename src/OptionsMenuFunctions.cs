@@ -1,5 +1,6 @@
 ﻿using Harmony;
 using Hmx.Audio;
+using MelonLoader;
 using System;
 using UnityEngine;
 
@@ -30,6 +31,18 @@ namespace ExScoringMod
         public static float targetingHapticsStrength;
         public static float aimAssist;
         public static bool disableMineSounds;
+        public static float timingWindow;
+
+        public static void GetTimingWindow()
+        {
+            timingWindow = Config.TimingWindow;
+        }
+
+        public static void SetTimingWindow(float value)
+        {
+            timingWindow = value;
+            Config.UpdateTimingWindow(value);
+        }
 
         public static void GetMineSounds()
         {
@@ -302,6 +315,52 @@ namespace ExScoringMod
                 else return true;
             }
 
+        }
+
+        [HarmonyPatch(typeof(AudioDriver), "StartPlaying", new Type[0])]
+        private static class SetCueTimingWindow
+        {
+            private static void Postfix(AudioDriver __instance)
+            {
+                MelonLogger.Log(Config.TimingWindow.ToString());
+                if (Config.TimingWindow == 1f) return;
+                SongCues.Cue[] cues = SongCues.I.GetCues();
+                SongList.SongData song = SongList.I.GetSong(SongDataHolder.I.songData.songID);
+                SongList.SongData.TempoChange[] tempos = song.tempos;
+
+                for (int i = 0; i < tempos.Length; i++)
+                {
+                    float timingWindowMs = 200 * Mathf.Lerp(0.07f, 1.0f, Config.TimingWindow);
+
+                    float ticks = timingWindowMs / (60000 / (tempos[i].tempo * 480));
+                    float halfTicks = ticks / 2;
+
+                    for (int j = 0; j < cues.Length; j++)
+                    {
+                        if (cues[j].behavior != Target.TargetBehavior.Chain && cues[j].behavior != Target.TargetBehavior.Dodge && cues[j].behavior != Target.TargetBehavior.Melee)
+                        {
+                            void UpdateTarget(SongCues.Cue cue)
+                            {
+                                cue.slopAfterTicks = halfTicks;
+                                cue.slopBeforeTicks = halfTicks;
+                            }
+                            if (cues[j].tick >= tempos[i].tick)
+                            {
+                                if (tempos.Length >= tempos.Length + 1 && cues[j].tick < tempos[i + 1].tick)
+                                {
+                                    UpdateTarget(cues[j]);
+                                }
+                                else if (tempos.Length < tempos.Length + 1)
+                                {
+                                    UpdateTarget(cues[j]);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                MelonLogger.Log("Timing Window Applied");
+            }
         }
     }
 }

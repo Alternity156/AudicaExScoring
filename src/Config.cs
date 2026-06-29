@@ -19,6 +19,8 @@ namespace ExScoringMod
 
         public static bool DisableMineSounds = false;
 
+        public static float TimingWindow;
+
         public static void RegisterConfig()
         {
             MelonPrefs.RegisterString(Category, nameof(typeHeader), "", "[Header]Scoring Type");
@@ -36,6 +38,8 @@ namespace ExScoringMod
 
             MelonPrefs.RegisterBool(Category, nameof(DisableMineSounds), false, "Disables mine sounds");
 
+            MelonPrefs.RegisterFloat(Category, nameof(TimingWindow), 1f, "Sets the timing window [0,1,0.05,1] {P}");
+
             OnModSettingsApplied();
         }
 
@@ -47,11 +51,23 @@ namespace ExScoringMod
             AudicaCalculation = MelonPrefs.GetBool(Category, nameof(AudicaCalculation));
             LinearCalculation = MelonPrefs.GetBool(Category, nameof(LinearCalculation));
             SafeSongListReload = MelonPrefs.GetBool(Category, nameof(SafeSongListReload));
+            DisableMineSounds = MelonPrefs.GetBool(Category, nameof(DisableMineSounds));
+            TimingWindow = MelonPrefs.GetFloat(Category, nameof(TimingWindow));
+        }
+
+        public static void UpdateTimingWindow(float value)
+        {
+            if (value < 0.05f) value = 0.05f;
+            if (value > 1f) value = 1f;
+            MelonPrefs.SetFloat(Category, nameof(TimingWindow), value);
+            TimingWindow = value;
+            MelonPrefs.SaveConfig();
         }
 
         public static void UpdateMineSoundDisabler(bool value)
         {
             MelonPrefs.SetBool(Category, nameof(DisableMineSounds), value);
+            DisableMineSounds = value;
             MelonPrefs.SaveConfig();
         }
 

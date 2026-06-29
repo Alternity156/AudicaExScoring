@@ -6,7 +6,10 @@ Since this mod is a massive overhaul of the song list menu, I took it upon mysel
 This mod aslo includes some other mods for convenience and menu placement. I don't think owning these mods should cause problems, but it is redundant to have them alonside this mod. These mods are settings based mods that enhance gameplay in some way.
 
 ParticleKiller
+
 MineSoundDisabler
+
+TimingAssist
 
 ## Optional Dependencies
 [SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience) Required to show album art.
@@ -45,3 +48,5 @@ This mod uses code or concepts from other mods and software such as:
 [ParticleKiller](https://github.com/octoberU/ParticleKiller) (Full mod support)
 
 [MineSoundDisabler](https://github.com/MeepsKitten/AudicaMineSoundDisabler) (Full mod support)
+
+[TimingAssist](https://github.com/octoberU/TimingAssist) (Full mod support, "Timing Window" setting)
