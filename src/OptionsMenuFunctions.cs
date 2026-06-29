@@ -35,6 +35,18 @@ namespace ExScoringMod
         public static float timingWindow;
         public static bool disableTemporalAimAssist;
         public static bool forceHitSounds;
+        public static bool disableGunBeamRedirection;
+
+        public static void GetGunBeamRedirection()
+        {
+            disableGunBeamRedirection = Config.DisableGunBeamRedirection;
+        }
+
+        public static void SetGunBeamRedirection(bool value)
+        {
+            disableGunBeamRedirection = value;
+            Config.UpdateGunBeamRedirection(value);
+        }
 
         public static void GetForceHitSounds()
         {
@@ -419,6 +431,20 @@ namespace ExScoringMod
                 {
                     temporalAssist = false;
                 }
+            }
+        }
+
+        [HarmonyPatch(typeof(Gun), "AdjustAutoaimedPosition", new Type[] { typeof(Target), typeof(Vector3), typeof(int), typeof(bool) })]
+        private static class PatchAdjustPosition
+        {
+            private static bool Prefix(Gun __instance, Target target, Vector3 intersection, int firepointHistoryIndex, bool forceForAutoplay, ref Vector3 __result)
+            {
+                if (Config.DisableTemporalAimAssist) { return false; }
+                return true;
+            }
+            private static void Postfix(Gun __instance, Target target, Vector3 intersection, int firepointHistoryIndex, bool forceForAutoplay, ref Vector3 __result)
+            {
+                if (Config.DisableTemporalAimAssist) { __result = intersection; }
             }
         }
     }

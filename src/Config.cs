@@ -23,6 +23,7 @@ namespace ExScoringMod
 
         public static bool DisableTemporalAimAssist;
         public static bool ForceHitSounds;
+        public static bool DisableGunBeamRedirection;
 
         public static void RegisterConfig()
         {
@@ -45,6 +46,7 @@ namespace ExScoringMod
 
             MelonPrefs.RegisterBool(Category, nameof(DisableTemporalAimAssist), false, "Disables temporal aim assist");
             MelonPrefs.RegisterBool(Category, nameof(ForceHitSounds), false, "Forces hit sounds on targets that have none");
+            MelonPrefs.RegisterBool(Category, nameof(DisableGunBeamRedirection), true, "Disables the gun beam redirection visual, has no effect on scoring");
 
             OnModSettingsApplied();
         }
@@ -61,6 +63,14 @@ namespace ExScoringMod
             TimingWindow = MelonPrefs.GetFloat(Category, nameof(TimingWindow));
             DisableTemporalAimAssist = MelonPrefs.GetBool(Category, nameof(DisableTemporalAimAssist));
             ForceHitSounds = MelonPrefs.GetBool(Category, nameof(ForceHitSounds));
+            DisableGunBeamRedirection = MelonPrefs.GetBool(Category, nameof(DisableGunBeamRedirection));
+        }
+
+        public static void UpdateGunBeamRedirection(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(DisableGunBeamRedirection), value);
+            DisableGunBeamRedirection = value;
+            MelonPrefs.SaveConfig();
         }
 
         public static void UpdateForceHitSounds(bool value)

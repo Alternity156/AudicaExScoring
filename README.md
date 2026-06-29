@@ -15,6 +15,8 @@ TemporalAimAssistDisabler
 
 ForcedHitSounds
 
+GunBeamRedirrectionDisabler
+
 ## Optional Dependencies
 [SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience) Required to show album art.
 
@@ -58,3 +60,5 @@ This mod uses code or concepts from other mods and software such as:
 [TemporalAimAssistDisabler](https://github.com/Alternity156/TemporalAimAssistDisabler) (Full mod support)
 
 [ForcedHitSounds](https://github.com/Alternity156/ForcedHitSounds) (Full mod support)
+
+[GunBeamRedirectionDisabler](https://github.com/Alternity156/GunBeamRedirectionDisabler) (Full mod support)

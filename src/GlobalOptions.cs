@@ -155,7 +155,10 @@ namespace ExScoringMod
                 var temporalAimAssistToggle = OptionsMenuClone.CreateToggle(0, "Disable Temporal Aim Assist",
                     () => OptionsMenuFunctions.disableTemporalAimAssist,
                     v => { OptionsMenuFunctions.disableTemporalAimAssist = v; OptionsMenuFunctions.SetTemporalAimAssist(v); });
-                OptionsMenuClone.AddRow(temporalAimAssistToggle);
+                var gunBeamRedirectionToggle = OptionsMenuClone.CreateToggle(1, "Disable Gun Beam Redirection",
+                    () => OptionsMenuFunctions.disableGunBeamRedirection,
+                    v => { OptionsMenuFunctions.disableGunBeamRedirection = v; OptionsMenuFunctions.SetGunBeamRedirection(v); });
+                OptionsMenuClone.AddRow(temporalAimAssistToggle, gunBeamRedirectionToggle);
 
                 var speedHeader = OptionsMenuClone.CreateHeader(0, "Speed");
                 OptionsMenuClone.AddRow(speedHeader);
