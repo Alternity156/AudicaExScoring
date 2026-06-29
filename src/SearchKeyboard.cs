@@ -9,6 +9,8 @@ namespace ExScoringMod
     {
         private static GameObject keyboardCopy = null;
 
+        private static readonly Vector3 KeyboardPosition = new Vector3(0f, 1.75f, 2f);
+
         private static KeyboardEntry FindSourceKeyboard()
         {
             KeyboardEntry fallback = null;
@@ -46,17 +48,12 @@ namespace ExScoringMod
                 return;
             }
 
-            // Capture the original keyboard's world placement (valid even while inactive)
-            Vector3 wpos = src.transform.position;
-            Quaternion wrot = src.transform.rotation;
-            Vector3 wscale = src.transform.lossyScale;
-
             keyboardCopy = GameObject.Instantiate(src.gameObject);
             keyboardCopy.name = "ExScoring_SearchKeyboard";
             keyboardCopy.transform.SetParent(null, true);   // scene root: localScale == world scale
-            keyboardCopy.transform.position = wpos;
-            keyboardCopy.transform.rotation = wrot;
-            keyboardCopy.transform.localScale = wscale;
+            keyboardCopy.transform.position = KeyboardPosition;
+            keyboardCopy.transform.rotation = src.transform.rotation;
+            keyboardCopy.transform.localScale = src.transform.lossyScale;
             keyboardCopy.SetActive(false);
         }
 
@@ -65,6 +62,7 @@ namespace ExScoringMod
             EnsureCopy();
             if (keyboardCopy == null) return;
 
+            keyboardCopy.transform.position = KeyboardPosition;
             keyboardCopy.SetActive(true);
             var ke = keyboardCopy.GetComponent<KeyboardEntry>();
             if (ke != null) ke.Show();
@@ -84,6 +82,7 @@ namespace ExScoringMod
             EnsureCopy();
             if (keyboardCopy == null) return;
 
+            keyboardCopy.transform.position = KeyboardPosition;
             keyboardCopy.SetActive(true);
             var ke = keyboardCopy.GetComponent<KeyboardEntry>();
             if (ke != null) ke.Show();

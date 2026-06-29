@@ -17,6 +17,8 @@ namespace ExScoringMod
         public static int LastSongCount;
         public static bool SafeSongListReload;
 
+        public static bool DisableMineSounds = false;
+
         public static void RegisterConfig()
         {
             MelonPrefs.RegisterString(Category, nameof(typeHeader), "", "[Header]Scoring Type");
@@ -32,6 +34,8 @@ namespace ExScoringMod
 
             MelonPrefs.RegisterBool(Category, nameof(SafeSongListReload), true, "Disables menu buttons while the song list is reloading");
 
+            MelonPrefs.RegisterBool(Category, nameof(DisableMineSounds), false, "Disables mine sounds");
+
             OnModSettingsApplied();
         }
 
@@ -43,6 +47,12 @@ namespace ExScoringMod
             AudicaCalculation = MelonPrefs.GetBool(Category, nameof(AudicaCalculation));
             LinearCalculation = MelonPrefs.GetBool(Category, nameof(LinearCalculation));
             SafeSongListReload = MelonPrefs.GetBool(Category, nameof(SafeSongListReload));
+        }
+
+        public static void UpdateMineSoundDisabler(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(DisableMineSounds), value);
+            MelonPrefs.SaveConfig();
         }
 
         public static void UpdateSongCount(int newCount)

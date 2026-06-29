@@ -1,4 +1,5 @@
 ﻿using Harmony;
+using Hmx.Audio;
 using System;
 using UnityEngine;
 
@@ -28,6 +29,18 @@ namespace ExScoringMod
         public static bool flipSlotTargets;
         public static float targetingHapticsStrength;
         public static float aimAssist;
+        public static bool disableMineSounds;
+
+        public static void GetMineSounds()
+        {
+            disableMineSounds = Config.DisableMineSounds;
+        }
+
+        public static void SetMineSounds(bool value)
+        {
+            disableMineSounds = value;
+            Config.UpdateMineSoundDisabler(value);
+        }
 
         public static void GetGunPitch()
         {
@@ -275,6 +288,20 @@ namespace ExScoringMod
                 if (ParticleKillerConfig.KillCPUParticles) return false;
                 else return true;
             }
+        }
+
+        [HarmonyPatch(typeof(KataUtil), "PlayFMODEvent", new Type[] { typeof(string), typeof(UAudioEmitterCom) })]
+        private static class InterceptSounds
+        {
+            private static bool Prefix(KataUtil __instance, string eventName, UAudioEmitterCom emitter)
+            {
+                if (eventName == "event:/gameplay/dodge_success" && Config.DisableMineSounds)
+                {
+                    return false;
+                }
+                else return true;
+            }
+
         }
     }
 }

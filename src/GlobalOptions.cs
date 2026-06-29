@@ -43,6 +43,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetSfxLevel();
                 OptionsMenuFunctions.GetMissFilter();
                 OptionsMenuFunctions.GetWeaponSfxMode();
+                OptionsMenuFunctions.GetMineSounds();
                 OptionsMenuFunctions.GetInputOffset();
                 OptionsMenuFunctions.GetVideoOffset();
                 OptionsMenuFunctions.GetGunPitch();
@@ -79,6 +80,11 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.weaponSfxMode = v; OptionsMenuFunctions.SetWeaponSfxMode(v); },
                     1);
                 OptionsMenuClone.AddRow(missFilterToggle, weaponSfxCycle);
+
+                var disableMineSounds = OptionsMenuClone.CreateToggle(0, "Disable Mine Sounds",
+                    () => OptionsMenuFunctions.disableMineSounds,
+                    v => { OptionsMenuFunctions.disableMineSounds = v; OptionsMenuFunctions.SetMineSounds(v); });
+                OptionsMenuClone.AddRow(disableMineSounds);
 
                 var audioVideoCalibrationHeader = OptionsMenuClone.CreateHeader(0, "Audio/Video Calibration");
                 OptionsMenuClone.AddRow(audioVideoCalibrationHeader);
