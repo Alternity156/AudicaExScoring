@@ -22,6 +22,7 @@ namespace ExScoringMod
         public static float TimingWindow;
 
         public static bool DisableTemporalAimAssist;
+        public static bool ForceHitSounds;
 
         public static void RegisterConfig()
         {
@@ -43,6 +44,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterFloat(Category, nameof(TimingWindow), 1f, "Sets the timing window [0,1,0.05,1] {P}");
 
             MelonPrefs.RegisterBool(Category, nameof(DisableTemporalAimAssist), false, "Disables temporal aim assist");
+            MelonPrefs.RegisterBool(Category, nameof(ForceHitSounds), false, "Forces hit sounds on targets that have none");
 
             OnModSettingsApplied();
         }
@@ -58,6 +60,14 @@ namespace ExScoringMod
             DisableMineSounds = MelonPrefs.GetBool(Category, nameof(DisableMineSounds));
             TimingWindow = MelonPrefs.GetFloat(Category, nameof(TimingWindow));
             DisableTemporalAimAssist = MelonPrefs.GetBool(Category, nameof(DisableTemporalAimAssist));
+            ForceHitSounds = MelonPrefs.GetBool(Category, nameof(ForceHitSounds));
+        }
+
+        public static void UpdateForceHitSounds(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(ForceHitSounds), value);
+            ForceHitSounds = value;
+            MelonPrefs.SaveConfig();
         }
 
         public static void UpdateTemporalAimAssist(bool value)
