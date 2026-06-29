@@ -3,6 +3,7 @@ using Hmx.Audio;
 using MelonLoader;
 using System;
 using UnityEngine;
+using Viveport.Internal;
 
 namespace ExScoringMod
 {
@@ -32,6 +33,18 @@ namespace ExScoringMod
         public static float aimAssist;
         public static bool disableMineSounds;
         public static float timingWindow;
+        public static bool disableTemporalAimAssist;
+
+        public static void GetTemporalAimAssist()
+        {
+            disableTemporalAimAssist = Config.DisableTemporalAimAssist;
+        }
+
+        public static void SetTemporalAimAssist(bool value)
+        {
+            disableTemporalAimAssist = value;
+            Config.UpdateTemporalAimAssist(value);
+        }
 
         public static void GetTimingWindow()
         {
@@ -322,7 +335,6 @@ namespace ExScoringMod
         {
             private static void Postfix(AudioDriver __instance)
             {
-                MelonLogger.Log(Config.TimingWindow.ToString());
                 if (Config.TimingWindow == 1f) return;
                 SongCues.Cue[] cues = SongCues.I.GetCues();
                 SongList.SongData song = SongList.I.GetSong(SongDataHolder.I.songData.songID);
@@ -358,8 +370,18 @@ namespace ExScoringMod
                         }
                     }
                 }
+            }
+        }
 
-                MelonLogger.Log("Timing Window Applied");
+        [HarmonyPatch(typeof(Gun), "FindBestIntersection")]
+        private static class GunFindBestIntersectionPatch
+        {
+            private static void Prefix(Gun __instance, Target target, float aimRadius, ref bool temporalAssist)
+            {
+                if (Config.DisableTemporalAimAssist)
+                {
+                    temporalAssist = false;
+                }
             }
         }
     }

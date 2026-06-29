@@ -122,6 +122,7 @@ namespace ExScoringMod
             {
                 OptionsMenuFunctions.GetAimAssist();
                 OptionsMenuFunctions.GetTimingWindow();
+                OptionsMenuFunctions.GetTemporalAimAssist();
                 OptionsMenuFunctions.GetTargetSpeedMultiplier();
                 OptionsMenuFunctions.GetMeleeSpeedMultiplier();
                 OptionsMenuFunctions.GetDartPreGlowAmount();
@@ -146,6 +147,11 @@ namespace ExScoringMod
                     5f, 100f, 1f, 100f,
                     v => v.ToString("N0") + "%");
                 OptionsMenuClone.AddRow(aimAssistSlider, timingWindowSlider);
+
+                var temporalAimAssistToggle = OptionsMenuClone.CreateToggle(0, "Disable Temporal Aim Assist",
+                    () => OptionsMenuFunctions.disableTemporalAimAssist,
+                    v => { OptionsMenuFunctions.disableTemporalAimAssist = v; OptionsMenuFunctions.SetTemporalAimAssist(v); });
+                OptionsMenuClone.AddRow(temporalAimAssistToggle);
 
                 var speedHeader = OptionsMenuClone.CreateHeader(0, "Speed");
                 OptionsMenuClone.AddRow(speedHeader);

@@ -17,9 +17,11 @@ namespace ExScoringMod
         public static int LastSongCount;
         public static bool SafeSongListReload;
 
-        public static bool DisableMineSounds = false;
+        public static bool DisableMineSounds;
 
         public static float TimingWindow;
+
+        public static bool DisableTemporalAimAssist;
 
         public static void RegisterConfig()
         {
@@ -40,6 +42,8 @@ namespace ExScoringMod
 
             MelonPrefs.RegisterFloat(Category, nameof(TimingWindow), 1f, "Sets the timing window [0,1,0.05,1] {P}");
 
+            MelonPrefs.RegisterBool(Category, nameof(DisableTemporalAimAssist), false, "Disables temporal aim assist");
+
             OnModSettingsApplied();
         }
 
@@ -53,6 +57,14 @@ namespace ExScoringMod
             SafeSongListReload = MelonPrefs.GetBool(Category, nameof(SafeSongListReload));
             DisableMineSounds = MelonPrefs.GetBool(Category, nameof(DisableMineSounds));
             TimingWindow = MelonPrefs.GetFloat(Category, nameof(TimingWindow));
+            DisableTemporalAimAssist = MelonPrefs.GetBool(Category, nameof(DisableTemporalAimAssist));
+        }
+
+        public static void UpdateTemporalAimAssist(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(DisableTemporalAimAssist), value);
+            DisableTemporalAimAssist = value;
+            MelonPrefs.SaveConfig();
         }
 
         public static void UpdateTimingWindow(float value)

@@ -11,6 +11,8 @@ MineSoundDisabler
 
 TimingAssist
 
+TemporalAimAssistDisabler
+
 ## Optional Dependencies
 [SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience) Required to show album art.
 
@@ -50,3 +52,5 @@ This mod uses code or concepts from other mods and software such as:
 [MineSoundDisabler](https://github.com/MeepsKitten/AudicaMineSoundDisabler) (Full mod support)
 
 [TimingAssist](https://github.com/octoberU/TimingAssist) (Full mod support, "Timing Window" setting)
+
+[TemporalAimAssistDisabler](https://github.com/Alternity156/TemporalAimAssistDisabler) (Full mod support)
