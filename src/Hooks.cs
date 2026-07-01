@@ -1066,5 +1066,19 @@ namespace ExScoringMod
         //         }
         //     }
         // }
+
+        [HarmonyPatch(typeof(StartupLoader), "SetState", new Type[] { typeof(StartupLoader.State) })]
+        public static class StartupLoaderSetStatePatch
+        {
+            public static bool Prefix(StartupLoader __instance, ref StartupLoader.State newState)
+            {
+                if (newState == StartupLoader.State.HMXLogo)
+                {
+                    MelonLoader.MelonLogger.Log("Skipping HMXLogo state, redirecting to Complete");
+                    newState = StartupLoader.State.Complete;
+                }
+                return true;
+            }
+        }
     }
 }
