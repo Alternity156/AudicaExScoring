@@ -462,6 +462,8 @@ namespace ExScoringMod
 
             if (Input.GetKeyDown(KeyCode.F6))
                 SongRequestIntegration.LogSnapshot();
+
+            TrippyMenu.Tick();
         }
 
         public override void OnLateUpdate()

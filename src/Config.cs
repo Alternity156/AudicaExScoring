@@ -37,6 +37,13 @@ namespace ExScoringMod
         public static bool ParticleKillerKillCPUParticles;
         public static int ParticleKillerParticleCount;
 
+        public static string menuHeader = "[Header]Menu";
+        public static bool DisableMenuGrab;
+        public static bool TrippyMenuEnabled;
+        public static float TrippyMenuSpeed;
+        public static float ScrollSpeedMultiplier;
+        public static float ArrowScrollRows;
+
         public static void RegisterConfig()
         {
             MelonPrefs.RegisterString(Category, nameof(typeHeader), "", "[Header]Scoring Type");
@@ -72,6 +79,13 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(ParticleKillerKillCPUParticles), true, "Disables a small puff of particles.");
             MelonPrefs.RegisterInt(Category, nameof(ParticleKillerParticleCount), 0, "Amount of GPU particles per shot. [0,50000,1000,0] {G}");
 
+            MelonPrefs.RegisterString(Category, nameof(menuHeader), "", "[Header]Menu");
+            MelonPrefs.RegisterBool(Category, nameof(DisableMenuGrab), false, "Disables grabbing the song list scroller in menus");
+            MelonPrefs.RegisterBool(Category, nameof(TrippyMenuEnabled), false, "Enables a psychedelic color cycle effect in menus");
+            MelonPrefs.RegisterFloat(Category, nameof(TrippyMenuSpeed), 1.0f, "Sets the trippy menu cycle speed [0.1,100,0.1,1]");
+            MelonPrefs.RegisterFloat(Category, nameof(ScrollSpeedMultiplier), 1.0f, "Sets the song list joystick scroll speed multiplier [0.1,10,0.1,1]");
+            MelonPrefs.RegisterFloat(Category, nameof(ArrowScrollRows), 3.0f, "Sets how many rows the song list scrolls per arrow shot [1,20,1,3]");
+
             OnModSettingsApplied();
         }
 
@@ -96,6 +110,29 @@ namespace ExScoringMod
             ParticleKillerEnabled = MelonPrefs.GetBool(Category, nameof(ParticleKillerEnabled));
             ParticleKillerKillCPUParticles = MelonPrefs.GetBool(Category, nameof(ParticleKillerKillCPUParticles));
             ParticleKillerParticleCount = MelonPrefs.GetInt(Category, nameof(ParticleKillerParticleCount));
+            DisableMenuGrab = MelonPrefs.GetBool(Category, nameof(DisableMenuGrab));
+            TrippyMenuEnabled = MelonPrefs.GetBool(Category, nameof(TrippyMenuEnabled));
+            TrippyMenuSpeed = MelonPrefs.GetFloat(Category, nameof(TrippyMenuSpeed));
+            ScrollSpeedMultiplier = MelonPrefs.GetFloat(Category, nameof(ScrollSpeedMultiplier));
+            ArrowScrollRows = MelonPrefs.GetFloat(Category, nameof(ArrowScrollRows));
+        }
+
+        public static void UpdateArrowScrollRows(float value)
+        {
+            if (value < 1f) value = 1f;
+            if (value > 20f) value = 20f;
+            MelonPrefs.SetFloat(Category, nameof(ArrowScrollRows), value);
+            ArrowScrollRows = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateScrollSpeedMultiplier(float value)
+        {
+            if (value < 0.1f) value = 0.1f;
+            if (value > 10f) value = 10f;
+            MelonPrefs.SetFloat(Category, nameof(ScrollSpeedMultiplier), value);
+            ScrollSpeedMultiplier = value;
+            MelonPrefs.SaveConfig();
         }
 
         public static void UpdateParticleKillerEnabled(bool value)
@@ -116,6 +153,29 @@ namespace ExScoringMod
         {
             MelonPrefs.SetInt(Category, nameof(ParticleKillerParticleCount), value);
             ParticleKillerParticleCount = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateDisableMenuGrab(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(DisableMenuGrab), value);
+            DisableMenuGrab = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateTrippyMenuEnabled(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(TrippyMenuEnabled), value);
+            TrippyMenuEnabled = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateTrippyMenuSpeed(float value)
+        {
+            if (value < 0.1f) value = 0.1f;
+            if (value > 100f) value = 100f;
+            MelonPrefs.SetFloat(Category, nameof(TrippyMenuSpeed), value);
+            TrippyMenuSpeed = value;
             MelonPrefs.SaveConfig();
         }
 

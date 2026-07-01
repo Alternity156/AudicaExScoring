@@ -251,6 +251,7 @@
     <Compile Include="src\SongSearchField.cs" />
     <Compile Include="src\SongSearchMenu.cs" />
     <Compile Include="src\TargetIcons.cs" />
+    <Compile Include="src\TrippyMenu.cs" />
     <Compile Include="src\UI.cs" />
     <Compile Include="src\Utils.cs" />
     <!-- csogg - OGG packet/page/sync layer (for song preview) -->

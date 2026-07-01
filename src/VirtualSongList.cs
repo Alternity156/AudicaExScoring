@@ -130,6 +130,9 @@ namespace ExScoringMod
 
         private static SongSelect songSelect;
         private static ShellScrollable scroller;
+
+        public static ShellScrollable Scroller => scroller;
+
         private static Transform scrollParent;
         private static GameObject hiddenHolder;
         private static float savedScroll = 0f; // scroll position remembered across leave/return

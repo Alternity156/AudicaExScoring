@@ -284,6 +284,39 @@ namespace ExScoringMod
             OptionsMenuClone.AddRow(widthSlider, lengthSlider);
         }),
 
+            new OptionsCategory("opt_menu", "Menu", () =>
+        {
+            OptionsMenuFunctions.GetDisableMenuGrab();
+            OptionsMenuFunctions.GetTrippyMenuEnabled();
+            OptionsMenuFunctions.GetTrippyMenuSpeed();
+            OptionsMenuFunctions.GetScrollSpeedMultiplier();
+            OptionsMenuFunctions.GetArrowScrollRows();
+
+            var disableMenuGrabToggle = OptionsMenuClone.CreateToggle(0, "Disable Menu Grab",
+                () => OptionsMenuFunctions.disableMenuGrab,
+                v => { OptionsMenuFunctions.disableMenuGrab = v; OptionsMenuFunctions.SetDisableMenuGrab(v); });
+            OptionsMenuClone.AddRow(disableMenuGrabToggle);
+
+            var trippyMenuToggle = OptionsMenuClone.CreateToggle(0, "Enable Trippy Menu",
+                () => OptionsMenuFunctions.trippyMenuEnabled,
+                v => { OptionsMenuFunctions.trippyMenuEnabled = v; OptionsMenuFunctions.SetTrippyMenuEnabled(v); });
+            var trippyMenuSpeedSlider = OptionsMenuClone.CreateSlider(1, "Trippy Speed",
+                () => OptionsMenuFunctions.trippyMenuSpeed,
+                v => { OptionsMenuFunctions.trippyMenuSpeed = v; OptionsMenuFunctions.SetTrippyMenuSpeed(v); },
+                0.1f, 100f, 0.1f, 1f, "N1");
+            OptionsMenuClone.AddRow(trippyMenuToggle, trippyMenuSpeedSlider);
+
+            var scrollSpeedSlider = OptionsMenuClone.CreateSlider(0, "Scroll Speed",
+                () => OptionsMenuFunctions.scrollSpeedMultiplier,
+                v => { OptionsMenuFunctions.scrollSpeedMultiplier = v; OptionsMenuFunctions.SetScrollSpeedMultiplier(v); },
+                0.1f, 10f, 0.1f, 1f, "N1");
+            var arrowScrollRowsSlider = OptionsMenuClone.CreateSlider(1, "Arrow Scroll Rows",
+                () => OptionsMenuFunctions.arrowScrollRows,
+                v => { OptionsMenuFunctions.arrowScrollRows = v; OptionsMenuFunctions.SetArrowScrollRows(v); },
+                1f, 20f, 1f, 3f, "N0");
+            OptionsMenuClone.AddRow(scrollSpeedSlider, arrowScrollRowsSlider);
+        }),
+
             new OptionsCategory("opt_test", "Wide Slider Test", () =>
         {
             var testHeader = OptionsMenuClone.CreateHeader(0, "Wide Slider Test");

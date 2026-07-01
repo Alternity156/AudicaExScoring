@@ -17,6 +17,10 @@ ForcedHitSounds
 
 GunBeamRedirrectionDisabler
 
+TrippyMenu
+
+MenuGrabDisabler
+
 ## Optional Dependencies
 [SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience) Required to show album art.
 
@@ -62,3 +66,7 @@ This mod uses code or concepts from other mods and software such as:
 [ForcedHitSounds](https://github.com/Alternity156/ForcedHitSounds) (Full mod support)
 
 [GunBeamRedirectionDisabler](https://github.com/Alternity156/GunBeamRedirectionDisabler) (Full mod support)
+
+[TrippyMenu](https://github.com/Alternity156/AudicaTrippyMenu) (Full mod support)
+
+[MenuGrabDisabler](https://github.com/Alternity156/MenuGrabDisabler) (Full mod support)

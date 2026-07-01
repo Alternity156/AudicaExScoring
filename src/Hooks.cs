@@ -81,6 +81,11 @@ namespace ExScoringMod
                     ResetExScore();
                 }
 
+                if (state == MenuState.State.Launched && menuState != MenuState.State.Launched)
+                {
+                    TrippyMenu.ResetOnSongStart();
+                }
+
                 menuState = state;
                 if (state == MenuState.State.TitleScreen)
                 {

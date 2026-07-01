@@ -3,7 +3,6 @@ using Hmx.Audio;
 using MelonLoader;
 using System;
 using UnityEngine;
-using Viveport.Internal;
 
 namespace ExScoringMod
 {
@@ -45,6 +44,33 @@ namespace ExScoringMod
         public static float arrowWidth;
         public static float arrowLength;
         public static bool enableChainArrow;
+        public static bool disableMenuGrab;
+        public static bool trippyMenuEnabled;
+        public static float trippyMenuSpeed;
+        public static float scrollSpeedMultiplier;
+        public static float arrowScrollRows;
+
+        public static void GetArrowScrollRows()
+        {
+            arrowScrollRows = Config.ArrowScrollRows;
+        }
+
+        public static void SetArrowScrollRows(float value)
+        {
+            arrowScrollRows = value;
+            Config.UpdateArrowScrollRows(value);
+        }
+
+        public static void GetScrollSpeedMultiplier()
+        {
+            scrollSpeedMultiplier = Config.ScrollSpeedMultiplier;
+        }
+
+        public static void SetScrollSpeedMultiplier(float value)
+        {
+            scrollSpeedMultiplier = value;
+            Config.UpdateScrollSpeedMultiplier(value);
+        }
 
         public static void GetEnableChainArrow()
         {
@@ -55,6 +81,39 @@ namespace ExScoringMod
         {
             enableChainArrow = value;
             Config.UpdateEnableChainArrow(value);
+        }
+
+        public static void GetDisableMenuGrab()
+        {
+            disableMenuGrab = Config.DisableMenuGrab;
+        }
+
+        public static void SetDisableMenuGrab(bool value)
+        {
+            disableMenuGrab = value;
+            Config.UpdateDisableMenuGrab(value);
+        }
+
+        public static void GetTrippyMenuEnabled()
+        {
+            trippyMenuEnabled = Config.TrippyMenuEnabled;
+        }
+
+        public static void SetTrippyMenuEnabled(bool value)
+        {
+            trippyMenuEnabled = value;
+            Config.UpdateTrippyMenuEnabled(value);
+        }
+
+        public static void GetTrippyMenuSpeed()
+        {
+            trippyMenuSpeed = Config.TrippyMenuSpeed;
+        }
+
+        public static void SetTrippyMenuSpeed(float value)
+        {
+            trippyMenuSpeed = value;
+            Config.UpdateTrippyMenuSpeed(value);
         }
 
         public static void GetArrowColorMode()
@@ -481,7 +540,7 @@ namespace ExScoringMod
                         }
                     }
                 }
-                
+
                 if (Config.ForceHitSounds)
                 {
                     SongCues.Cue[] cues = SongCues.I.GetCues();
@@ -530,6 +589,45 @@ namespace ExScoringMod
             private static void Postfix(Gun __instance, Target target, Vector3 intersection, int firepointHistoryIndex, bool forceForAutoplay, ref Vector3 __result)
             {
                 if (Config.DisableGunBeamRedirection) { __result = intersection; }
+            }
+        }
+
+        [HarmonyPatch(typeof(GrabScroll), "OnGrab", new Type[] { typeof(Gun), typeof(Vector3) })]
+        private static class MenuGrabDisablerPatch
+        {
+            private static bool Prefix(GrabScroll __instance, Gun gun, Vector3 grabPos)
+            {
+                if (Config.DisableMenuGrab) return false;
+                if (__instance.isArrow) return false; // arrow buttons never grab-scroll
+                return true;
+            }
+        }
+
+        [HarmonyPatch(typeof(ShellScrollable), "Scroll", new Type[] { typeof(float) })]
+        private static class ShellScrollableScrollSpeedPatch
+        {
+            private static bool Prefix(ShellScrollable __instance, float amount)
+            {
+                if (VirtualSongList.Scroller == null || __instance.Pointer != VirtualSongList.Scroller.Pointer)
+                    return true;
+
+                float effectiveAmount;
+                if (Mathf.Approximately(Mathf.Abs(amount), 3f))
+                {
+                    effectiveAmount = Mathf.Sign(amount) * Config.ArrowScrollRows;
+                }
+                else
+                {
+                    effectiveAmount = amount * Config.ScrollSpeedMultiplier;
+                }
+
+                float maxScroll = Mathf.Max(0f, VirtualSongList.CurrentView.Count - __instance.displayCount);
+                float newIndex = Mathf.Clamp(__instance.mIndex + effectiveAmount, 0f, maxScroll);
+
+                __instance.SnapTo(newIndex, true);
+                __instance.UpdateScroll(-1);
+
+                return false;
             }
         }
     }
