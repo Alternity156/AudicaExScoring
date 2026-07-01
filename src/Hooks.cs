@@ -1067,6 +1067,7 @@ namespace ExScoringMod
         //     }
         // }
 
+        /*
         [HarmonyPatch(typeof(StartupLoader), "SetState", new Type[] { typeof(StartupLoader.State) })]
         public static class StartupLoaderSetStatePatch
         {
@@ -1078,6 +1079,62 @@ namespace ExScoringMod
                     newState = StartupLoader.State.Complete;
                 }
                 return true;
+            }
+        }
+        */
+
+        [HarmonyPatch(typeof(StartupLogo), "OnEnable", new Type[0])]
+        private static class StartupLogoOnEnablePatch
+        {
+            private static void Postfix(StartupLogo __instance)
+            {
+                __instance.displayTime = 0.15f;
+                __instance.fadeInTime = 0.15f;
+                __instance.fadeOutTime = 0.15f;
+                MelonLoader.MelonLogger.Log("Shortened StartupLogo timings (moderate)");
+            }
+        }
+
+        [HarmonyPatch(typeof(Target), "UpdateChainLineAnim", new Type[] { typeof(float), typeof(float) })]
+        public static class TargetUpdateChainLineAnimPatch
+        {
+            public static void Postfix(Target __instance, float ticksUntil, float animationTime)
+            {
+                LineRenderer chain = __instance.chainLine;
+                if (chain == null || !chain.enabled || chain.positionCount < 2)
+                {
+                    ChainArrow.Hide(__instance);
+                    return;
+                }
+
+                Vector3 p0 = chain.GetPosition(0);
+                Vector3 p1 = chain.GetPosition(1);
+
+                Vector3 dir = p1 - p0;
+                float len = dir.magnitude;
+                if (len < 0.0001f)
+                {
+                    ChainArrow.Hide(__instance);
+                    return;
+                }
+                dir /= len;
+
+                LineRenderer arrow = ChainArrow.GetOrCreate(__instance);
+                if (arrow == null)
+                    return;
+
+                Vector3 mid = (p0 + p1) * 0.5f;
+                Vector3 perp = Vector3.Cross(dir, __instance.transform.forward).normalized;
+
+                float arrowSize = Mathf.Clamp(len * 0.15f, 0.05f, 0.3f);
+                Vector3 back = -dir * arrowSize;
+                Vector3 side = perp * arrowSize * 0.6f;
+
+                arrow.SetPosition(0, mid + back + side);
+                arrow.SetPosition(1, mid + dir * arrowSize); // apex, points toward next target
+                arrow.SetPosition(2, mid + back - side);
+
+                arrow.enabled = true;
             }
         }
     }

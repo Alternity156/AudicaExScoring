@@ -194,6 +194,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="src\ChainArrow.cs" />
     <Compile Include="src\ParticleKillerConfig.cs" />
     <Compile Include="src\AddPlaylistButton.cs" />
     <Compile Include="src\AlbumArt.cs" />
