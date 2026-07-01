@@ -3,7 +3,7 @@ This mod conflicts with ScorePercentage, SongBrowser, Meeps Audica UI Enhancemen
 
 Since this mod is a massive overhaul of the song list menu, I took it upon myself to include pretty much all the Song Browser features within this mod.
 
-This mod aslo includes some other mods for convenience and menu placement. I don't think owning these mods should cause problems, but it is redundant to have them alonside this mod. These mods are settings based mods that enhance gameplay in some way.
+This mod aslo includes some other mods for convenience and menu placement. Do not have these mods as they will conflict. To enable/disable these mods simply find them in the Options menu from the song list.
 
 ParticleKiller
 

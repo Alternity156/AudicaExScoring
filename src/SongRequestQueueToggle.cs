@@ -79,7 +79,6 @@ namespace ExScoringMod
         {
             bool now = !SongRequestIntegration.RequestsEnabled;
             SongRequestIntegration.SetRequestsEnabled(now);
-            SongRequestIntegration.EmitQueueStateChanged(now); // chat: "Request queue enabled/disabled."
             SyncIndicator();
         }
 

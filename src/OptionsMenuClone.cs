@@ -86,6 +86,20 @@ namespace ExScoringMod
             Menu.scrollable.SnapTo(0, true);
         }
 
+        /// <summary>
+        /// Shows a page's real, native content as built by the game's own OptionsMenu logic —
+        /// no Wipe(), no custom Build(). Used for pages we want to present unmodified (e.g. Customization).
+        /// </summary>
+        public static void DrawNativePage(string title, OptionsMenu.Page page)
+        {
+            if (Menu == null) return;
+            allowShowPage = true;
+            Menu.ShowPage(page);
+            allowShowPage = false;
+            if (title != null && Menu.screenTitle != null) Menu.screenTitle.text = title;
+            Menu.scrollable.SnapTo(0, true);
+        }
+
         public static void Wipe()
         {
             if (Menu == null) return;

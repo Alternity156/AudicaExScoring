@@ -11,7 +11,10 @@ namespace ExScoringMod
         public string Id;
         public string Title;
         public Action Build;
+        public OptionsMenu.Page? NativePage;
+
         public OptionsCategory(string id, string title, Action build) { Id = id; Title = title; Build = build; }
+        public OptionsCategory(string id, string title, OptionsMenu.Page nativePage) { Id = id; Title = title; NativePage = nativePage; }
     }
 
     /// <summary>
@@ -122,6 +125,7 @@ namespace ExScoringMod
                     -360f, 360f, 1f, 0f, "N0");
                 OptionsMenuClone.AddRow(gunYawSlider);
             }),
+
             new OptionsCategory("opt_gameplay", "Gameplay Options", () =>
             {
                 OptionsMenuFunctions.GetAimAssist();
@@ -226,6 +230,11 @@ namespace ExScoringMod
                     v => v.ToString("N0") + "%");
                 OptionsMenuClone.AddRow(hapticsSlider);
             }),
+
+            new OptionsCategory("opt_customize", "Customize", OptionsMenu.Page.Customization),
+
+            new OptionsCategory("opt_colors", "Colors", OptionsMenu.Page.Colors),
+
             new OptionsCategory("opt_test", "Wide Slider Test", () =>
         {
             var testHeader = OptionsMenuClone.CreateHeader(0, "Wide Slider Test");
@@ -274,7 +283,7 @@ namespace ExScoringMod
             }
             else
             {
-                OptionsMenuClone.Draw(cat.Title, cat.Build); // already up: redraw, no animation
+                DrawCategory(cat); // already up: redraw, no animation
             }
         }
 
@@ -294,10 +303,10 @@ namespace ExScoringMod
             MelonLogger.Log($"[Options] waiting hideAnim length {len:N2}s before disabling launch page");
             yield return new WaitForSeconds(len);
 
-            if (launchPage != null) launchPage.SetActive(false); // the missing SetActive(false)
+            if (launchPage != null) launchPage.SetActive(false);
             OptionsMenuClone.Show();
-            yield return null; // let ShowPage settle a frame
-            OptionsMenuClone.Draw(cat.Title, cat.Build);
+            yield return null;
+            DrawCategory(cat);
             MelonLogger.Log("[Options] launch page disabled, clone shown");
         }
 
@@ -369,6 +378,14 @@ namespace ExScoringMod
 
             // in RestoreIfPending, log entry + which category
             MelonLogger.Log($"[Options] RestoreIfPending: catId={restoreCategoryId}");
+        }
+
+        private static void DrawCategory(OptionsCategory cat)
+        {
+            if (cat.NativePage.HasValue)
+                OptionsMenuClone.DrawNativePage(cat.Title, cat.NativePage.Value);
+            else
+                OptionsMenuClone.Draw(cat.Title, cat.Build);
         }
     }
 }
