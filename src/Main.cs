@@ -73,7 +73,6 @@ namespace ExScoringMod
         {
             Config.RegisterConfig();
             PlaylistConfig.RegisterConfig();
-            ParticleKillerConfig.RegisterConfig();
 
             // Check if AuthorableModifiers is installed
             if (MelonHandler.Mods.Any(it => it.Assembly.GetName().Name == "AuthorableModifiers"))

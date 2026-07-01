@@ -42,6 +42,8 @@ namespace ExScoringMod
         {
             new OptionsCategory("opt_audiovideo", "Audio/Video And Calibration", () =>            {
                 OptionsMenuFunctions.GetParticleMode();
+                OptionsMenuFunctions.GetKillCPUParticles();
+                OptionsMenuFunctions.GetParticleKillerCount();
                 OptionsMenuFunctions.GetMusicLevel();
                 OptionsMenuFunctions.GetSfxLevel();
                 OptionsMenuFunctions.GetMissFilter();
@@ -62,6 +64,15 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.particleMode = v; OptionsMenuFunctions.SetParticleMode(v); },
                     1);
                 OptionsMenuClone.AddRow(particleCycle);
+
+                var killCpuParticlesToggle = OptionsMenuClone.CreateToggle(0, "Kill CPU Particles",
+                    () => OptionsMenuFunctions.killCPUParticles,
+                    v => { OptionsMenuFunctions.killCPUParticles = v; OptionsMenuFunctions.SetKillCPUParticles(v); });
+                var particleCountSlider = OptionsMenuClone.CreateSlider(1, "Particle Count",
+                    () => OptionsMenuFunctions.particleKillerCount,
+                    v => { OptionsMenuFunctions.particleKillerCount = v; OptionsMenuFunctions.SetParticleKillerCount(v); },
+                    0f, 50000f, 1000f, 0f, "N0");
+                OptionsMenuClone.AddRow(killCpuParticlesToggle, particleCountSlider);
 
                 var audioHeader = OptionsMenuClone.CreateHeader(0, "Audio");
                 OptionsMenuClone.AddRow(audioHeader);
@@ -131,6 +142,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetAimAssist();
                 OptionsMenuFunctions.GetTimingWindow();
                 OptionsMenuFunctions.GetTemporalAimAssist();
+                OptionsMenuFunctions.GetGunBeamRedirection();
                 OptionsMenuFunctions.GetTargetSpeedMultiplier();
                 OptionsMenuFunctions.GetMeleeSpeedMultiplier();
                 OptionsMenuFunctions.GetDartPreGlowAmount();
@@ -234,6 +246,43 @@ namespace ExScoringMod
             new OptionsCategory("opt_customize", "Customize", OptionsMenu.Page.Customization),
 
             new OptionsCategory("opt_colors", "Colors", OptionsMenu.Page.Colors),
+
+            new OptionsCategory("opt_chainarrow", "Chain Arrow", () =>
+        {
+            OptionsMenuFunctions.GetEnableChainArrow();
+            OptionsMenuFunctions.GetArrowColorMode();
+            OptionsMenuFunctions.GetChainLineColorMode();
+            OptionsMenuFunctions.GetArrowWidth();
+            OptionsMenuFunctions.GetArrowLength();
+
+            var header = OptionsMenuClone.CreateHeader(0, "Chain Arrow");
+            OptionsMenuClone.AddRow(header);
+
+            var enableToggle = OptionsMenuClone.CreateToggle(0, "Enable Arrow",
+                () => OptionsMenuFunctions.enableChainArrow,
+                v => { OptionsMenuFunctions.enableChainArrow = v; OptionsMenuFunctions.SetEnableChainArrow(v); });
+            OptionsMenuClone.AddRow(enableToggle);
+
+            var arrowColorCycle = OptionsMenuClone.CreateCycle(0, "Arrow Color", OptionsMenuFunctions.ArrowColorOptions,
+                () => OptionsMenuFunctions.arrowColorMode,
+                v => { OptionsMenuFunctions.arrowColorMode = v; OptionsMenuFunctions.SetArrowColorMode(v); },
+                0);
+            var chainLineColorCycle = OptionsMenuClone.CreateCycle(1, "Chain Line Color", OptionsMenuFunctions.ChainLineColorOptions,
+                () => OptionsMenuFunctions.chainLineColorMode,
+                v => { OptionsMenuFunctions.chainLineColorMode = v; OptionsMenuFunctions.SetChainLineColorMode(v); },
+                0);
+            OptionsMenuClone.AddRow(arrowColorCycle, chainLineColorCycle);
+
+            var widthSlider = OptionsMenuClone.CreateSlider(0, "Arrow Width",
+                () => OptionsMenuFunctions.arrowWidth,
+                v => { OptionsMenuFunctions.arrowWidth = v; OptionsMenuFunctions.SetArrowWidth(v); },
+                0.1f, 1f, 0.05f, 0.5f, "N2");
+            var lengthSlider = OptionsMenuClone.CreateSlider(1, "Arrow Length",
+                () => OptionsMenuFunctions.arrowLength,
+                v => { OptionsMenuFunctions.arrowLength = v; OptionsMenuFunctions.SetArrowLength(v); },
+                0.05f, 1f, 0.05f, 0.25f, "N2");
+            OptionsMenuClone.AddRow(widthSlider, lengthSlider);
+        }),
 
             new OptionsCategory("opt_test", "Wide Slider Test", () =>
         {

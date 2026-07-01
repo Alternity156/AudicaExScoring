@@ -12,6 +12,8 @@ namespace ExScoringMod
         public static readonly string[] ParticleOptions = { "No Particles", "Normal Particles", "Extra Particles" };
         public static readonly string[] WeaponSfxOptions = { "Yes", "Menus Only", "No" };
         public static int particleMode = 1;
+        public static bool killCPUParticles;
+        public static float particleKillerCount;
         public static int weaponSfxMode = 0;
         public static float musicLevel;
         public static float sfxLevel;
@@ -36,6 +38,68 @@ namespace ExScoringMod
         public static bool disableTemporalAimAssist;
         public static bool forceHitSounds;
         public static bool disableGunBeamRedirection;
+        public static readonly string[] ArrowColorOptions = { "White", "Hand Color" };
+        public static readonly string[] ChainLineColorOptions = { "Default (Black)", "Hand Color" };
+        public static int arrowColorMode;
+        public static int chainLineColorMode;
+        public static float arrowWidth;
+        public static float arrowLength;
+        public static bool enableChainArrow;
+
+        public static void GetEnableChainArrow()
+        {
+            enableChainArrow = Config.EnableChainArrow;
+        }
+
+        public static void SetEnableChainArrow(bool value)
+        {
+            enableChainArrow = value;
+            Config.UpdateEnableChainArrow(value);
+        }
+
+        public static void GetArrowColorMode()
+        {
+            arrowColorMode = Config.ArrowColorMode;
+        }
+
+        public static void SetArrowColorMode(int value)
+        {
+            arrowColorMode = value;
+            Config.UpdateArrowColorMode(value);
+        }
+
+        public static void GetChainLineColorMode()
+        {
+            chainLineColorMode = Config.ChainLineColorMode;
+        }
+
+        public static void SetChainLineColorMode(int value)
+        {
+            chainLineColorMode = value;
+            Config.UpdateChainLineColorMode(value);
+        }
+
+        public static void GetArrowWidth()
+        {
+            arrowWidth = Config.ArrowWidth;
+        }
+
+        public static void SetArrowWidth(float value)
+        {
+            arrowWidth = value;
+            Config.UpdateArrowWidth(value);
+        }
+
+        public static void GetArrowLength()
+        {
+            arrowLength = Config.ArrowLength;
+        }
+
+        public static void SetArrowLength(float value)
+        {
+            arrowLength = value;
+            Config.UpdateArrowLength(value);
+        }
 
         public static void GetGunBeamRedirection()
         {
@@ -184,7 +248,7 @@ namespace ExScoringMod
 
         public static void GetParticleMode()
         {
-            if (ParticleKillerConfig.Enabled) particleMode = 0;
+            if (Config.ParticleKillerEnabled) particleMode = 0;
             else
             {
                 if (PlayerPreferences.I.ExtraParticles.mVal) particleMode = 2;
@@ -194,19 +258,40 @@ namespace ExScoringMod
 
         public static void SetParticleMode(int value)
         {
-            if (value == 0) ParticleKillerConfig.Enabled = true;
+            if (value == 0) Config.UpdateParticleKillerEnabled(true);
             else if (value == 1)
             {
                 PlayerPreferences.I.ExtraParticles.Set(false);
-                ParticleKillerConfig.Enabled = false;
+                Config.UpdateParticleKillerEnabled(false);
             }
             else if (value == 2)
             {
                 PlayerPreferences.I.ExtraParticles.Set(true);
-                ParticleKillerConfig.Enabled = false;
+                Config.UpdateParticleKillerEnabled(false);
             }
         }
 
+        public static void GetKillCPUParticles()
+        {
+            killCPUParticles = Config.ParticleKillerKillCPUParticles;
+        }
+
+        public static void SetKillCPUParticles(bool value)
+        {
+            killCPUParticles = value;
+            Config.UpdateParticleKillerKillCPUParticles(value);
+        }
+
+        public static void GetParticleKillerCount()
+        {
+            particleKillerCount = Config.ParticleKillerParticleCount;
+        }
+
+        public static void SetParticleKillerCount(float value)
+        {
+            particleKillerCount = value;
+            Config.UpdateParticleKillerParticleCount((int)value);
+        }
 
         public static void GetTargetSpeedMultiplier()
         {
@@ -314,8 +399,8 @@ namespace ExScoringMod
         {
             private static void Prefix(UGPUEmitter __instance, ref int count, bool immediate)
             {
-                if (!ParticleKillerConfig.Enabled) return;
-                count = ParticleKillerConfig.ParticleCount;
+                if (!Config.ParticleKillerEnabled) return;
+                count = Config.ParticleKillerParticleCount;
             }
         }
 
@@ -324,8 +409,8 @@ namespace ExScoringMod
         {
             private static void Prefix(UGPUEmitter __instance, ref int count)
             {
-                if (!ParticleKillerConfig.Enabled) return;
-                count = ParticleKillerConfig.ParticleCount;
+                if (!Config.ParticleKillerEnabled) return;
+                count = Config.ParticleKillerParticleCount;
             }
         }
 
@@ -334,8 +419,8 @@ namespace ExScoringMod
         {
             private static bool Prefix(ParticlePool __instance)
             {
-                if (!ParticleKillerConfig.Enabled) return true;
-                if (ParticleKillerConfig.KillCPUParticles) return false;
+                if (!Config.ParticleKillerEnabled) return true;
+                if (Config.ParticleKillerKillCPUParticles) return false;
                 else return true;
             }
         }
@@ -439,12 +524,12 @@ namespace ExScoringMod
         {
             private static bool Prefix(Gun __instance, Target target, Vector3 intersection, int firepointHistoryIndex, bool forceForAutoplay, ref Vector3 __result)
             {
-                if (Config.DisableTemporalAimAssist) { return false; }
+                if (Config.DisableGunBeamRedirection) { return false; }
                 return true;
             }
             private static void Postfix(Gun __instance, Target target, Vector3 intersection, int firepointHistoryIndex, bool forceForAutoplay, ref Vector3 __result)
             {
-                if (Config.DisableTemporalAimAssist) { __result = intersection; }
+                if (Config.DisableGunBeamRedirection) { __result = intersection; }
             }
         }
     }

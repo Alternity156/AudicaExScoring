@@ -25,6 +25,18 @@ namespace ExScoringMod
         public static bool ForceHitSounds;
         public static bool DisableGunBeamRedirection;
 
+        public static string chainArrowHeader = "[Header]Chain Arrow";
+        public static int ArrowColorMode;      // 0 = White, 1 = Hand Color
+        public static int ChainLineColorMode;  // 0 = Default (Black), 1 = Hand Color
+        public static float ArrowWidth;
+        public static float ArrowLength;
+        public static bool EnableChainArrow;
+
+        public static string particleKillerHeader = "[Header]Particle Killer";
+        public static bool ParticleKillerEnabled;
+        public static bool ParticleKillerKillCPUParticles;
+        public static int ParticleKillerParticleCount;
+
         public static void RegisterConfig()
         {
             MelonPrefs.RegisterString(Category, nameof(typeHeader), "", "[Header]Scoring Type");
@@ -48,6 +60,18 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(ForceHitSounds), false, "Forces hit sounds on targets that have none");
             MelonPrefs.RegisterBool(Category, nameof(DisableGunBeamRedirection), true, "Disables the gun beam redirection visual, has no effect on scoring");
 
+            MelonPrefs.RegisterString(Category, nameof(chainArrowHeader), "", "[Header]Chain Arrow");
+            MelonPrefs.RegisterBool(Category, nameof(EnableChainArrow), true, "Shows a directional arrow on chain lines");
+            MelonPrefs.RegisterInt(Category, nameof(ArrowColorMode), 0, "Chain arrow color: 0 = White, 1 = Hand Color");
+            MelonPrefs.RegisterInt(Category, nameof(ChainLineColorMode), 0, "Chain line color: 0 = Default (Black), 1 = Hand Color");
+            MelonPrefs.RegisterFloat(Category, nameof(ArrowWidth), 0.5f, "Sets the chain arrow width [0.1,1,0.05,0.5] {P}");
+            MelonPrefs.RegisterFloat(Category, nameof(ArrowLength), 0.25f, "Sets the chain arrow length [0.05,1,0.05,0.25] {P}");
+
+            MelonPrefs.RegisterString(Category, nameof(particleKillerHeader), "", "[Header]Particle Killer");
+            MelonPrefs.RegisterBool(Category, nameof(ParticleKillerEnabled), true, "Enables the mod.");
+            MelonPrefs.RegisterBool(Category, nameof(ParticleKillerKillCPUParticles), true, "Disables a small puff of particles.");
+            MelonPrefs.RegisterInt(Category, nameof(ParticleKillerParticleCount), 0, "Amount of GPU particles per shot. [0,50000,1000,0] {G}");
+
             OnModSettingsApplied();
         }
 
@@ -64,6 +88,70 @@ namespace ExScoringMod
             DisableTemporalAimAssist = MelonPrefs.GetBool(Category, nameof(DisableTemporalAimAssist));
             ForceHitSounds = MelonPrefs.GetBool(Category, nameof(ForceHitSounds));
             DisableGunBeamRedirection = MelonPrefs.GetBool(Category, nameof(DisableGunBeamRedirection));
+            ArrowColorMode = MelonPrefs.GetInt(Category, nameof(ArrowColorMode));
+            ChainLineColorMode = MelonPrefs.GetInt(Category, nameof(ChainLineColorMode));
+            ArrowWidth = MelonPrefs.GetFloat(Category, nameof(ArrowWidth));
+            ArrowLength = MelonPrefs.GetFloat(Category, nameof(ArrowLength));
+            EnableChainArrow = MelonPrefs.GetBool(Category, nameof(EnableChainArrow));
+            ParticleKillerEnabled = MelonPrefs.GetBool(Category, nameof(ParticleKillerEnabled));
+            ParticleKillerKillCPUParticles = MelonPrefs.GetBool(Category, nameof(ParticleKillerKillCPUParticles));
+            ParticleKillerParticleCount = MelonPrefs.GetInt(Category, nameof(ParticleKillerParticleCount));
+        }
+
+        public static void UpdateParticleKillerEnabled(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(ParticleKillerEnabled), value);
+            ParticleKillerEnabled = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateParticleKillerKillCPUParticles(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(ParticleKillerKillCPUParticles), value);
+            ParticleKillerKillCPUParticles = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateParticleKillerParticleCount(int value)
+        {
+            MelonPrefs.SetInt(Category, nameof(ParticleKillerParticleCount), value);
+            ParticleKillerParticleCount = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateEnableChainArrow(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(EnableChainArrow), value);
+            EnableChainArrow = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateArrowColorMode(int value)
+        {
+            MelonPrefs.SetInt(Category, nameof(ArrowColorMode), value);
+            ArrowColorMode = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateChainLineColorMode(int value)
+        {
+            MelonPrefs.SetInt(Category, nameof(ChainLineColorMode), value);
+            ChainLineColorMode = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateArrowWidth(float value)
+        {
+            MelonPrefs.SetFloat(Category, nameof(ArrowWidth), value);
+            ArrowWidth = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateArrowLength(float value)
+        {
+            MelonPrefs.SetFloat(Category, nameof(ArrowLength), value);
+            ArrowLength = value;
+            MelonPrefs.SaveConfig();
         }
 
         public static void UpdateGunBeamRedirection(bool value)
