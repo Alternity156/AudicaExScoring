@@ -291,6 +291,8 @@ namespace ExScoringMod
             OptionsMenuFunctions.GetTrippyMenuSpeed();
             OptionsMenuFunctions.GetScrollSpeedMultiplier();
             OptionsMenuFunctions.GetArrowScrollRows();
+            OptionsMenuFunctions.GetHideScoreData();
+            OptionsMenuFunctions.GetFirstPlayBlind();
 
             var disableMenuGrabToggle = OptionsMenuClone.CreateToggle(0, "Disable Menu Grab",
                 () => OptionsMenuFunctions.disableMenuGrab,
@@ -315,6 +317,16 @@ namespace ExScoringMod
                 v => { OptionsMenuFunctions.arrowScrollRows = v; OptionsMenuFunctions.SetArrowScrollRows(v); },
                 1f, 20f, 1f, 3f, "N0");
             OptionsMenuClone.AddRow(scrollSpeedSlider, arrowScrollRowsSlider);
+
+            var hideScoreDataToggle = OptionsMenuClone.CreateToggle(0, "Hide Score Data",
+                () => OptionsMenuFunctions.hideScoreData,
+                v => { OptionsMenuFunctions.hideScoreData = v; OptionsMenuFunctions.SetHideScoreData(v); },
+                "Permanently hides target data, heatmap, and intensity graph on the launch panel");
+            var firstPlayBlindToggle = OptionsMenuClone.CreateToggle(1, "First Play Blind",
+                () => OptionsMenuFunctions.firstPlayBlind,
+                v => { OptionsMenuFunctions.firstPlayBlind = v; OptionsMenuFunctions.SetFirstPlayBlind(v); },
+                "Hides target data, heatmap, and intensity graph only for songs you've never played");
+            OptionsMenuClone.AddRow(hideScoreDataToggle, firstPlayBlindToggle);
         }),
 
             new OptionsCategory("opt_test", "Wide Slider Test", () =>

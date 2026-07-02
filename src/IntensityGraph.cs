@@ -155,6 +155,14 @@ namespace ExScoringMod
         {
             if (selectedSong == null) return;
 
+            if (ShouldHideScoreData(selectedSong))
+            {
+                DestroyIntensityGraph();
+                DestroyHeatmap();
+                lastBuiltSongId = null;
+                return;
+            }
+
             KataConfig.Difficulty difficulty = KataConfig.I.GetDifficulty();
 
             // Skip redundant rebuilds: same song + difficulty and the graph still exists.

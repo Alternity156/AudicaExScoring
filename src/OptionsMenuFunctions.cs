@@ -49,6 +49,32 @@ namespace ExScoringMod
         public static float trippyMenuSpeed;
         public static float scrollSpeedMultiplier;
         public static float arrowScrollRows;
+        public static bool hideScoreData;
+        public static bool firstPlayBlind;
+
+        public static void GetHideScoreData()
+        {
+            hideScoreData = Config.HideScoreData;
+        }
+
+        public static void SetHideScoreData(bool value)
+        {
+            hideScoreData = value;
+            Config.UpdateHideScoreData(value);
+            ExScoring.RefreshScoreDataVisibility();
+        }
+
+        public static void GetFirstPlayBlind()
+        {
+            firstPlayBlind = Config.FirstPlayBlind;
+        }
+
+        public static void SetFirstPlayBlind(bool value)
+        {
+            firstPlayBlind = value;
+            Config.UpdateFirstPlayBlind(value);
+            ExScoring.RefreshScoreDataVisibility();
+        }
 
         public static void GetArrowScrollRows()
         {

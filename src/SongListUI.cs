@@ -343,6 +343,8 @@ namespace ExScoringMod
             launchPanelCenterTotalLeftHandTargets.GetComponent<TextMeshPro>().text = GetLeftHandCueStatsString(stats);
             launchPanelCenterTotalEitherHandTargets.GetComponent<TextMeshPro>().text = GetEitherHandCueStatsString(stats);
 
+            ApplyScoreDataVisibility();
+
             UpdateFavoriteIndicator();
             UpdateDeleteButtonEnabled();
             UpdateDifficultyButtonsEnabled();
@@ -357,6 +359,66 @@ namespace ExScoringMod
 
             if (songDataLoaderInstalled)
                 AlbumArt.UpdateAlbumArt(SongDataHolder.I.songData.songID);
+        }
+
+        /// <summary>
+        /// True if target data, heatmap, and intensity graph should be hidden for this song —
+        /// either Hide Score Data is on permanently, or First Play Blind is on and the song has
+        /// never been played.
+        /// </summary>
+        public static bool ShouldHideScoreData(string songId)
+        {
+            if (Config.HideScoreData) return true;
+            if (!Config.FirstPlayBlind) return false;
+            if (string.IsNullOrEmpty(songId)) return false;
+
+            try
+            {
+                var hist = SongPlayHistory.I;
+                var rec = hist != null ? hist.GetRecentPlayHistory(songId) : null;
+                return rec == null || rec.playCount <= 0;
+            }
+            catch (System.Exception ex)
+            {
+                MelonLogger.Log($"[BlindData] play count check failed for {songId}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>Shows/hides the target-count labels+values based on ShouldHideScoreData.</summary>
+        private static void ApplyScoreDataVisibility()
+        {
+            if (string.IsNullOrEmpty(selectedSong)) return;
+            bool hide = ShouldHideScoreData(selectedSong);
+
+            GameObject launchCenterObj = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center");
+            if (launchCenterObj == null) return;
+            Transform launchCenter = launchCenterObj.transform;
+
+            string[] names =
+            {
+                "TotalTargetsLabel", "TotalTargets",
+                "RightHandTargetsLabel", "TotalRightHandTargets",
+                "LeftHandTargetsLabel", "TotalLeftHandTargets",
+                "EitherHandTargetsLabel", "TotalEitherHandTargets"
+            };
+
+            foreach (string n in names)
+            {
+                Transform t = launchCenter.Find(n);
+                if (t != null) t.gameObject.SetActive(!hide);
+            }
+        }
+
+        /// <summary>
+        /// Called when Hide Score Data / First Play Blind is toggled in options, so a currently-shown
+        /// launch panel updates immediately without needing reselection.
+        /// </summary>
+        public static void RefreshScoreDataVisibility()
+        {
+            if (string.IsNullOrEmpty(selectedSong)) return;
+            ApplyScoreDataVisibility();
+            RefreshIntensityGraph();
         }
 
         /// <summary>Recursively find a descendant by name (incl. inactive) under root and deactivate it.</summary>

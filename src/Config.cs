@@ -43,6 +43,8 @@ namespace ExScoringMod
         public static float TrippyMenuSpeed;
         public static float ScrollSpeedMultiplier;
         public static float ArrowScrollRows;
+        public static bool HideScoreData;
+        public static bool FirstPlayBlind;
 
         public static void RegisterConfig()
         {
@@ -85,6 +87,8 @@ namespace ExScoringMod
             MelonPrefs.RegisterFloat(Category, nameof(TrippyMenuSpeed), 1.0f, "Sets the trippy menu cycle speed [0.1,100,0.1,1]");
             MelonPrefs.RegisterFloat(Category, nameof(ScrollSpeedMultiplier), 1.0f, "Sets the song list joystick scroll speed multiplier [0.1,10,0.1,1]");
             MelonPrefs.RegisterFloat(Category, nameof(ArrowScrollRows), 3.0f, "Sets how many rows the song list scrolls per arrow shot [1,20,1,3]");
+            MelonPrefs.RegisterBool(Category, nameof(HideScoreData), false, "Permanently hides target data, heatmap, and intensity graph on the launch panel");
+            MelonPrefs.RegisterBool(Category, nameof(FirstPlayBlind), false, "Hides target data, heatmap, and intensity graph only for songs you've never played");
 
             OnModSettingsApplied();
         }
@@ -115,6 +119,22 @@ namespace ExScoringMod
             TrippyMenuSpeed = MelonPrefs.GetFloat(Category, nameof(TrippyMenuSpeed));
             ScrollSpeedMultiplier = MelonPrefs.GetFloat(Category, nameof(ScrollSpeedMultiplier));
             ArrowScrollRows = MelonPrefs.GetFloat(Category, nameof(ArrowScrollRows));
+            HideScoreData = MelonPrefs.GetBool(Category, nameof(HideScoreData));
+            FirstPlayBlind = MelonPrefs.GetBool(Category, nameof(FirstPlayBlind));
+        }
+
+        public static void UpdateHideScoreData(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(HideScoreData), value);
+            HideScoreData = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateFirstPlayBlind(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(FirstPlayBlind), value);
+            FirstPlayBlind = value;
+            MelonPrefs.SaveConfig();
         }
 
         public static void UpdateArrowScrollRows(float value)
