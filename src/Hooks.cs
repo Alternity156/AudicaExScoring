@@ -309,6 +309,9 @@ namespace ExScoringMod
                     exCue.tick = cue.tick;
                     exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal;
                     exCue.miss = true;
+
+                    processedCuesIndexes.Add(cue.index);
+                    exCues.Add(exCue);
                 }
             }
         }
@@ -608,6 +611,22 @@ namespace ExScoringMod
                     TextMeshPro tmp = scoreAndPercent.GetComponent<TextMeshPro>();
                     if (tmp.text != $"{GetCurrentMaxPossibleJudgementPercentage()}%")
                         tmp.text = $"{GetCurrentMaxPossibleJudgementPercentage()}%";
+                }
+            }
+        }
+
+        /// <summary>
+        /// Fires once, exactly when the song actually ends (before the end sequence
+        /// animation/UI plays). Used to persist raw run data for completed (non-failed) runs.
+        /// </summary>
+        [HarmonyPatch(typeof(SongEnd), "OnSongOver", new Type[] { typeof(bool) })]
+        public static class SongEndOnSongOverPatch
+        {
+            public static void Postfix(SongEnd __instance, bool failed)
+            {
+                if (!failed)
+                {
+                    SaveRunData();
                 }
             }
         }

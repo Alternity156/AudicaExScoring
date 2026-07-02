@@ -47,10 +47,14 @@ namespace ExScoringMod
 
         public class ScoreSaveData
         {
-            public ExCue[] exCues;
-            public string songHash;
             public string songId;
+            public string songTitle;
+            public string songArtist;
+            public string songMapper;
+            public string difficulty;
+            public string scoringCalculation;
             public long unixTimestamp;
+            public ExCue[] exCues;
         }
 
         public class UnprocessedTargetHitPos

@@ -28,6 +28,7 @@ namespace ExScoringMod
         public static List<int> processedCuesIndexes = new List<int>();
         public static List<ExCue> exCues = new List<ExCue>();
         public static List<UnprocessedTargetHitPos> unprocessedTargetHitPoses = new List<UnprocessedTargetHitPos>();
+        public static bool runSaved = false;
 
         private static Dictionary<int, List<(float aimScore, Vector3 intersectionPoint)>> pendingAimResults = new Dictionary<int, List<(float, Vector3)>>();
 

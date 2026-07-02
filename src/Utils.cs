@@ -46,6 +46,7 @@ namespace ExScoringMod
             GameplayStatsUpdateDisplayPatch._hasRun = false;
             processedCuesIndexes.Clear();
             exCues.Clear();
+            runSaved = false;
             exScore = 0;
             judgementScore = 0;
             currentMaxPossibleExScore = 0;

@@ -235,6 +235,7 @@
     <Compile Include="src\RandomSong.cs" />
     <Compile Include="src\RandomSongButton.cs" />
     <Compile Include="src\RefreshButton.cs" />
+    <Compile Include="src\RunDataSaveHandler.cs" />
     <Compile Include="src\SearchKeyboard.cs" />
     <Compile Include="src\SongDownloader.cs" />
     <Compile Include="src\SongDownloaderTracker.cs" />
