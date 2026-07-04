@@ -16,6 +16,9 @@ namespace ExScoringMod
             public float timingMs;
             public float aim;
             public TargetHitPos targetHitPos;
+            public Vector3 contactPos;
+            public Vector3 intersectionPoint;
+            public float health;
             public float velocity;
             public float sustainPercent;
             public float aimAssist;
@@ -54,7 +57,7 @@ namespace ExScoringMod
             public string difficulty;
             public string scoringCalculation;
             public long unixTimestamp;
-            public ExCue[] exCues;
+            public ExCueSaveData[] exCues;
         }
 
         public class UnprocessedTargetHitPos
@@ -67,6 +70,58 @@ namespace ExScoringMod
         {
             public float x;
             public float y;
+        }
+
+        /// <summary>
+        /// Plain, non-Unity Vector3 for clean JSON serialization.
+        /// </summary>
+        public class Vector3Data
+        {
+            public float x;
+            public float y;
+            public float z;
+
+            public Vector3Data() { }
+
+            public Vector3Data(Vector3 v)
+            {
+                x = v.x;
+                y = v.y;
+                z = v.z;
+            }
+        }
+
+        /// <summary>
+        /// Slim per-target record written to disk. Non-universal fields are nullable
+        /// and only populated when relevant to the cue's behavior (see BuildExCueSaveData),
+        /// so JsonSerializerSettings.NullValueHandling.Ignore drops them from the output.
+        /// Dodge cues are excluded entirely and never produce one of these.
+        /// </summary>
+        public class ExCueSaveData
+        {
+            // Universal - always present
+            public Target.TargetBehavior behavior;
+            public Target.TargetHandType handType;
+            public float tick;
+            public float health;
+            public bool miss;
+
+            // Standard / Vertical / Horizontal / ChainStart / Hold
+            public float? timingMs;
+            public Vector3Data intersectionPoint;
+            public Vector3Data contactPos;
+            public float? aimAssist;
+
+            // Hold only
+            public float? sustainPercent;
+
+            // Chain only
+            public float? aim;
+            public bool? isChainTail;
+            public float? chainAverage;
+
+            // Melee only
+            public float? velocity;
         }
     }
 }

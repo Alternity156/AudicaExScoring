@@ -51,6 +51,8 @@ namespace ExScoringMod
         public static float arrowScrollRows;
         public static bool hideScoreData;
         public static bool firstPlayBlind;
+        public static float maxRunsPerSong;
+        public static float maxRunDataSizeMB;
 
         public static void GetHideScoreData()
         {
@@ -74,6 +76,28 @@ namespace ExScoringMod
             firstPlayBlind = value;
             Config.UpdateFirstPlayBlind(value);
             ExScoring.RefreshScoreDataVisibility();
+        }
+
+        public static void GetMaxRunsPerSong()
+        {
+            maxRunsPerSong = Config.MaxRunsPerSong;
+        }
+
+        public static void SetMaxRunsPerSong(float value)
+        {
+            maxRunsPerSong = value;
+            Config.UpdateMaxRunsPerSong((int)value);
+        }
+
+        public static void GetMaxRunDataSizeMB()
+        {
+            maxRunDataSizeMB = Config.MaxRunDataSizeMB;
+        }
+
+        public static void SetMaxRunDataSizeMB(float value)
+        {
+            maxRunDataSizeMB = value;
+            Config.UpdateMaxRunDataSizeMB(value);
         }
 
         public static void GetArrowScrollRows()

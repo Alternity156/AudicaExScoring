@@ -329,6 +329,28 @@ namespace ExScoringMod
             OptionsMenuClone.AddRow(hideScoreDataToggle, firstPlayBlindToggle);
         }),
 
+            new OptionsCategory("opt_data", "Data", () =>
+        {
+            OptionsMenuFunctions.GetMaxRunsPerSong();
+            OptionsMenuFunctions.GetMaxRunDataSizeMB();
+
+            var dataHeader = OptionsMenuClone.CreateHeader(0, "Run Data");
+            OptionsMenuClone.AddRow(dataHeader);
+
+            var maxRunsSlider = OptionsMenuClone.CreateSlider(0, "Max Runs Per Song",
+                () => OptionsMenuFunctions.maxRunsPerSong,
+                v => { OptionsMenuFunctions.maxRunsPerSong = v; OptionsMenuFunctions.SetMaxRunsPerSong(v); },
+                1f, 50f, 1f, 10f, "N0",
+                "Oldest saved runs for a song, per difficulty, are deleted beyond this count");
+            var maxSizeSlider = OptionsMenuClone.CreateSlider(1, "Max Total Size",
+                () => OptionsMenuFunctions.maxRunDataSizeMB,
+                v => { OptionsMenuFunctions.maxRunDataSizeMB = v; OptionsMenuFunctions.SetMaxRunDataSizeMB(v); },
+                10f, 2000f, 10f, 100f,
+                v => v.ToString("N0") + " MB",
+                "Oldest saved runs across all songs are deleted once this total is exceeded");
+            OptionsMenuClone.AddRow(maxRunsSlider, maxSizeSlider);
+        }),
+
             new OptionsCategory("opt_test", "Wide Slider Test", () =>
         {
             var testHeader = OptionsMenuClone.CreateHeader(0, "Wide Slider Test");

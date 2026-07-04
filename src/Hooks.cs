@@ -308,6 +308,7 @@ namespace ExScoringMod
                     exCue.handType = cue.handType;
                     exCue.tick = cue.tick;
                     exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal;
+                    exCue.health = ScoreKeeper.I.GetHealth();
                     exCue.miss = true;
 
                     processedCuesIndexes.Add(cue.index);
@@ -422,6 +423,9 @@ namespace ExScoringMod
                         exCue.timingMs = timingMs;
                         exCue.aim = aim;
                         exCue.targetHitPos = GetTargetHitPos(cue.target, finalIntersection);
+                        exCue.contactPos = cue.target.GetContactPosition();
+                        exCue.intersectionPoint = finalIntersection;
+                        exCue.health = ScoreKeeper.I.GetHealth();
                         exCue.velocity = cue.meleeVelocityAmount;
                         exCue.sustainPercent = cue.sustainPercent;
                         exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal;

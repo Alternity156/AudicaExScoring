@@ -46,6 +46,10 @@ namespace ExScoringMod
         public static bool HideScoreData;
         public static bool FirstPlayBlind;
 
+        public static string dataHeader = "[Header]Data";
+        public static int MaxRunsPerSong;
+        public static float MaxRunDataSizeMB;
+
         public static void RegisterConfig()
         {
             MelonPrefs.RegisterString(Category, nameof(typeHeader), "", "[Header]Scoring Type");
@@ -90,6 +94,10 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(HideScoreData), false, "Permanently hides target data, heatmap, and intensity graph on the launch panel");
             MelonPrefs.RegisterBool(Category, nameof(FirstPlayBlind), false, "Hides target data, heatmap, and intensity graph only for songs you've never played");
 
+            MelonPrefs.RegisterString(Category, nameof(dataHeader), "", "[Header]Data");
+            MelonPrefs.RegisterInt(Category, nameof(MaxRunsPerSong), 10, "Sets how many run data files are kept per song, per difficulty [1,50,1,10] {G}");
+            MelonPrefs.RegisterFloat(Category, nameof(MaxRunDataSizeMB), 100f, "Sets the max total disk space (MB) run data files can use [10,2000,10,100] {G}");
+
             OnModSettingsApplied();
         }
 
@@ -121,6 +129,8 @@ namespace ExScoringMod
             ArrowScrollRows = MelonPrefs.GetFloat(Category, nameof(ArrowScrollRows));
             HideScoreData = MelonPrefs.GetBool(Category, nameof(HideScoreData));
             FirstPlayBlind = MelonPrefs.GetBool(Category, nameof(FirstPlayBlind));
+            MaxRunsPerSong = MelonPrefs.GetInt(Category, nameof(MaxRunsPerSong));
+            MaxRunDataSizeMB = MelonPrefs.GetFloat(Category, nameof(MaxRunDataSizeMB));
         }
 
         public static void UpdateHideScoreData(bool value)
@@ -152,6 +162,24 @@ namespace ExScoringMod
             if (value > 10f) value = 10f;
             MelonPrefs.SetFloat(Category, nameof(ScrollSpeedMultiplier), value);
             ScrollSpeedMultiplier = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateMaxRunsPerSong(int value)
+        {
+            if (value < 1) value = 1;
+            if (value > 50) value = 50;
+            MelonPrefs.SetInt(Category, nameof(MaxRunsPerSong), value);
+            MaxRunsPerSong = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateMaxRunDataSizeMB(float value)
+        {
+            if (value < 10f) value = 10f;
+            if (value > 2000f) value = 2000f;
+            MelonPrefs.SetFloat(Category, nameof(MaxRunDataSizeMB), value);
+            MaxRunDataSizeMB = value;
             MelonPrefs.SaveConfig();
         }
 
