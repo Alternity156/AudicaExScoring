@@ -331,11 +331,18 @@ namespace ExScoringMod
 
             new OptionsCategory("opt_data", "Data", () =>
         {
+            OptionsMenuFunctions.GetEnableRunDataSaving();
             OptionsMenuFunctions.GetMaxRunsPerSong();
             OptionsMenuFunctions.GetMaxRunDataSizeMB();
 
             var dataHeader = OptionsMenuClone.CreateHeader(0, "Run Data");
             OptionsMenuClone.AddRow(dataHeader);
+
+            var enableSavingToggle = OptionsMenuClone.CreateToggle(0, "Save Run Data",
+                () => OptionsMenuFunctions.enableRunDataSaving,
+                v => { OptionsMenuFunctions.enableRunDataSaving = v; OptionsMenuFunctions.SetEnableRunDataSaving(v); },
+                "Saves raw scoring data for each run to disk, for external recalculation/analysis");
+            OptionsMenuClone.AddRow(enableSavingToggle);
 
             var maxRunsSlider = OptionsMenuClone.CreateSlider(0, "Max Runs Per Song",
                 () => OptionsMenuFunctions.maxRunsPerSong,

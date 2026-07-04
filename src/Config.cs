@@ -47,6 +47,7 @@ namespace ExScoringMod
         public static bool FirstPlayBlind;
 
         public static string dataHeader = "[Header]Data";
+        public static bool EnableRunDataSaving;
         public static int MaxRunsPerSong;
         public static float MaxRunDataSizeMB;
 
@@ -95,6 +96,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(FirstPlayBlind), false, "Hides target data, heatmap, and intensity graph only for songs you've never played");
 
             MelonPrefs.RegisterString(Category, nameof(dataHeader), "", "[Header]Data");
+            MelonPrefs.RegisterBool(Category, nameof(EnableRunDataSaving), false, "Saves raw scoring data for each run to disk, for external recalculation/analysis");
             MelonPrefs.RegisterInt(Category, nameof(MaxRunsPerSong), 10, "Sets how many run data files are kept per song, per difficulty [1,50,1,10] {G}");
             MelonPrefs.RegisterFloat(Category, nameof(MaxRunDataSizeMB), 100f, "Sets the max total disk space (MB) run data files can use [10,2000,10,100] {G}");
 
@@ -131,6 +133,7 @@ namespace ExScoringMod
             FirstPlayBlind = MelonPrefs.GetBool(Category, nameof(FirstPlayBlind));
             MaxRunsPerSong = MelonPrefs.GetInt(Category, nameof(MaxRunsPerSong));
             MaxRunDataSizeMB = MelonPrefs.GetFloat(Category, nameof(MaxRunDataSizeMB));
+            EnableRunDataSaving = MelonPrefs.GetBool(Category, nameof(EnableRunDataSaving));
         }
 
         public static void UpdateHideScoreData(bool value)
@@ -171,6 +174,13 @@ namespace ExScoringMod
             if (value > 50) value = 50;
             MelonPrefs.SetInt(Category, nameof(MaxRunsPerSong), value);
             MaxRunsPerSong = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateEnableRunDataSaving(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(EnableRunDataSaving), value);
+            EnableRunDataSaving = value;
             MelonPrefs.SaveConfig();
         }
 

@@ -14,7 +14,7 @@ namespace ExScoringMod
     {
         private static GameObject playlistButton;
 
-        private static Vector3 playlistButtonMenuPosition = new Vector3(2.5f, 1.5f, 0f);
+        private static Vector3 playlistButtonMenuPosition = new Vector3(2.5f, 2.4f, 0f);
         private static Vector3 playlistButtonMenuScale = new Vector3(0.75f, 0.75f, 0.75f);
         private static Vector3 playlistButtonMenuRotation = new Vector3(0f, 0f, 0f);
         private static Vector3 playlistButtonLabelScale = new Vector3(1.5f, 1.5f, 1.5f);

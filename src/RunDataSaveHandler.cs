@@ -34,6 +34,7 @@ namespace ExScoringMod
         /// </summary>
         public static void SaveRunData()
         {
+            if (!Config.EnableRunDataSaving) return;
             if (runSaved) return;
             if (exCues.Count == 0) return;
             if (selectedSongData == null) return;

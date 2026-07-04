@@ -53,6 +53,7 @@ namespace ExScoringMod
         public static bool firstPlayBlind;
         public static float maxRunsPerSong;
         public static float maxRunDataSizeMB;
+        public static bool enableRunDataSaving;
 
         public static void GetHideScoreData()
         {
@@ -98,6 +99,17 @@ namespace ExScoringMod
         {
             maxRunDataSizeMB = value;
             Config.UpdateMaxRunDataSizeMB(value);
+        }
+
+        public static void GetEnableRunDataSaving()
+        {
+            enableRunDataSaving = Config.EnableRunDataSaving;
+        }
+
+        public static void SetEnableRunDataSaving(bool value)
+        {
+            enableRunDataSaving = value;
+            Config.UpdateEnableRunDataSaving(value);
         }
 
         public static void GetArrowScrollRows()
