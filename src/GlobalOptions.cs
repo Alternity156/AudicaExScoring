@@ -294,6 +294,7 @@ namespace ExScoringMod
             OptionsMenuFunctions.GetHideScoreData();
             OptionsMenuFunctions.GetFirstPlayBlind();
             OptionsMenuFunctions.GetPracticeModeMinimizeButtonEnabled();
+            OptionsMenuFunctions.GetRandomSongScope();
 
             var disableMenuGrabToggle = OptionsMenuClone.CreateToggle(0, "Disable Menu Grab",
                 () => OptionsMenuFunctions.disableMenuGrab,
@@ -334,6 +335,16 @@ namespace ExScoringMod
                 v => { OptionsMenuFunctions.practiceModeMinimizeButtonEnabled = v; OptionsMenuFunctions.SetPracticeModeMinimizeButtonEnabled(v); },
                 "Adds a button in practice mode to minimize its panel");
             OptionsMenuClone.AddRow(practiceModeMinimizeToggle);
+
+            var randomSongHeader = OptionsMenuClone.CreateHeader(0, "Random Song");
+            OptionsMenuClone.AddRow(randomSongHeader);
+
+            var randomSongScopeCycle = OptionsMenuClone.CreateCycle(0, "Random Song Source", OptionsMenuFunctions.RandomSongScopeOptions,
+                () => OptionsMenuFunctions.randomSongScope,
+                v => { OptionsMenuFunctions.randomSongScope = v; OptionsMenuFunctions.SetRandomSongScope(v); RandomSong.UpdateButtonState(); },
+                0,
+                "Folder Songs: picks from the currently open folder. All Songs: picks from your entire library and jumps to it.");
+            OptionsMenuClone.AddRow(randomSongScopeCycle);
         }),
 
             new OptionsCategory("opt_data", "Data", () =>

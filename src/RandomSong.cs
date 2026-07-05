@@ -15,20 +15,21 @@ namespace ExScoringMod
 
         public static void SelectRandomSong()
         {
-            var view = VirtualSongList.CurrentViewSongIDs;
-            if (view == null || view.Count == 0) return;
+            bool allSongs = Config.RandomSongScope == 1;
+            var pool = allSongs ? GetAllSongIDs() : VirtualSongList.CurrentViewSongIDs;
+            if (pool == null || pool.Count == 0) return;
 
             // Prefer songs that haven't been picked recently.
             var candidates = new List<string>();
-            for (int i = 0; i < view.Count; i++)
-                if (!recentlySelected.Contains(view[i]))
-                    candidates.Add(view[i]);
+            for (int i = 0; i < pool.Count; i++)
+                if (!recentlySelected.Contains(pool[i]))
+                    candidates.Add(pool[i]);
 
-            // All visible songs were picked recently → reset history and use the whole view.
+            // All eligible songs were picked recently → reset history and use the whole pool.
             if (candidates.Count == 0)
             {
                 recentlySelected.Clear();
-                for (int i = 0; i < view.Count; i++) candidates.Add(view[i]);
+                for (int i = 0; i < pool.Count; i++) candidates.Add(pool[i]);
             }
 
             string songID = candidates[rand.Next(candidates.Count)];
@@ -37,17 +38,49 @@ namespace ExScoringMod
             if (recentlySelected.Count > historySize) recentlySelected.RemoveAt(0);
 
             ExScoring.selectedSong = songID;
-            VirtualSongList.ScrollToAndSelect(songID);
+
+            if (allSongs)
+                // Song may live in a folder that isn't currently open — open it and scroll to
+                // the song, same as every other cross-folder selection (favorites, search, etc.).
+                FolderRowManager.RevealAndSelect(songID);
+            else
+                VirtualSongList.ScrollToAndSelect(songID);
         }
 
         /// <summary>
-        /// Enable the Random Song button only when the open folder has songs in view.
+        /// Every loaded songID, unfiltered. Used as the Random Song pool in "All Songs" mode.
+        /// </summary>
+        private static List<string> GetAllSongIDs()
+        {
+            var ids = new List<string>();
+            if (SongList.I == null || SongList.I.songs == null) return ids;
+
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var song = SongList.I.songs[i];
+                if (song == null) continue;
+                ids.Add(song.songID);
+            }
+            return ids;
+        }
+
+        /// <summary>
+        /// Enable the Random Song button when there are songs to pick from: any loaded song in
+        /// "All Songs" mode, or the open folder's visible songs in "Folder Songs" mode.
         /// Called by FolderRowManager after every view change.
         /// </summary>
         public static void UpdateButtonState()
         {
-            var view = VirtualSongList.CurrentViewSongIDs;
-            if (view != null && view.Count > 0) RandomSongButton.Enable();
+            bool hasSongs;
+            if (Config.RandomSongScope == 1)
+                hasSongs = SongList.I != null && SongList.I.songs != null && SongList.I.songs.Count > 0;
+            else
+            {
+                var view = VirtualSongList.CurrentViewSongIDs;
+                hasSongs = view != null && view.Count > 0;
+            }
+
+            if (hasSongs) RandomSongButton.Enable();
             else RandomSongButton.Disable();
         }
 

@@ -52,6 +52,8 @@ namespace ExScoringMod
         public static bool hideScoreData;
         public static bool firstPlayBlind;
         public static bool practiceModeMinimizeButtonEnabled;
+        public static readonly string[] RandomSongScopeOptions = { "Folder Songs", "All Songs" };
+        public static int randomSongScope;
         public static float maxRunsPerSong;
         public static float maxRunDataSizeMB;
         public static bool enableRunDataSaving;
@@ -177,6 +179,17 @@ namespace ExScoringMod
         {
             trippyMenuEnabled = value;
             Config.UpdateTrippyMenuEnabled(value);
+        }
+
+        public static void GetRandomSongScope()
+        {
+            randomSongScope = Config.RandomSongScope;
+        }
+
+        public static void SetRandomSongScope(int value)
+        {
+            randomSongScope = value;
+            Config.UpdateRandomSongScope(value);
         }
 
         public static void GetTrippyMenuSpeed()
