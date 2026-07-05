@@ -45,6 +45,7 @@ namespace ExScoringMod
         public static float ArrowScrollRows;
         public static bool HideScoreData;
         public static bool FirstPlayBlind;
+        public static bool PracticeModeMinimizeButtonEnabled;
 
         public static string dataHeader = "[Header]Data";
         public static bool EnableRunDataSaving;
@@ -94,6 +95,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterFloat(Category, nameof(ArrowScrollRows), 3.0f, "Sets how many rows the song list scrolls per arrow shot [1,20,1,3]");
             MelonPrefs.RegisterBool(Category, nameof(HideScoreData), false, "Permanently hides target data, heatmap, and intensity graph on the launch panel");
             MelonPrefs.RegisterBool(Category, nameof(FirstPlayBlind), false, "Hides target data, heatmap, and intensity graph only for songs you've never played");
+            MelonPrefs.RegisterBool(Category, nameof(PracticeModeMinimizeButtonEnabled), true, "Adds a button in practice mode to minimize its panel");
 
             MelonPrefs.RegisterString(Category, nameof(dataHeader), "", "[Header]Data");
             MelonPrefs.RegisterBool(Category, nameof(EnableRunDataSaving), false, "Saves raw scoring data for each run to disk, for external recalculation/analysis");
@@ -131,6 +133,7 @@ namespace ExScoringMod
             ArrowScrollRows = MelonPrefs.GetFloat(Category, nameof(ArrowScrollRows));
             HideScoreData = MelonPrefs.GetBool(Category, nameof(HideScoreData));
             FirstPlayBlind = MelonPrefs.GetBool(Category, nameof(FirstPlayBlind));
+            PracticeModeMinimizeButtonEnabled = MelonPrefs.GetBool(Category, nameof(PracticeModeMinimizeButtonEnabled));
             MaxRunsPerSong = MelonPrefs.GetInt(Category, nameof(MaxRunsPerSong));
             MaxRunDataSizeMB = MelonPrefs.GetFloat(Category, nameof(MaxRunDataSizeMB));
             EnableRunDataSaving = MelonPrefs.GetBool(Category, nameof(EnableRunDataSaving));
@@ -147,6 +150,13 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(FirstPlayBlind), value);
             FirstPlayBlind = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdatePracticeModeMinimizeButtonEnabled(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(PracticeModeMinimizeButtonEnabled), value);
+            PracticeModeMinimizeButtonEnabled = value;
             MelonPrefs.SaveConfig();
         }
 

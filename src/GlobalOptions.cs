@@ -293,6 +293,7 @@ namespace ExScoringMod
             OptionsMenuFunctions.GetArrowScrollRows();
             OptionsMenuFunctions.GetHideScoreData();
             OptionsMenuFunctions.GetFirstPlayBlind();
+            OptionsMenuFunctions.GetPracticeModeMinimizeButtonEnabled();
 
             var disableMenuGrabToggle = OptionsMenuClone.CreateToggle(0, "Disable Menu Grab",
                 () => OptionsMenuFunctions.disableMenuGrab,
@@ -327,6 +328,12 @@ namespace ExScoringMod
                 v => { OptionsMenuFunctions.firstPlayBlind = v; OptionsMenuFunctions.SetFirstPlayBlind(v); },
                 "Hides target data, heatmap, and intensity graph only for songs you've never played");
             OptionsMenuClone.AddRow(hideScoreDataToggle, firstPlayBlindToggle);
+
+            var practiceModeMinimizeToggle = OptionsMenuClone.CreateToggle(0, "Practice Mode Minimize Button",
+                () => OptionsMenuFunctions.practiceModeMinimizeButtonEnabled,
+                v => { OptionsMenuFunctions.practiceModeMinimizeButtonEnabled = v; OptionsMenuFunctions.SetPracticeModeMinimizeButtonEnabled(v); },
+                "Adds a button in practice mode to minimize its panel");
+            OptionsMenuClone.AddRow(practiceModeMinimizeToggle);
         }),
 
             new OptionsCategory("opt_data", "Data", () =>

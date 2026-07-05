@@ -51,6 +51,7 @@ namespace ExScoringMod
         public static float arrowScrollRows;
         public static bool hideScoreData;
         public static bool firstPlayBlind;
+        public static bool practiceModeMinimizeButtonEnabled;
         public static float maxRunsPerSong;
         public static float maxRunDataSizeMB;
         public static bool enableRunDataSaving;
@@ -77,6 +78,17 @@ namespace ExScoringMod
             firstPlayBlind = value;
             Config.UpdateFirstPlayBlind(value);
             ExScoring.RefreshScoreDataVisibility();
+        }
+
+        public static void GetPracticeModeMinimizeButtonEnabled()
+        {
+            practiceModeMinimizeButtonEnabled = Config.PracticeModeMinimizeButtonEnabled;
+        }
+
+        public static void SetPracticeModeMinimizeButtonEnabled(bool value)
+        {
+            practiceModeMinimizeButtonEnabled = value;
+            Config.UpdatePracticeModeMinimizeButtonEnabled(value);
         }
 
         public static void GetMaxRunsPerSong()

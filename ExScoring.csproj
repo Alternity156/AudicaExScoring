@@ -232,6 +232,7 @@
     <Compile Include="src\ExScoring.cs" />
     <Compile Include="src\Playlist.cs" />
     <Compile Include="src\PlaylistManager.cs" />
+    <Compile Include="src\PracticeModeMinimizeButton.cs" />
     <Compile Include="src\RandomSong.cs" />
     <Compile Include="src\RandomSongButton.cs" />
     <Compile Include="src\RefreshButton.cs" />
