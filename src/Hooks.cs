@@ -1223,5 +1223,37 @@ namespace ExScoringMod
                 ChainArrow.ClearCache(__instance);
             }
         }
+
+        [HarmonyPatch(typeof(SongInfoPanel), "Update")]
+        public static class SongInfoPanelHistoryScrollFixPatch
+        {
+            // Tracks the last-seen active-child-count of the history list per SongInfoPanel instance
+            // (keyed by native pointer), so we only re-queue a size update when the list actually changes.
+            private static readonly Dictionary<IntPtr, int> lastActiveCount = new Dictionary<IntPtr, int>();
+
+            public static void Postfix(SongInfoPanel __instance)
+            {
+                KataScrollRect scrollRect = __instance.historyScroll;
+                if (scrollRect == null) return;
+
+                Transform content = scrollRect.content;
+                if (content == null) return;
+
+                int activeCount = 0;
+                for (int i = 0; i < content.childCount; i++)
+                {
+                    if (content.GetChild(i).gameObject.activeSelf) activeCount++;
+                }
+
+                IntPtr key = __instance.Pointer;
+                int lastCount;
+                if (!lastActiveCount.TryGetValue(key, out lastCount) || lastCount != activeCount)
+                {
+                    lastActiveCount[key] = activeCount;
+                    scrollRect.QueueUpdateSize();
+                    MelonLogger.Log($"[SongInfoPanel] History list active count changed to {activeCount}; queued scroll size update.");
+                }
+            }
+        }
     }
 }
