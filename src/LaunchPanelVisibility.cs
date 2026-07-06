@@ -9,6 +9,8 @@ namespace ExScoringMod
         private static bool launchContentHidden = false;
         private static bool restorePreviewOnShow = false;
         private static Transform launchCenter;
+        private static Transform launchLeft;
+        private static Transform launchRight;
 
         /// <summary>
         /// Show/hide the song-specific launch panel content (title/artist/mapper/tempo + target
@@ -30,6 +32,12 @@ namespace ExScoringMod
                     if (hiddenLaunchContent[i] != null) hiddenLaunchContent[i].SetActive(true);
                 hiddenLaunchContent.Clear();
                 launchContentHidden = false;
+
+                Transform left = GetLaunchLeft();
+                if (left != null) left.gameObject.SetActive(true);
+
+                Transform right = GetLaunchRight();
+                if (right != null) right.gameObject.SetActive(true);
 
                 // Re-check song preview only if WE turned it off.
                 if (restorePreviewOnShow)
@@ -87,6 +95,14 @@ namespace ExScoringMod
                 if (!hiddenLaunchContent.Contains(child)) hiddenLaunchContent.Add(child);
             }
 
+            // Left/Right get reactivated by something shortly after we hide them, so re-assert
+            // every frame here, same as the center content above.
+            Transform left = GetLaunchLeft();
+            if (left != null && left.gameObject.activeSelf) left.gameObject.SetActive(false);
+
+            Transform right = GetLaunchRight();
+            if (right != null && right.gameObject.activeSelf) right.gameObject.SetActive(false);
+
             launchContentHidden = true;
         }
 
@@ -98,6 +114,26 @@ namespace ExScoringMod
                 if (go != null) launchCenter = go.transform;
             }
             return launchCenter;
+        }
+
+        private static Transform GetLaunchLeft()
+        {
+            if (launchLeft == null)
+            {
+                GameObject go = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Left");
+                if (go != null) launchLeft = go.transform;
+            }
+            return launchLeft;
+        }
+
+        private static Transform GetLaunchRight()
+        {
+            if (launchRight == null)
+            {
+                GameObject go = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Right");
+                if (go != null) launchRight = go.transform;
+            }
+            return launchRight;
         }
     }
 }

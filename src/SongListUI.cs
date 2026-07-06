@@ -139,7 +139,7 @@ namespace ExScoringMod
             launchPanelModifiersButton.SetActive(false);
             launchPanelChooseDiffLabel.SetActive(false);
 
-            launchPanelLeftObject.transform.localPosition = new Vector3(-22.0736f, 14f, 14.567f);
+            launchPanelLeftObject.transform.localPosition = new Vector3(-23.0736f, 14f, 14.567f);
 
             launchPanelCenterObject.transform.localPosition = new Vector3(9.18f, 6f, 24f);
             launchPanelCenterGlass.transform.localPosition = new Vector3(0f, 1.4f, 0.15f);
