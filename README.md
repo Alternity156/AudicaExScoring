@@ -21,6 +21,8 @@ TrippyMenu
 
 MenuGrabDisabler
 
+Grind-Mode
+
 ## Optional Dependencies
 [SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience) Required to show album art.
 
@@ -51,7 +53,7 @@ This mod uses code or concepts from other mods and software such as:
 
 [NotReaper](https://github.com/octoberU/NotReaper/tree/2021-upgrade) (Target Icons for song data)
 
-[Meeps Audica UI Enhancements](https://github.com/MeepsKitten/Meeps-Audica-UI-Enhancements) (Album Art)
+[Meeps Audica UI Enhancements](https://github.com/MeepsKitten/Meeps-Audica-UI-Enhancements) (Album Art, Practice Mode menu minimize button)
 
 [ModSettings](https://github.com/octoberU/ModSettings) (Settings menu cloning)
 
@@ -70,3 +72,5 @@ This mod uses code or concepts from other mods and software such as:
 [TrippyMenu](https://github.com/Alternity156/AudicaTrippyMenu) (Full mod support)
 
 [MenuGrabDisabler](https://github.com/Alternity156/MenuGrabDisabler) (Full mod support)
+
+[Grind-Mode](https://github.com/Contiinuum/Grind-Mode) (GameplayStats on Fail)

@@ -628,10 +628,30 @@ namespace ExScoringMod
         {
             public static void Postfix(SongEnd __instance, bool failed)
             {
-                if (!failed)
+                if (!failed || Config.SaveFailedRunData)
                 {
                     SaveRunData();
                 }
+            }
+        }
+
+        /// <summary>
+        /// When enabled, redirects a failed song into the normal results/stats screen
+        /// (GameplayStats) instead of the vanilla FailedScreen. GameplayStatsUpdateDisplayPatch
+        /// already handles both Config.ExType on (EX breakdown) and off (vanilla Audica stats).
+        /// </summary>
+        [HarmonyPatch(typeof(FailedScreen), "OnEnable")]
+        private static class FailedScreenOnEnablePatch
+        {
+            private static bool Prefix(FailedScreen __instance)
+            {
+                if (KataConfig.I.practiceMode) return true;
+                if (!Config.ShowStatsOnFail) return true;
+
+                SongEnd.I.ShowResults();
+                AudioDriver.I.Pause();
+
+                return true;
             }
         }
 

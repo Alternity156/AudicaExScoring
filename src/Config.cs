@@ -47,11 +47,13 @@ namespace ExScoringMod
         public static bool FirstPlayBlind;
         public static bool PracticeModeMinimizeButtonEnabled;
         public static int RandomSongScope; // 0 = Folder Songs, 1 = All Songs
+        public static bool ShowStatsOnFail;
 
         public static string dataHeader = "[Header]Data";
         public static bool EnableRunDataSaving;
         public static int MaxRunsPerSong;
         public static float MaxRunDataSizeMB;
+        public static bool SaveFailedRunData;
 
         public static void RegisterConfig()
         {
@@ -98,11 +100,13 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(FirstPlayBlind), false, "Hides target data, heatmap, and intensity graph only for songs you've never played");
             MelonPrefs.RegisterBool(Category, nameof(PracticeModeMinimizeButtonEnabled), true, "Adds a button in practice mode to minimize its panel");
             MelonPrefs.RegisterInt(Category, nameof(RandomSongScope), 0, "Random Song source: 0 = Folder Songs, 1 = All Songs");
+            MelonPrefs.RegisterBool(Category, nameof(ShowStatsOnFail), false, "Shows the stats screen after failing a song instead of the fail screen");
 
             MelonPrefs.RegisterString(Category, nameof(dataHeader), "", "[Header]Data");
             MelonPrefs.RegisterBool(Category, nameof(EnableRunDataSaving), false, "Saves raw scoring data for each run to disk, for external recalculation/analysis");
             MelonPrefs.RegisterInt(Category, nameof(MaxRunsPerSong), 10, "Sets how many run data files are kept per song, per difficulty [1,50,1,10] {G}");
             MelonPrefs.RegisterFloat(Category, nameof(MaxRunDataSizeMB), 100f, "Sets the max total disk space (MB) run data files can use [10,2000,10,100] {G}");
+            MelonPrefs.RegisterBool(Category, nameof(SaveFailedRunData), false, "Also saves run data for failed songs (requires Save Run Data)");
 
             OnModSettingsApplied();
         }
@@ -140,6 +144,8 @@ namespace ExScoringMod
             MaxRunsPerSong = MelonPrefs.GetInt(Category, nameof(MaxRunsPerSong));
             MaxRunDataSizeMB = MelonPrefs.GetFloat(Category, nameof(MaxRunDataSizeMB));
             EnableRunDataSaving = MelonPrefs.GetBool(Category, nameof(EnableRunDataSaving));
+            ShowStatsOnFail = MelonPrefs.GetBool(Category, nameof(ShowStatsOnFail));
+            SaveFailedRunData = MelonPrefs.GetBool(Category, nameof(SaveFailedRunData));
         }
 
         public static void UpdateHideScoreData(bool value)
@@ -167,6 +173,13 @@ namespace ExScoringMod
         {
             MelonPrefs.SetInt(Category, nameof(RandomSongScope), value);
             RandomSongScope = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateShowStatsOnFail(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(ShowStatsOnFail), value);
+            ShowStatsOnFail = value;
             MelonPrefs.SaveConfig();
         }
 
@@ -201,6 +214,13 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(EnableRunDataSaving), value);
             EnableRunDataSaving = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateSaveFailedRunData(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(SaveFailedRunData), value);
+            SaveFailedRunData = value;
             MelonPrefs.SaveConfig();
         }
 

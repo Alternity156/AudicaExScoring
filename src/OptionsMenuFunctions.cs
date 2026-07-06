@@ -57,6 +57,8 @@ namespace ExScoringMod
         public static float maxRunsPerSong;
         public static float maxRunDataSizeMB;
         public static bool enableRunDataSaving;
+        public static bool showStatsOnFail;
+        public static bool saveFailedRunData;
 
         public static void GetHideScoreData()
         {
@@ -126,6 +128,17 @@ namespace ExScoringMod
             Config.UpdateEnableRunDataSaving(value);
         }
 
+        public static void GetSaveFailedRunData()
+        {
+            saveFailedRunData = Config.SaveFailedRunData;
+        }
+
+        public static void SetSaveFailedRunData(bool value)
+        {
+            saveFailedRunData = value;
+            Config.UpdateSaveFailedRunData(value);
+        }
+
         public static void GetArrowScrollRows()
         {
             arrowScrollRows = Config.ArrowScrollRows;
@@ -190,6 +203,17 @@ namespace ExScoringMod
         {
             randomSongScope = value;
             Config.UpdateRandomSongScope(value);
+        }
+
+        public static void GetShowStatsOnFail()
+        {
+            showStatsOnFail = Config.ShowStatsOnFail;
+        }
+
+        public static void SetShowStatsOnFail(bool value)
+        {
+            showStatsOnFail = value;
+            Config.UpdateShowStatsOnFail(value);
         }
 
         public static void GetTrippyMenuSpeed()

@@ -295,6 +295,7 @@ namespace ExScoringMod
             OptionsMenuFunctions.GetFirstPlayBlind();
             OptionsMenuFunctions.GetPracticeModeMinimizeButtonEnabled();
             OptionsMenuFunctions.GetRandomSongScope();
+            OptionsMenuFunctions.GetShowStatsOnFail();
 
             var disableMenuGrabToggle = OptionsMenuClone.CreateToggle(0, "Disable Menu Grab",
                 () => OptionsMenuFunctions.disableMenuGrab,
@@ -336,6 +337,12 @@ namespace ExScoringMod
                 "Adds a button in practice mode to minimize its panel");
             OptionsMenuClone.AddRow(practiceModeMinimizeToggle);
 
+            var showStatsOnFailToggle = OptionsMenuClone.CreateToggle(0, "Show Stats On Fail",
+                () => OptionsMenuFunctions.showStatsOnFail,
+                v => { OptionsMenuFunctions.showStatsOnFail = v; OptionsMenuFunctions.SetShowStatsOnFail(v); },
+                "Shows the stats screen after failing a song instead of the fail screen");
+            OptionsMenuClone.AddRow(showStatsOnFailToggle);
+
             var randomSongHeader = OptionsMenuClone.CreateHeader(0, "Random Song");
             OptionsMenuClone.AddRow(randomSongHeader);
 
@@ -352,6 +359,7 @@ namespace ExScoringMod
             OptionsMenuFunctions.GetEnableRunDataSaving();
             OptionsMenuFunctions.GetMaxRunsPerSong();
             OptionsMenuFunctions.GetMaxRunDataSizeMB();
+            OptionsMenuFunctions.GetSaveFailedRunData();
 
             var dataHeader = OptionsMenuClone.CreateHeader(0, "Run Data");
             OptionsMenuClone.AddRow(dataHeader);
@@ -360,7 +368,11 @@ namespace ExScoringMod
                 () => OptionsMenuFunctions.enableRunDataSaving,
                 v => { OptionsMenuFunctions.enableRunDataSaving = v; OptionsMenuFunctions.SetEnableRunDataSaving(v); },
                 "Saves raw scoring data for each run to disk, for external recalculation/analysis");
-            OptionsMenuClone.AddRow(enableSavingToggle);
+            var saveFailedRunDataToggle = OptionsMenuClone.CreateToggle(1, "Save Failed Runs",
+                () => OptionsMenuFunctions.saveFailedRunData,
+                v => { OptionsMenuFunctions.saveFailedRunData = v; OptionsMenuFunctions.SetSaveFailedRunData(v); },
+                "Also saves run data for failed songs (requires Save Run Data)");
+            OptionsMenuClone.AddRow(enableSavingToggle, saveFailedRunDataToggle);
 
             var maxRunsSlider = OptionsMenuClone.CreateSlider(0, "Max Runs Per Song",
                 () => OptionsMenuFunctions.maxRunsPerSong,
