@@ -289,6 +289,7 @@ namespace ExScoringMod
             OptionsMenuFunctions.GetDisableMenuGrab();
             OptionsMenuFunctions.GetTrippyMenuEnabled();
             OptionsMenuFunctions.GetTrippyMenuSpeed();
+            OptionsMenuFunctions.GetPurpleMenuEnabled();
             OptionsMenuFunctions.GetScrollSpeedMultiplier();
             OptionsMenuFunctions.GetArrowScrollRows();
             OptionsMenuFunctions.GetHideScoreData();
@@ -310,6 +311,12 @@ namespace ExScoringMod
                 v => { OptionsMenuFunctions.trippyMenuSpeed = v; OptionsMenuFunctions.SetTrippyMenuSpeed(v); },
                 0.1f, 100f, 0.1f, 1f, "N1");
             OptionsMenuClone.AddRow(trippyMenuToggle, trippyMenuSpeedSlider);
+
+            var purpleMenuToggle = OptionsMenuClone.CreateToggle(0, "Purple Menu Background",
+                () => OptionsMenuFunctions.purpleMenuEnabled,
+                v => { OptionsMenuFunctions.purpleMenuEnabled = v; OptionsMenuFunctions.SetPurpleMenuEnabled(v); },
+                "Tints the stage purple while browsing menus, for aesthetic purposes");
+            OptionsMenuClone.AddRow(purpleMenuToggle);
 
             var scrollSpeedSlider = OptionsMenuClone.CreateSlider(0, "Scroll Speed",
                 () => OptionsMenuFunctions.scrollSpeedMultiplier,

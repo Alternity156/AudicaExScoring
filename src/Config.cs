@@ -40,6 +40,7 @@ namespace ExScoringMod
         public static string menuHeader = "[Header]Menu";
         public static bool DisableMenuGrab;
         public static bool TrippyMenuEnabled;
+        public static bool PurpleMenuEnabled;
         public static float TrippyMenuSpeed;
         public static float ScrollSpeedMultiplier;
         public static float ArrowScrollRows;
@@ -93,6 +94,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterString(Category, nameof(menuHeader), "", "[Header]Menu");
             MelonPrefs.RegisterBool(Category, nameof(DisableMenuGrab), false, "Disables grabbing the song list scroller in menus");
             MelonPrefs.RegisterBool(Category, nameof(TrippyMenuEnabled), false, "Enables a psychedelic color cycle effect in menus");
+            MelonPrefs.RegisterBool(Category, nameof(PurpleMenuEnabled), false, "Enables the purple peak-state stage visual in menus, for aesthetic purposes");
             MelonPrefs.RegisterFloat(Category, nameof(TrippyMenuSpeed), 1.0f, "Sets the trippy menu cycle speed [0.1,100,0.1,1]");
             MelonPrefs.RegisterFloat(Category, nameof(ScrollSpeedMultiplier), 1.0f, "Sets the song list joystick scroll speed multiplier [0.1,10,0.1,1]");
             MelonPrefs.RegisterFloat(Category, nameof(ArrowScrollRows), 3.0f, "Sets how many rows the song list scrolls per arrow shot [1,20,1,3]");
@@ -134,6 +136,7 @@ namespace ExScoringMod
             ParticleKillerParticleCount = MelonPrefs.GetInt(Category, nameof(ParticleKillerParticleCount));
             DisableMenuGrab = MelonPrefs.GetBool(Category, nameof(DisableMenuGrab));
             TrippyMenuEnabled = MelonPrefs.GetBool(Category, nameof(TrippyMenuEnabled));
+            PurpleMenuEnabled = MelonPrefs.GetBool(Category, nameof(PurpleMenuEnabled));
             TrippyMenuSpeed = MelonPrefs.GetFloat(Category, nameof(TrippyMenuSpeed));
             ScrollSpeedMultiplier = MelonPrefs.GetFloat(Category, nameof(ScrollSpeedMultiplier));
             ArrowScrollRows = MelonPrefs.GetFloat(Category, nameof(ArrowScrollRows));
@@ -265,6 +268,13 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(TrippyMenuEnabled), value);
             TrippyMenuEnabled = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdatePurpleMenuEnabled(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(PurpleMenuEnabled), value);
+            PurpleMenuEnabled = value;
             MelonPrefs.SaveConfig();
         }
 

@@ -24,6 +24,7 @@ namespace ExScoringMod
                 )
             {
                 ResetExScore();
+                exTypePurple = true;
             }
         }
 
@@ -84,6 +85,7 @@ namespace ExScoringMod
                 if (state == MenuState.State.Launched && menuState != MenuState.State.Launched)
                 {
                     TrippyMenu.ResetOnSongStart();
+                    exTypePurple = true;
                 }
 
                 menuState = state;
@@ -313,6 +315,40 @@ namespace ExScoringMod
 
                     processedCuesIndexes.Add(cue.index);
                     exCues.Add(exCue);
+
+                    exTypePurple = false;
+                }
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        //  ExType purple stage visual
+        // ══════════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// mGameStateCurrent drives the stage's "peak"/purple visual (2 = purple, 0 = normal).
+        /// The game recalculates it every frame from the real multiplier/overdrive state, so we
+        /// override it here, after that calculation, to decouple the purple visual from the
+        /// real multiplier while ExType is active, and to allow a separate menu-only toggle.
+        /// </summary>
+        [HarmonyPatch(typeof(ShaderGlobals), "UpdateGameState")]
+        public static class ShaderGlobalsUpdateGameStatePatch
+        {
+            public static void Postfix(ShaderGlobals __instance)
+            {
+                if (menuState == MenuState.State.Launched)
+                {
+                    if (Config.ExType)
+                    {
+                        __instance.mGameStateCurrent = exTypePurple ? 2f : 0f;
+                    }
+                }
+                else
+                {
+                    if (Config.PurpleMenuEnabled)
+                    {
+                        __instance.mGameStateCurrent = 2f;
+                    }
                 }
             }
         }
@@ -385,6 +421,8 @@ namespace ExScoringMod
                     {
                         currentMaxPossibleExScore += GetMaxExScoreForCue(cue);
                         currentMaxPossibleJudgementScore += GetMaxJudgementScoreForCue(cue);
+
+                        exTypePurple = true;
 
                         ExCue exCue = new ExCue();
 
@@ -539,6 +577,20 @@ namespace ExScoringMod
                     extraText = "";
 
                     nextPopupText = "";
+                }
+            }
+        }
+
+        [HarmonyPatch(typeof(GameplayStats), "Update")]
+        public static class GameplayStatsUpdatePatch
+        {
+            public static void Prefix(GameplayStats __instance)
+            {
+                if (__instance.mTickProgress < float.MaxValue / 2f)
+                {
+                    MelonLoader.MelonLogger.Log($"[GameplayStatsUpdatePatch] mTickProgress before: {__instance.mTickProgress}, mLastTickProgress: {__instance.mLastTickProgress}");
+                    __instance.mTickProgress = float.MaxValue / 2f;
+                    __instance.mLastTickProgress = float.MaxValue / 2f;
                 }
             }
         }

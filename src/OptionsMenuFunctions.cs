@@ -47,6 +47,7 @@ namespace ExScoringMod
         public static bool disableMenuGrab;
         public static bool trippyMenuEnabled;
         public static float trippyMenuSpeed;
+        public static bool purpleMenuEnabled;
         public static float scrollSpeedMultiplier;
         public static float arrowScrollRows;
         public static bool hideScoreData;
@@ -192,6 +193,17 @@ namespace ExScoringMod
         {
             trippyMenuEnabled = value;
             Config.UpdateTrippyMenuEnabled(value);
+        }
+
+        public static void GetPurpleMenuEnabled()
+        {
+            purpleMenuEnabled = Config.PurpleMenuEnabled;
+        }
+
+        public static void SetPurpleMenuEnabled(bool value)
+        {
+            purpleMenuEnabled = value;
+            Config.UpdatePurpleMenuEnabled(value);
         }
 
         public static void GetRandomSongScope()

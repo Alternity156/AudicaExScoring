@@ -27,6 +27,12 @@ namespace ExScoringMod
 
         public static List<int> processedCuesIndexes = new List<int>();
         public static List<ExCue> exCues = new List<ExCue>();
+
+        /// <summary>
+        /// Whether ExType gameplay should currently show the "purple" peak visual state.
+        /// True on hit/song start, false on miss. Independent of the real ScoreKeeper multiplier.
+        /// </summary>
+        public static bool exTypePurple = true;
         public static List<UnprocessedTargetHitPos> unprocessedTargetHitPoses = new List<UnprocessedTargetHitPos>();
         public static bool runSaved = false;
 
