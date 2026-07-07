@@ -1118,6 +1118,22 @@ namespace ExScoringMod
             }
         }
 
+        [HarmonyPatch(typeof(InGameUI), "Update")]
+        public static class InGameUIUpdatePatch
+        {
+            public static void Postfix(InGameUI __instance)
+            {
+                if (__instance.GetState() != InGameUI.State.ChangeDifficultyPausePage) return;
+
+                GameObject root = GameObject.Find("InGameUI");
+                if (root == null) return;
+
+                Transform communityMaps = root.transform.Find("ShellPage_ChangeDifficultyPause/page/ShellPanel_Center/CommunityMaps");
+                if (communityMaps != null && communityMaps.gameObject.activeSelf)
+                    communityMaps.gameObject.SetActive(false);
+            }
+        }
+
         // ══════════════════════════════════════════════════════════════════
         //  Song download tracker post-process hooks
         // ══════════════════════════════════════════════════════════════════

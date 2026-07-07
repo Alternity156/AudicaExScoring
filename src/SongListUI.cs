@@ -51,7 +51,6 @@ namespace ExScoringMod
             MeshRenderer renderer = indicator.GetComponent<MeshRenderer>();
             if (renderer != null)
             {
-                renderer.material.color = new Color(1f, 1f, 1f, 1f);
                 renderer.sortingOrder = -1; // draw beneath the row Canvas (sortingOrder 0)
             }
 
@@ -469,10 +468,6 @@ namespace ExScoringMod
                 clone.transform.localPosition = new Vector3(0f, 0f, -0.005f);
                 clone.transform.localRotation = Quaternion.identity;
                 clone.transform.localScale = new Vector3(0.39f, 0.49f, 1f);
-
-                MeshRenderer renderer = clone.GetComponent<MeshRenderer>();
-                if (renderer != null)
-                    renderer.material.color = new Color(1f, 1f, 1f, 1f);
 
                 clone.SetActive(false);
             }
