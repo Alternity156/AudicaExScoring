@@ -586,9 +586,10 @@ namespace ExScoringMod
         {
             public static void Prefix(GameplayStats __instance)
             {
+                if (!Config.ExType) return;
+
                 if (__instance.mTickProgress < float.MaxValue / 2f)
                 {
-                    MelonLoader.MelonLogger.Log($"[GameplayStatsUpdatePatch] mTickProgress before: {__instance.mTickProgress}, mLastTickProgress: {__instance.mLastTickProgress}");
                     __instance.mTickProgress = float.MaxValue / 2f;
                     __instance.mLastTickProgress = float.MaxValue / 2f;
                 }
