@@ -60,6 +60,39 @@ namespace ExScoringMod
         public static bool enableRunDataSaving;
         public static bool showStatsOnFail;
         public static bool saveFailedRunData;
+        public static float exScorePopupSize;
+        public static float exScorePopupOpacity;
+
+        public static void GetExScorePopupSize()
+        {
+            exScorePopupSize = Config.ExScorePopupSize;
+        }
+
+        public static void SetExScorePopupSize(float value)
+        {
+            exScorePopupSize = value;
+            Config.UpdateExScorePopupSize(value);
+        }
+
+        public static void GetExScorePopupOpacity()
+        {
+            exScorePopupOpacity = Config.ExScorePopupOpacity;
+        }
+
+        public static void SetExScorePopupOpacity(float value)
+        {
+            exScorePopupOpacity = value;
+            Config.UpdateExScorePopupOpacity(value);
+        }
+
+        public static readonly string[] ScoringTypeOptions = { "Audica Scoring", "EX Scoring" };
+
+        public static int GetScoringTypeIndex() => Config.ExType ? 1 : 0;
+
+        public static void SetScoringTypeIndex(int idx)
+        {
+            Config.SetScoringType(idx == 1);
+        }
 
         public static void GetHideScoreData()
         {

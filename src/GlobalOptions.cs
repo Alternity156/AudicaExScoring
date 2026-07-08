@@ -248,164 +248,179 @@ namespace ExScoringMod
             new OptionsCategory("opt_colors", "Colors", OptionsMenu.Page.Colors),
 
             new OptionsCategory("opt_chainarrow", "Chain Arrow", () =>
-        {
-            OptionsMenuFunctions.GetEnableChainArrow();
-            OptionsMenuFunctions.GetArrowColorMode();
-            OptionsMenuFunctions.GetChainLineColorMode();
-            OptionsMenuFunctions.GetArrowWidth();
-            OptionsMenuFunctions.GetArrowLength();
+            {
+                OptionsMenuFunctions.GetEnableChainArrow();
+                OptionsMenuFunctions.GetArrowColorMode();
+                OptionsMenuFunctions.GetChainLineColorMode();
+                OptionsMenuFunctions.GetArrowWidth();
+                OptionsMenuFunctions.GetArrowLength();
 
-            var header = OptionsMenuClone.CreateHeader(0, "Chain Arrow");
-            OptionsMenuClone.AddRow(header);
+                var header = OptionsMenuClone.CreateHeader(0, "Chain Arrow");
+                OptionsMenuClone.AddRow(header);
 
-            var enableToggle = OptionsMenuClone.CreateToggle(0, "Enable Arrow",
-                () => OptionsMenuFunctions.enableChainArrow,
-                v => { OptionsMenuFunctions.enableChainArrow = v; OptionsMenuFunctions.SetEnableChainArrow(v); });
-            OptionsMenuClone.AddRow(enableToggle);
+                var enableToggle = OptionsMenuClone.CreateToggle(0, "Enable Arrow",
+                    () => OptionsMenuFunctions.enableChainArrow,
+                    v => { OptionsMenuFunctions.enableChainArrow = v; OptionsMenuFunctions.SetEnableChainArrow(v); });
+                OptionsMenuClone.AddRow(enableToggle);
 
-            var arrowColorCycle = OptionsMenuClone.CreateCycle(0, "Arrow Color", OptionsMenuFunctions.ArrowColorOptions,
-                () => OptionsMenuFunctions.arrowColorMode,
-                v => { OptionsMenuFunctions.arrowColorMode = v; OptionsMenuFunctions.SetArrowColorMode(v); },
-                0);
-            var chainLineColorCycle = OptionsMenuClone.CreateCycle(1, "Chain Line Color", OptionsMenuFunctions.ChainLineColorOptions,
-                () => OptionsMenuFunctions.chainLineColorMode,
-                v => { OptionsMenuFunctions.chainLineColorMode = v; OptionsMenuFunctions.SetChainLineColorMode(v); },
-                0);
-            OptionsMenuClone.AddRow(arrowColorCycle, chainLineColorCycle);
+                var arrowColorCycle = OptionsMenuClone.CreateCycle(0, "Arrow Color", OptionsMenuFunctions.ArrowColorOptions,
+                    () => OptionsMenuFunctions.arrowColorMode,
+                    v => { OptionsMenuFunctions.arrowColorMode = v; OptionsMenuFunctions.SetArrowColorMode(v); },
+                    0);
+                var chainLineColorCycle = OptionsMenuClone.CreateCycle(1, "Chain Line Color", OptionsMenuFunctions.ChainLineColorOptions,
+                    () => OptionsMenuFunctions.chainLineColorMode,
+                    v => { OptionsMenuFunctions.chainLineColorMode = v; OptionsMenuFunctions.SetChainLineColorMode(v); },
+                    0);
+                OptionsMenuClone.AddRow(arrowColorCycle, chainLineColorCycle);
 
-            var widthSlider = OptionsMenuClone.CreateSlider(0, "Arrow Width",
-                () => OptionsMenuFunctions.arrowWidth,
-                v => { OptionsMenuFunctions.arrowWidth = v; OptionsMenuFunctions.SetArrowWidth(v); },
-                0.1f, 1f, 0.05f, 0.5f, "N2");
-            var lengthSlider = OptionsMenuClone.CreateSlider(1, "Arrow Length",
-                () => OptionsMenuFunctions.arrowLength,
-                v => { OptionsMenuFunctions.arrowLength = v; OptionsMenuFunctions.SetArrowLength(v); },
-                0.05f, 1f, 0.05f, 0.25f, "N2");
-            OptionsMenuClone.AddRow(widthSlider, lengthSlider);
-        }),
+                var widthSlider = OptionsMenuClone.CreateSlider(0, "Arrow Width",
+                    () => OptionsMenuFunctions.arrowWidth,
+                    v => { OptionsMenuFunctions.arrowWidth = v; OptionsMenuFunctions.SetArrowWidth(v); },
+                    0.1f, 1f, 0.05f, 0.5f, "N2");
+                var lengthSlider = OptionsMenuClone.CreateSlider(1, "Arrow Length",
+                    () => OptionsMenuFunctions.arrowLength,
+                    v => { OptionsMenuFunctions.arrowLength = v; OptionsMenuFunctions.SetArrowLength(v); },
+                    0.05f, 1f, 0.05f, 0.25f, "N2");
+                OptionsMenuClone.AddRow(widthSlider, lengthSlider);
+            }),
 
             new OptionsCategory("opt_menu", "Menu", () =>
-        {
-            OptionsMenuFunctions.GetDisableMenuGrab();
-            OptionsMenuFunctions.GetTrippyMenuEnabled();
-            OptionsMenuFunctions.GetTrippyMenuSpeed();
-            OptionsMenuFunctions.GetPurpleMenuEnabled();
-            OptionsMenuFunctions.GetScrollSpeedMultiplier();
-            OptionsMenuFunctions.GetArrowScrollRows();
-            OptionsMenuFunctions.GetHideScoreData();
-            OptionsMenuFunctions.GetFirstPlayBlind();
-            OptionsMenuFunctions.GetPracticeModeMinimizeButtonEnabled();
-            OptionsMenuFunctions.GetRandomSongScope();
-            OptionsMenuFunctions.GetShowStatsOnFail();
+            {
+                OptionsMenuFunctions.GetDisableMenuGrab();
+                OptionsMenuFunctions.GetTrippyMenuEnabled();
+                OptionsMenuFunctions.GetTrippyMenuSpeed();
+                OptionsMenuFunctions.GetPurpleMenuEnabled();
+                OptionsMenuFunctions.GetScrollSpeedMultiplier();
+                OptionsMenuFunctions.GetArrowScrollRows();
+                OptionsMenuFunctions.GetHideScoreData();
+                OptionsMenuFunctions.GetFirstPlayBlind();
+                OptionsMenuFunctions.GetPracticeModeMinimizeButtonEnabled();
+                OptionsMenuFunctions.GetRandomSongScope();
+                OptionsMenuFunctions.GetShowStatsOnFail();
 
-            var disableMenuGrabToggle = OptionsMenuClone.CreateToggle(0, "Disable Menu Grab",
-                () => OptionsMenuFunctions.disableMenuGrab,
-                v => { OptionsMenuFunctions.disableMenuGrab = v; OptionsMenuFunctions.SetDisableMenuGrab(v); });
-            OptionsMenuClone.AddRow(disableMenuGrabToggle);
+                var disableMenuGrabToggle = OptionsMenuClone.CreateToggle(0, "Disable Menu Grab",
+                    () => OptionsMenuFunctions.disableMenuGrab,
+                    v => { OptionsMenuFunctions.disableMenuGrab = v; OptionsMenuFunctions.SetDisableMenuGrab(v); });
+                OptionsMenuClone.AddRow(disableMenuGrabToggle);
 
-            var trippyMenuToggle = OptionsMenuClone.CreateToggle(0, "Enable Trippy Menu",
-                () => OptionsMenuFunctions.trippyMenuEnabled,
-                v => { OptionsMenuFunctions.trippyMenuEnabled = v; OptionsMenuFunctions.SetTrippyMenuEnabled(v); });
-            var trippyMenuSpeedSlider = OptionsMenuClone.CreateSlider(1, "Trippy Speed",
-                () => OptionsMenuFunctions.trippyMenuSpeed,
-                v => { OptionsMenuFunctions.trippyMenuSpeed = v; OptionsMenuFunctions.SetTrippyMenuSpeed(v); },
-                0.1f, 100f, 0.1f, 1f, "N1");
-            OptionsMenuClone.AddRow(trippyMenuToggle, trippyMenuSpeedSlider);
+                var trippyMenuToggle = OptionsMenuClone.CreateToggle(0, "Enable Trippy Menu",
+                    () => OptionsMenuFunctions.trippyMenuEnabled,
+                    v => { OptionsMenuFunctions.trippyMenuEnabled = v; OptionsMenuFunctions.SetTrippyMenuEnabled(v); });
+                var trippyMenuSpeedSlider = OptionsMenuClone.CreateSlider(1, "Trippy Speed",
+                    () => OptionsMenuFunctions.trippyMenuSpeed,
+                    v => { OptionsMenuFunctions.trippyMenuSpeed = v; OptionsMenuFunctions.SetTrippyMenuSpeed(v); },
+                    0.1f, 100f, 0.1f, 1f, "N1");
+                OptionsMenuClone.AddRow(trippyMenuToggle, trippyMenuSpeedSlider);
 
-            var purpleMenuToggle = OptionsMenuClone.CreateToggle(0, "Purple Menu Background",
-                () => OptionsMenuFunctions.purpleMenuEnabled,
-                v => { OptionsMenuFunctions.purpleMenuEnabled = v; OptionsMenuFunctions.SetPurpleMenuEnabled(v); },
-                "Tints the stage purple while browsing menus, for aesthetic purposes");
-            OptionsMenuClone.AddRow(purpleMenuToggle);
+                var purpleMenuToggle = OptionsMenuClone.CreateToggle(0, "Purple Menu Background",
+                    () => OptionsMenuFunctions.purpleMenuEnabled,
+                    v => { OptionsMenuFunctions.purpleMenuEnabled = v; OptionsMenuFunctions.SetPurpleMenuEnabled(v); },
+                    "Tints the stage purple while browsing menus, for aesthetic purposes");
+                OptionsMenuClone.AddRow(purpleMenuToggle);
 
-            var scrollSpeedSlider = OptionsMenuClone.CreateSlider(0, "Scroll Speed",
-                () => OptionsMenuFunctions.scrollSpeedMultiplier,
-                v => { OptionsMenuFunctions.scrollSpeedMultiplier = v; OptionsMenuFunctions.SetScrollSpeedMultiplier(v); },
-                0.1f, 10f, 0.1f, 1f, "N1");
-            var arrowScrollRowsSlider = OptionsMenuClone.CreateSlider(1, "Arrow Scroll Rows",
-                () => OptionsMenuFunctions.arrowScrollRows,
-                v => { OptionsMenuFunctions.arrowScrollRows = v; OptionsMenuFunctions.SetArrowScrollRows(v); },
-                1f, 20f, 1f, 3f, "N0");
-            OptionsMenuClone.AddRow(scrollSpeedSlider, arrowScrollRowsSlider);
+                var scrollSpeedSlider = OptionsMenuClone.CreateSlider(0, "Scroll Speed",
+                    () => OptionsMenuFunctions.scrollSpeedMultiplier,
+                    v => { OptionsMenuFunctions.scrollSpeedMultiplier = v; OptionsMenuFunctions.SetScrollSpeedMultiplier(v); },
+                    0.1f, 10f, 0.1f, 1f, "N1");
+                var arrowScrollRowsSlider = OptionsMenuClone.CreateSlider(1, "Arrow Scroll Rows",
+                    () => OptionsMenuFunctions.arrowScrollRows,
+                    v => { OptionsMenuFunctions.arrowScrollRows = v; OptionsMenuFunctions.SetArrowScrollRows(v); },
+                    1f, 20f, 1f, 3f, "N0");
+                OptionsMenuClone.AddRow(scrollSpeedSlider, arrowScrollRowsSlider);
 
-            var hideScoreDataToggle = OptionsMenuClone.CreateToggle(0, "Hide Score Data",
-                () => OptionsMenuFunctions.hideScoreData,
-                v => { OptionsMenuFunctions.hideScoreData = v; OptionsMenuFunctions.SetHideScoreData(v); },
-                "Permanently hides target data, heatmap, and intensity graph on the launch panel");
-            var firstPlayBlindToggle = OptionsMenuClone.CreateToggle(1, "First Play Blind",
-                () => OptionsMenuFunctions.firstPlayBlind,
-                v => { OptionsMenuFunctions.firstPlayBlind = v; OptionsMenuFunctions.SetFirstPlayBlind(v); },
-                "Hides target data, heatmap, and intensity graph only for songs you've never played");
-            OptionsMenuClone.AddRow(hideScoreDataToggle, firstPlayBlindToggle);
+                var hideScoreDataToggle = OptionsMenuClone.CreateToggle(0, "Hide Score Data",
+                    () => OptionsMenuFunctions.hideScoreData,
+                    v => { OptionsMenuFunctions.hideScoreData = v; OptionsMenuFunctions.SetHideScoreData(v); },
+                    "Permanently hides target data, heatmap, and intensity graph on the launch panel");
+                var firstPlayBlindToggle = OptionsMenuClone.CreateToggle(1, "First Play Blind",
+                    () => OptionsMenuFunctions.firstPlayBlind,
+                    v => { OptionsMenuFunctions.firstPlayBlind = v; OptionsMenuFunctions.SetFirstPlayBlind(v); },
+                    "Hides target data, heatmap, and intensity graph only for songs you've never played");
+                OptionsMenuClone.AddRow(hideScoreDataToggle, firstPlayBlindToggle);
 
-            var practiceModeMinimizeToggle = OptionsMenuClone.CreateToggle(0, "Practice Mode Minimize Button",
-                () => OptionsMenuFunctions.practiceModeMinimizeButtonEnabled,
-                v => { OptionsMenuFunctions.practiceModeMinimizeButtonEnabled = v; OptionsMenuFunctions.SetPracticeModeMinimizeButtonEnabled(v); },
-                "Adds a button in practice mode to minimize its panel");
-            OptionsMenuClone.AddRow(practiceModeMinimizeToggle);
+                var practiceModeMinimizeToggle = OptionsMenuClone.CreateToggle(0, "Practice Mode Minimize Button",
+                    () => OptionsMenuFunctions.practiceModeMinimizeButtonEnabled,
+                    v => { OptionsMenuFunctions.practiceModeMinimizeButtonEnabled = v; OptionsMenuFunctions.SetPracticeModeMinimizeButtonEnabled(v); },
+                    "Adds a button in practice mode to minimize its panel");
+                OptionsMenuClone.AddRow(practiceModeMinimizeToggle);
 
-            var showStatsOnFailToggle = OptionsMenuClone.CreateToggle(0, "Show Stats On Fail",
-                () => OptionsMenuFunctions.showStatsOnFail,
-                v => { OptionsMenuFunctions.showStatsOnFail = v; OptionsMenuFunctions.SetShowStatsOnFail(v); },
-                "Shows the stats screen after failing a song instead of the fail screen");
-            OptionsMenuClone.AddRow(showStatsOnFailToggle);
+                var showStatsOnFailToggle = OptionsMenuClone.CreateToggle(0, "Show Stats On Fail",
+                    () => OptionsMenuFunctions.showStatsOnFail,
+                    v => { OptionsMenuFunctions.showStatsOnFail = v; OptionsMenuFunctions.SetShowStatsOnFail(v); },
+                    "Shows the stats screen after failing a song instead of the fail screen");
+                OptionsMenuClone.AddRow(showStatsOnFailToggle);
 
-            var randomSongHeader = OptionsMenuClone.CreateHeader(0, "Random Song");
-            OptionsMenuClone.AddRow(randomSongHeader);
+                var randomSongHeader = OptionsMenuClone.CreateHeader(0, "Random Song");
+                OptionsMenuClone.AddRow(randomSongHeader);
 
-            var randomSongScopeCycle = OptionsMenuClone.CreateCycle(0, "Random Song Source", OptionsMenuFunctions.RandomSongScopeOptions,
-                () => OptionsMenuFunctions.randomSongScope,
-                v => { OptionsMenuFunctions.randomSongScope = v; OptionsMenuFunctions.SetRandomSongScope(v); RandomSong.UpdateButtonState(); },
-                0,
-                "Folder Songs: picks from the currently open folder. All Songs: picks from your entire library and jumps to it.");
-            OptionsMenuClone.AddRow(randomSongScopeCycle);
-        }),
+                var randomSongScopeCycle = OptionsMenuClone.CreateCycle(0, "Random Song Source", OptionsMenuFunctions.RandomSongScopeOptions,
+                    () => OptionsMenuFunctions.randomSongScope,
+                    v => { OptionsMenuFunctions.randomSongScope = v; OptionsMenuFunctions.SetRandomSongScope(v); RandomSong.UpdateButtonState(); },
+                    0,
+                    "Folder Songs: picks from the currently open folder. All Songs: picks from your entire library and jumps to it.");
+                OptionsMenuClone.AddRow(randomSongScopeCycle);
+            }),
 
             new OptionsCategory("opt_data", "Data", () =>
-        {
-            OptionsMenuFunctions.GetEnableRunDataSaving();
-            OptionsMenuFunctions.GetMaxRunsPerSong();
-            OptionsMenuFunctions.GetMaxRunDataSizeMB();
-            OptionsMenuFunctions.GetSaveFailedRunData();
+            {
+                OptionsMenuFunctions.GetEnableRunDataSaving();
+                OptionsMenuFunctions.GetMaxRunsPerSong();
+                OptionsMenuFunctions.GetMaxRunDataSizeMB();
+                OptionsMenuFunctions.GetSaveFailedRunData();
 
-            var dataHeader = OptionsMenuClone.CreateHeader(0, "Run Data");
-            OptionsMenuClone.AddRow(dataHeader);
+                var dataHeader = OptionsMenuClone.CreateHeader(0, "Run Data");
+                OptionsMenuClone.AddRow(dataHeader);
 
-            var enableSavingToggle = OptionsMenuClone.CreateToggle(0, "Save Run Data",
-                () => OptionsMenuFunctions.enableRunDataSaving,
-                v => { OptionsMenuFunctions.enableRunDataSaving = v; OptionsMenuFunctions.SetEnableRunDataSaving(v); },
-                "Saves raw scoring data for each run to disk, for external recalculation/analysis");
-            var saveFailedRunDataToggle = OptionsMenuClone.CreateToggle(1, "Save Failed Runs",
-                () => OptionsMenuFunctions.saveFailedRunData,
-                v => { OptionsMenuFunctions.saveFailedRunData = v; OptionsMenuFunctions.SetSaveFailedRunData(v); },
-                "Also saves run data for failed songs (requires Save Run Data)");
-            OptionsMenuClone.AddRow(enableSavingToggle, saveFailedRunDataToggle);
+                var enableSavingToggle = OptionsMenuClone.CreateToggle(0, "Save Run Data",
+                    () => OptionsMenuFunctions.enableRunDataSaving,
+                    v => { OptionsMenuFunctions.enableRunDataSaving = v; OptionsMenuFunctions.SetEnableRunDataSaving(v); },
+                    "Saves raw scoring data for each run to disk, for external recalculation/analysis");
+                var saveFailedRunDataToggle = OptionsMenuClone.CreateToggle(1, "Save Failed Runs",
+                    () => OptionsMenuFunctions.saveFailedRunData,
+                    v => { OptionsMenuFunctions.saveFailedRunData = v; OptionsMenuFunctions.SetSaveFailedRunData(v); },
+                    "Also saves run data for failed songs (requires Save Run Data)");
+                OptionsMenuClone.AddRow(enableSavingToggle, saveFailedRunDataToggle);
 
-            var maxRunsSlider = OptionsMenuClone.CreateSlider(0, "Max Runs Per Song",
-                () => OptionsMenuFunctions.maxRunsPerSong,
-                v => { OptionsMenuFunctions.maxRunsPerSong = v; OptionsMenuFunctions.SetMaxRunsPerSong(v); },
-                1f, 50f, 1f, 10f, "N0",
-                "Oldest saved runs for a song, per difficulty, are deleted beyond this count");
-            var maxSizeSlider = OptionsMenuClone.CreateSlider(1, "Max Total Size",
-                () => OptionsMenuFunctions.maxRunDataSizeMB,
-                v => { OptionsMenuFunctions.maxRunDataSizeMB = v; OptionsMenuFunctions.SetMaxRunDataSizeMB(v); },
-                10f, 2000f, 10f, 100f,
-                v => v.ToString("N0") + " MB",
-                "Oldest saved runs across all songs are deleted once this total is exceeded");
-            OptionsMenuClone.AddRow(maxRunsSlider, maxSizeSlider);
-        }),
+                var maxRunsSlider = OptionsMenuClone.CreateSlider(0, "Max Runs Per Song",
+                    () => OptionsMenuFunctions.maxRunsPerSong,
+                    v => { OptionsMenuFunctions.maxRunsPerSong = v; OptionsMenuFunctions.SetMaxRunsPerSong(v); },
+                    1f, 50f, 1f, 10f, "N0",
+                    "Oldest saved runs for a song, per difficulty, are deleted beyond this count");
+                var maxSizeSlider = OptionsMenuClone.CreateSlider(1, "Max Total Size",
+                    () => OptionsMenuFunctions.maxRunDataSizeMB,
+                    v => { OptionsMenuFunctions.maxRunDataSizeMB = v; OptionsMenuFunctions.SetMaxRunDataSizeMB(v); },
+                    10f, 2000f, 10f, 100f,
+                    v => v.ToString("N0") + " MB",
+                    "Oldest saved runs across all songs are deleted once this total is exceeded");
+                OptionsMenuClone.AddRow(maxRunsSlider, maxSizeSlider);
+            }),
 
-            new OptionsCategory("opt_test", "Wide Slider Test", () =>
-        {
-            var testHeader = OptionsMenuClone.CreateHeader(0, "Wide Slider Test");
-            OptionsMenuClone.AddRow(testHeader);
+            new OptionsCategory("opt_scoring", "Scoring", () =>
+            {
+                var scoringTypeCycle = OptionsMenuClone.CreateCycle(0, "Scoring Type", OptionsMenuFunctions.ScoringTypeOptions,
+                    OptionsMenuFunctions.GetScoringTypeIndex,
+                    OptionsMenuFunctions.SetScoringTypeIndex,
+                    0);
+                OptionsMenuClone.AddRow(scoringTypeCycle);
 
-            float testValue = 50f;
-            OptionsMenuClone.AddWideSlider("Test Wide Slider",
-                () => testValue,
-                v => { testValue = v; },
-                0f, 100f, 1f, 50f, "N0");
-        }),
+                OptionsMenuFunctions.GetExScorePopupSize();
+                OptionsMenuFunctions.GetExScorePopupOpacity();
+
+                var header = OptionsMenuClone.CreateHeader(0, "EX Score Popup");
+                OptionsMenuClone.AddRow(header);
+
+                var sizeSlider = OptionsMenuClone.CreateSlider(0, "Popup Size",
+                    () => OptionsMenuFunctions.exScorePopupSize,
+                    v => { OptionsMenuFunctions.exScorePopupSize = v; OptionsMenuFunctions.SetExScorePopupSize(v); },
+                    10f, 100f, 5f, 100f,
+                    v => v.ToString("N0") + "%");
+                var opacitySlider = OptionsMenuClone.CreateSlider(1, "Popup Opacity",
+                    () => OptionsMenuFunctions.exScorePopupOpacity,
+                    v => { OptionsMenuFunctions.exScorePopupOpacity = v; OptionsMenuFunctions.SetExScorePopupOpacity(v); },
+                    0f, 100f, 5f, 100f,
+                    v => v.ToString("N0") + "%");
+                OptionsMenuClone.AddRow(sizeSlider, opacitySlider);
+            }),
         };
 
         // ── Song-list view (Back + categories) ────────────────────────────────

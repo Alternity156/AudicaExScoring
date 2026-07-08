@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.RegularExpressions;
 using Harmony;
 using MelonLoader;
 using TMPro;
@@ -573,7 +574,11 @@ namespace ExScoringMod
 
                     popup.text.richText = true;
 
-                    text = nextPopupText.ToString();
+                    int alphaHex = Mathf.RoundToInt(Config.ExScorePopupOpacity / 100f * 255f);
+                    string alphaTag = $"<alpha=#{alphaHex:X2}>";
+                    string coloredText = Regex.Replace(nextPopupText.ToString(), "(<color=#[0-9A-Fa-f]{6}>)", "$1" + alphaTag);
+                    text = $"<size={Config.ExScorePopupSize}%>{alphaTag}{coloredText}";
+
                     extraText = "";
 
                     nextPopupText = "";

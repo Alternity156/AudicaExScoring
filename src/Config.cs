@@ -56,6 +56,10 @@ namespace ExScoringMod
         public static float MaxRunDataSizeMB;
         public static bool SaveFailedRunData;
 
+        public static string scoringHeader = "[Header]Scoring";
+        public static float ExScorePopupSize;
+        public static float ExScorePopupOpacity;
+
         public static void RegisterConfig()
         {
             MelonPrefs.RegisterString(Category, nameof(typeHeader), "", "[Header]Scoring Type");
@@ -110,6 +114,10 @@ namespace ExScoringMod
             MelonPrefs.RegisterFloat(Category, nameof(MaxRunDataSizeMB), 100f, "Sets the max total disk space (MB) run data files can use [10,2000,10,100] {G}");
             MelonPrefs.RegisterBool(Category, nameof(SaveFailedRunData), false, "Also saves run data for failed songs (requires Save Run Data)");
 
+            MelonPrefs.RegisterString(Category, nameof(scoringHeader), "", "[Header]Scoring");
+            MelonPrefs.RegisterFloat(Category, nameof(ExScorePopupSize), 100f, "Sets the EX score popup size [10,100,5,100] {P}");
+            MelonPrefs.RegisterFloat(Category, nameof(ExScorePopupOpacity), 100f, "Sets the EX score popup opacity [0,100,5,100] {P}");
+
             OnModSettingsApplied();
         }
 
@@ -149,6 +157,35 @@ namespace ExScoringMod
             EnableRunDataSaving = MelonPrefs.GetBool(Category, nameof(EnableRunDataSaving));
             ShowStatsOnFail = MelonPrefs.GetBool(Category, nameof(ShowStatsOnFail));
             SaveFailedRunData = MelonPrefs.GetBool(Category, nameof(SaveFailedRunData));
+            ExScorePopupSize = MelonPrefs.GetFloat(Category, nameof(ExScorePopupSize));
+            ExScorePopupOpacity = MelonPrefs.GetFloat(Category, nameof(ExScorePopupOpacity));
+        }
+
+        public static void UpdateExScorePopupSize(float value)
+        {
+            if (value < 10f) value = 10f;
+            if (value > 100f) value = 100f;
+            MelonPrefs.SetFloat(Category, nameof(ExScorePopupSize), value);
+            ExScorePopupSize = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateExScorePopupOpacity(float value)
+        {
+            if (value < 0f) value = 0f;
+            if (value > 100f) value = 100f;
+            MelonPrefs.SetFloat(Category, nameof(ExScorePopupOpacity), value);
+            ExScorePopupOpacity = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void SetScoringType(bool ex)
+        {
+            MelonPrefs.SetBool(Category, nameof(ExType), ex);
+            MelonPrefs.SetBool(Category, nameof(AudicaType), !ex);
+            ExType = ex;
+            AudicaType = !ex;
+            MelonPrefs.SaveConfig();
         }
 
         public static void UpdateHideScoreData(bool value)
