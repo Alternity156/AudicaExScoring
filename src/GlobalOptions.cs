@@ -12,9 +12,14 @@ namespace ExScoringMod
         public string Title;
         public Action Build;
         public OptionsMenu.Page? NativePage;
+        public bool IsRawPage;
 
         public OptionsCategory(string id, string title, Action build) { Id = id; Title = title; Build = build; }
         public OptionsCategory(string id, string title, OptionsMenu.Page nativePage) { Id = id; Title = title; NativePage = nativePage; }
+
+        /// <summary>Category that reveals a real, non-OptionsMenu ShellPage (e.g. Modifiers) rather
+        /// than drawing rows on the cloned OptionsMenu. Pass rawPage: true to select this overload.</summary>
+        public OptionsCategory(string id, string title, bool rawPage) { Id = id; Title = title; IsRawPage = rawPage; }
     }
 
     /// <summary>
@@ -246,6 +251,8 @@ namespace ExScoringMod
             new OptionsCategory("opt_customize", "Customize", OptionsMenu.Page.Customization),
 
             new OptionsCategory("opt_colors", "Colors", OptionsMenu.Page.Colors),
+
+            new OptionsCategory("opt_modifiers", "Modifiers", rawPage: true),
 
             new OptionsCategory("opt_chainarrow", "Chain Arrow", () =>
             {
@@ -507,10 +514,9 @@ namespace ExScoringMod
             yield return new WaitForSeconds(len);
 
             if (launchPage != null) launchPage.SetActive(false);
-            OptionsMenuClone.Show();
             yield return null;
             DrawCategory(cat);
-            MelonLogger.Log("[Options] launch page disabled, clone shown");
+            MelonLogger.Log("[Options] launch page disabled, category shown");
         }
 
         public static void HidePanel()
@@ -523,6 +529,7 @@ namespace ExScoringMod
 
             OptionsMenuClone.Wipe();
             OptionsMenuClone.Hide();
+            ModifiersPage.Hide();
 
             if (launchPage != null) launchPage.SetActive(true);
 
@@ -557,6 +564,7 @@ namespace ExScoringMod
                 panelShown = false;
                 OptionsMenuClone.Wipe();
                 OptionsMenuClone.Hide();
+                ModifiersPage.Hide();
                 if (launchPage != null) launchPage.SetActive(false);
             }
             launchPage = null;
@@ -585,6 +593,16 @@ namespace ExScoringMod
 
         private static void DrawCategory(OptionsCategory cat)
         {
+            if (cat.IsRawPage)
+            {
+                OptionsMenuClone.Hide();
+                ModifiersPage.Show();
+                return;
+            }
+
+            ModifiersPage.Hide();
+            OptionsMenuClone.Show();
+
             if (cat.NativePage.HasValue)
                 OptionsMenuClone.DrawNativePage(cat.Title, cat.NativePage.Value);
             else

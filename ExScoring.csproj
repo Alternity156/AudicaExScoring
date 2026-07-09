@@ -204,6 +204,7 @@
     <Compile Include="src\GlobalOptions.cs" />
     <Compile Include="src\LaunchPanelVisibility.cs" />
     <Compile Include="src\MarathonSetup.cs" />
+    <Compile Include="src\ModifiersPage.cs" />
     <Compile Include="src\OptionsMenuClone.cs" />
     <Compile Include="src\OptionsMenuFunctions.cs" />
     <Compile Include="src\PlaylistConfig.cs" />
