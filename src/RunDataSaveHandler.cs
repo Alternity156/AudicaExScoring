@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using System.IO.Compression;
 using System.Linq;
 using MelonLoader;
 using Newtonsoft.Json;
@@ -29,7 +30,7 @@ namespace ExScoringMod
         };
 
         /// <summary>
-        /// Saves the current run's raw ExCue data to its own JSON file.
+        /// Saves the current run's raw ExCue data to its own gzip-compressed JSON file.
         /// Safe to call multiple times per run; only writes once (see runSaved).
         /// </summary>
         public static void SaveRunData()
@@ -65,11 +66,17 @@ namespace ExScoringMod
                     exCues = slimCues
                 };
 
-                string fileName = SanitizeFileName($"{saveData.songId}_{saveData.difficulty}_{saveData.unixTimestamp}") + ".json";
+                string fileName = SanitizeFileName($"{saveData.songId}_{saveData.difficulty}_{saveData.unixTimestamp}") + ".json.gz";
                 string filePath = Path.Combine(runDataDirectory, fileName);
 
                 string json = JsonConvert.SerializeObject(saveData, runDataSerializerSettings);
-                File.WriteAllText(filePath, json);
+
+                using (FileStream fileStream = new FileStream(filePath, FileMode.Create))
+                using (GZipStream gzipStream = new GZipStream(fileStream, CompressionLevel.Optimal))
+                using (StreamWriter writer = new StreamWriter(gzipStream))
+                {
+                    writer.Write(json);
+                }
 
                 MelonLogger.Log($"[ExScoring] Saved run data to {filePath}");
 
@@ -95,7 +102,8 @@ namespace ExScoringMod
         /// </summary>
         private static ParsedRunFileName ParseRunFileName(string fileName)
         {
-            string nameNoExt = Path.GetFileNameWithoutExtension(fileName);
+            // Strip both the ".gz" and ".json" extensions.
+            string nameNoExt = Path.GetFileNameWithoutExtension(Path.GetFileNameWithoutExtension(fileName));
             string[] parts = nameNoExt.Split('_');
             if (parts.Length < 3) return new ParsedRunFileName();
 
@@ -117,7 +125,7 @@ namespace ExScoringMod
                 string sanitizedSongId = SanitizeFileName(songId);
                 string sanitizedDifficulty = SanitizeFileName(difficulty);
 
-                List<FileInfo> songFiles = Directory.GetFiles(runDataDirectory, "*.json")
+                List<FileInfo> songFiles = Directory.GetFiles(runDataDirectory, "*.json.gz")
                     .Select(f => new FileInfo(f))
                     .Where(f =>
                     {
@@ -135,7 +143,7 @@ namespace ExScoringMod
                 }
 
                 long maxBytes = (long)(Config.MaxRunDataSizeMB * 1024 * 1024);
-                List<FileInfo> allFiles = Directory.GetFiles(runDataDirectory, "*.json")
+                List<FileInfo> allFiles = Directory.GetFiles(runDataDirectory, "*.json.gz")
                     .Select(f => new FileInfo(f))
                     .OrderBy(f => f.LastWriteTimeUtc)
                     .ToList();
