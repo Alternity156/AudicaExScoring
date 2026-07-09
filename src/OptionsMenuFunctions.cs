@@ -62,6 +62,10 @@ namespace ExScoringMod
         public static bool saveFailedRunData;
         public static float exScorePopupSize;
         public static float exScorePopupOpacity;
+        public static float searchKeyboardPosX;
+        public static float searchKeyboardPosY;
+        public static float searchKeyboardPosZ;
+        public static float searchKeyboardTilt;
 
         public static void GetExScorePopupSize()
         {
@@ -83,6 +87,54 @@ namespace ExScoringMod
         {
             exScorePopupOpacity = value;
             Config.UpdateExScorePopupOpacity(value);
+        }
+
+        public static void GetSearchKeyboardPosX()
+        {
+            searchKeyboardPosX = Config.SearchKeyboardPosX;
+        }
+
+        public static void SetSearchKeyboardPosX(float value)
+        {
+            searchKeyboardPosX = value;
+            Config.UpdateSearchKeyboardPosX(value);
+            SearchKeyboard.ApplyTransform();
+        }
+
+        public static void GetSearchKeyboardPosY()
+        {
+            searchKeyboardPosY = Config.SearchKeyboardPosY;
+        }
+
+        public static void SetSearchKeyboardPosY(float value)
+        {
+            searchKeyboardPosY = value;
+            Config.UpdateSearchKeyboardPosY(value);
+            SearchKeyboard.ApplyTransform();
+        }
+
+        public static void GetSearchKeyboardPosZ()
+        {
+            searchKeyboardPosZ = Config.SearchKeyboardPosZ;
+        }
+
+        public static void SetSearchKeyboardPosZ(float value)
+        {
+            searchKeyboardPosZ = value;
+            Config.UpdateSearchKeyboardPosZ(value);
+            SearchKeyboard.ApplyTransform();
+        }
+
+        public static void GetSearchKeyboardTilt()
+        {
+            searchKeyboardTilt = Config.SearchKeyboardTilt;
+        }
+
+        public static void SetSearchKeyboardTilt(float value)
+        {
+            searchKeyboardTilt = value;
+            Config.UpdateSearchKeyboardTilt(value);
+            SearchKeyboard.ApplyTransform();
         }
 
         public static readonly string[] ScoringTypeOptions = { "Audica Scoring", "EX Scoring" };

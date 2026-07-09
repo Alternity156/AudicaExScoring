@@ -9,7 +9,23 @@ namespace ExScoringMod
     {
         private static GameObject keyboardCopy = null;
 
-        private static readonly Vector3 KeyboardPosition = new Vector3(0f, 1.75f, 2f);
+        private static Vector3 KeyboardPosition =>
+            new Vector3(Config.SearchKeyboardPosX, Config.SearchKeyboardPosY, Config.SearchKeyboardPosZ);
+
+        private static Quaternion KeyboardRotation =>
+            Quaternion.Euler(Config.SearchKeyboardTilt, 0f, 0f);
+
+        /// <summary>
+        /// Re-applies the configured position/rotation to the live keyboard copy, if it exists.
+        /// Called when the user adjusts the position/tilt sliders in the options menu, so changes
+        /// are visible immediately without needing to reopen the keyboard.
+        /// </summary>
+        public static void ApplyTransform()
+        {
+            if (keyboardCopy == null) return;
+            keyboardCopy.transform.position = KeyboardPosition;
+            keyboardCopy.transform.rotation = KeyboardRotation;
+        }
 
         private static KeyboardEntry FindSourceKeyboard()
         {
@@ -52,7 +68,7 @@ namespace ExScoringMod
             keyboardCopy.name = "ExScoring_SearchKeyboard";
             keyboardCopy.transform.SetParent(null, true);   // scene root: localScale == world scale
             keyboardCopy.transform.position = KeyboardPosition;
-            keyboardCopy.transform.rotation = src.transform.rotation;
+            keyboardCopy.transform.rotation = KeyboardRotation;
             keyboardCopy.transform.localScale = src.transform.lossyScale;
             keyboardCopy.SetActive(false);
         }
@@ -62,7 +78,7 @@ namespace ExScoringMod
             EnsureCopy();
             if (keyboardCopy == null) return;
 
-            keyboardCopy.transform.position = KeyboardPosition;
+            ApplyTransform();
             keyboardCopy.SetActive(true);
             var ke = keyboardCopy.GetComponent<KeyboardEntry>();
             if (ke != null) ke.Show();
@@ -82,7 +98,7 @@ namespace ExScoringMod
             EnsureCopy();
             if (keyboardCopy == null) return;
 
-            keyboardCopy.transform.position = KeyboardPosition;
+            ApplyTransform();
             keyboardCopy.SetActive(true);
             var ke = keyboardCopy.GetComponent<KeyboardEntry>();
             if (ke != null) ke.Show();

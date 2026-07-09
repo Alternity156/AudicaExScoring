@@ -60,6 +60,12 @@ namespace ExScoringMod
         public static float ExScorePopupSize;
         public static float ExScorePopupOpacity;
 
+        public static string searchKeyboardHeader = "[Header]Search Keyboard";
+        public static float SearchKeyboardPosX;
+        public static float SearchKeyboardPosY;
+        public static float SearchKeyboardPosZ;
+        public static float SearchKeyboardTilt;
+
         public static void RegisterConfig()
         {
             MelonPrefs.RegisterString(Category, nameof(typeHeader), "", "[Header]Scoring Type");
@@ -118,6 +124,12 @@ namespace ExScoringMod
             MelonPrefs.RegisterFloat(Category, nameof(ExScorePopupSize), 100f, "Sets the EX score popup size [10,100,5,100] {P}");
             MelonPrefs.RegisterFloat(Category, nameof(ExScorePopupOpacity), 100f, "Sets the EX score popup opacity [0,100,5,100] {P}");
 
+            MelonPrefs.RegisterString(Category, nameof(searchKeyboardHeader), "", "[Header]Search Keyboard");
+            MelonPrefs.RegisterFloat(Category, nameof(SearchKeyboardPosX), 0f, "Sets the search keyboard X position [-5,5,0.25,0] {P}");
+            MelonPrefs.RegisterFloat(Category, nameof(SearchKeyboardPosY), 1.75f, "Sets the search keyboard Y position [0,5,0.25,1.75] {P}");
+            MelonPrefs.RegisterFloat(Category, nameof(SearchKeyboardPosZ), 2f, "Sets the search keyboard Z position [-5,5,0.25,2] {P}");
+            MelonPrefs.RegisterFloat(Category, nameof(SearchKeyboardTilt), 30f, "Sets the search keyboard tilt angle [0,90,1,30] {P}");
+
             OnModSettingsApplied();
         }
 
@@ -159,6 +171,10 @@ namespace ExScoringMod
             SaveFailedRunData = MelonPrefs.GetBool(Category, nameof(SaveFailedRunData));
             ExScorePopupSize = MelonPrefs.GetFloat(Category, nameof(ExScorePopupSize));
             ExScorePopupOpacity = MelonPrefs.GetFloat(Category, nameof(ExScorePopupOpacity));
+            SearchKeyboardPosX = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardPosX));
+            SearchKeyboardPosY = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardPosY));
+            SearchKeyboardPosZ = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardPosZ));
+            SearchKeyboardTilt = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardTilt));
         }
 
         public static void UpdateExScorePopupSize(float value)
@@ -400,6 +416,42 @@ namespace ExScoringMod
         {
             MelonPrefs.SetInt(Category, nameof(LastSongCount), newCount);
             LastSongCount = newCount;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateSearchKeyboardPosX(float value)
+        {
+            if (value < -5f) value = -5f;
+            if (value > 5f) value = 5f;
+            MelonPrefs.SetFloat(Category, nameof(SearchKeyboardPosX), value);
+            SearchKeyboardPosX = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateSearchKeyboardPosY(float value)
+        {
+            if (value < 0f) value = 0f;
+            if (value > 5f) value = 5f;
+            MelonPrefs.SetFloat(Category, nameof(SearchKeyboardPosY), value);
+            SearchKeyboardPosY = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateSearchKeyboardPosZ(float value)
+        {
+            if (value < -5f) value = -5f;
+            if (value > 5f) value = 5f;
+            MelonPrefs.SetFloat(Category, nameof(SearchKeyboardPosZ), value);
+            SearchKeyboardPosZ = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateSearchKeyboardTilt(float value)
+        {
+            if (value < 0f) value = 0f;
+            if (value > 90f) value = 90f;
+            MelonPrefs.SetFloat(Category, nameof(SearchKeyboardTilt), value);
+            SearchKeyboardTilt = value;
             MelonPrefs.SaveConfig();
         }
 

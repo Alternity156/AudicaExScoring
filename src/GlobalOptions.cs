@@ -297,6 +297,10 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetPracticeModeMinimizeButtonEnabled();
                 OptionsMenuFunctions.GetRandomSongScope();
                 OptionsMenuFunctions.GetShowStatsOnFail();
+                OptionsMenuFunctions.GetSearchKeyboardPosX();
+                OptionsMenuFunctions.GetSearchKeyboardPosY();
+                OptionsMenuFunctions.GetSearchKeyboardPosZ();
+                OptionsMenuFunctions.GetSearchKeyboardTilt();
 
                 var disableMenuGrabToggle = OptionsMenuClone.CreateToggle(0, "Disable Menu Grab",
                     () => OptionsMenuFunctions.disableMenuGrab,
@@ -359,6 +363,30 @@ namespace ExScoringMod
                     0,
                     "Folder Songs: picks from the currently open folder. All Songs: picks from your entire library and jumps to it.");
                 OptionsMenuClone.AddRow(randomSongScopeCycle);
+
+                var searchKeyboardHeader = OptionsMenuClone.CreateHeader(0, "Search Keyboard");
+                OptionsMenuClone.AddRow(searchKeyboardHeader);
+
+                var searchKeyboardPosXSlider = OptionsMenuClone.CreateSlider(0, "Position X",
+                    () => OptionsMenuFunctions.searchKeyboardPosX,
+                    v => { OptionsMenuFunctions.searchKeyboardPosX = v; OptionsMenuFunctions.SetSearchKeyboardPosX(v); },
+                    -5f, 5f, 0.25f, 0f, "N2");
+                var searchKeyboardPosYSlider = OptionsMenuClone.CreateSlider(1, "Position Y",
+                    () => OptionsMenuFunctions.searchKeyboardPosY,
+                    v => { OptionsMenuFunctions.searchKeyboardPosY = v; OptionsMenuFunctions.SetSearchKeyboardPosY(v); },
+                    0f, 5f, 0.25f, 1.75f, "N2");
+                OptionsMenuClone.AddRow(searchKeyboardPosXSlider, searchKeyboardPosYSlider);
+
+                var searchKeyboardPosZSlider = OptionsMenuClone.CreateSlider(0, "Position Z",
+                    () => OptionsMenuFunctions.searchKeyboardPosZ,
+                    v => { OptionsMenuFunctions.searchKeyboardPosZ = v; OptionsMenuFunctions.SetSearchKeyboardPosZ(v); },
+                    -5f, 5f, 0.25f, 2f, "N2");
+                var searchKeyboardTiltSlider = OptionsMenuClone.CreateSlider(1, "Tilt",
+                    () => OptionsMenuFunctions.searchKeyboardTilt,
+                    v => { OptionsMenuFunctions.searchKeyboardTilt = v; OptionsMenuFunctions.SetSearchKeyboardTilt(v); },
+                    0f, 90f, 1f, 30f, "N0",
+                    "Rotation of the search keyboard around the X axis");
+                OptionsMenuClone.AddRow(searchKeyboardPosZSlider, searchKeyboardTiltSlider);
             }),
 
             new OptionsCategory("opt_data", "Data", () =>
