@@ -59,6 +59,7 @@ namespace ExScoringMod
             public string difficulty;
             public string scoringCalculation;
             public long unixTimestamp;
+            public bool failed;
             public ExCueSaveData[] exCues;
         }
 

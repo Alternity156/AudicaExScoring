@@ -65,7 +65,7 @@ namespace ExScoringMod
 
                 if (i < results.Count)
                 {
-                    SetHistoryItem(item, results[i]);
+                    SetHistoryItem(item, results[i], i);
                     item.gameObject.SetActive(true);
 
                     historyHitboxRuns[i] = results[i];
@@ -75,6 +75,7 @@ namespace ExScoringMod
                 {
                     item.gameObject.SetActive(false);
                     historyHitboxRuns.Remove(i);
+                    ClearRowGradeVisual(i);
                 }
             }
 
@@ -85,7 +86,7 @@ namespace ExScoringMod
         }
 
         // Placeholder formatting — score/percent/info text is easy to retune once we see it in-game.
-        private static void SetHistoryItem(SongInfoHistoryItem item, RecalculatedRun run)
+        private static void SetHistoryItem(SongInfoHistoryItem item, RecalculatedRun run, int slot)
         {
             if (item.date != null)
                 item.date.text = DateTimeOffset.FromUnixTimeSeconds(run.unixTimestamp).LocalDateTime.ToString("MMM d, yyyy");
@@ -100,7 +101,24 @@ namespace ExScoringMod
                 item.percent.text = $"{run.judgementPercent:0.00}%";
 
             if (item.info != null)
-                item.info.text = run.fullCombo ? "Full Combo" : $"{run.missCount} Miss" + (run.missCount != 1 ? "es" : "");
+            {
+                Grade grade = GetGrade(run.judgementPercent, run.failed);
+                item.info.gameObject.SetActive(true);
+
+                if (IsStarGrade(grade))
+                {
+                    // Clear the text and grow the mini star visual as a child of this same
+                    // transform instead — keeps info active as an anchor point.
+                    item.info.text = "";
+                    CreateOrUpdateRowGradeVisual(slot, item.info.transform, grade);
+                }
+                else
+                {
+                    ClearRowGradeVisual(slot);
+                    item.info.text = GetGradeText(grade);
+                    item.info.color = GetGradeColor(grade);
+                }
+            }
 
             // No per-run star rating exists yet in our data — hide rather than show something wrong.
             if (item.stars != null)

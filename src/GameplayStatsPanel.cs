@@ -26,7 +26,7 @@ namespace ExScoringMod
                 $"{run.songId} ({run.difficulty})");
             if (panel == null) return;
 
-            BuildGameplayStatsContent(panel, run.exCues, run.judgementPercent);
+            BuildGameplayStatsContent(panel, run.exCues, run.judgementPercent, run.failed);
         }
 
         /// <summary>
@@ -43,9 +43,9 @@ namespace ExScoringMod
         private const float ResultsScreenScaleMultiplier = 33.333333f;
         private const float ResultsScreenYOffset = 616.667f;
 
-        private static void ShowGameplayStatsPanelOnResultsScreen(Transform resultsPanelParent, List<ExCue> cuesToShow, float judgementPercent)
+        private static void ShowGameplayStatsPanelOnResultsScreen(Transform resultsPanelParent, List<ExCue> cuesToShow, float judgementPercent, bool failed)
         {
-            BuildGameplayStatsContent(resultsPanelParent, cuesToShow, judgementPercent, ResultsScreenScaleMultiplier, ResultsScreenYOffset);
+            BuildGameplayStatsContent(resultsPanelParent, cuesToShow, judgementPercent, failed, ResultsScreenScaleMultiplier, ResultsScreenYOffset);
         }
 
         /// <summary>
@@ -55,7 +55,7 @@ namespace ExScoringMod
         /// results screen (ShellPanel_Center, needs scaleMultiplier and yOffset to compensate for
         /// its much smaller local unit scale and different vertical anchor).
         /// </summary>
-        private static void BuildGameplayStatsContent(Transform parent, List<ExCue> cuesToShow, float judgementPercent, float scaleMultiplier = 1f, float yOffset = 0f)
+        private static void BuildGameplayStatsContent(Transform parent, List<ExCue> cuesToShow, float judgementPercent, bool failed, float scaleMultiplier = 1f, float yOffset = 0f)
         {
             CreateTimingGraph(parent, cuesToShow);
             if (scaleMultiplier != 1f && timingGraphObject != null)
@@ -104,6 +104,14 @@ namespace ExScoringMod
             var scoreLabel = CreateTimingLabel(parent, "ExScoreDisplay (Clone)", new Vector3(35f, -0.5f, 0f) * scaleMultiplier + new Vector3(0f, yOffset, 0f), Color.white, TextAlignmentOptions.Left);
             scoreLabel.text = $"Score: {judgementPercent:0.##}%";
             scoreLabel.transform.localScale = new Vector3(4f, 4f, 4f) * scaleMultiplier;
+
+            CreateGradeVisual(parent, judgementPercent, failed);
+            if (scaleMultiplier != 1f && gradeVisualObject != null)
+            {
+                gradeVisualObject.transform.localPosition *= scaleMultiplier;
+                gradeVisualObject.transform.localScale *= scaleMultiplier;
+            }
+            gradeVisualObject.transform.localPosition += new Vector3(0f, yOffset, 0f);
         }
     }
 }

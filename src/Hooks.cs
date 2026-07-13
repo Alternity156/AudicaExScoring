@@ -771,7 +771,7 @@ namespace ExScoringMod
                         ? $"{selectedSongData.title} ({KataConfig.I.GetDifficulty()})"
                         : "Results";
 
-                    ShowGameplayStatsPanelOnResultsScreen(parent, exCues, GetCurrentMaxPossibleJudgementPercentage());
+                    ShowGameplayStatsPanelOnResultsScreen(parent, exCues, GetCurrentMaxPossibleJudgementPercentage(), currentRunFailed);
 
                     return false;
                 }
@@ -812,9 +812,11 @@ namespace ExScoringMod
         {
             public static void Postfix(SongEnd __instance, bool failed)
             {
+                currentRunFailed = failed;
+
                 if (!failed || Config.SaveFailedRunData)
                 {
-                    SaveRunData();
+                    SaveRunData(failed);
                 }
             }
         }

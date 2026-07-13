@@ -33,7 +33,7 @@ namespace ExScoringMod
         /// Saves the current run's raw ExCue data to its own gzip-compressed JSON file.
         /// Safe to call multiple times per run; only writes once (see runSaved).
         /// </summary>
-        public static void SaveRunData()
+        public static void SaveRunData(bool failed = false)
         {
             if (!Config.EnableRunDataSaving) return;
             if (runSaved) return;
@@ -63,6 +63,7 @@ namespace ExScoringMod
                     difficulty = KataConfig.I.GetDifficulty().ToString(),
                     scoringCalculation = Config.LinearCalculation ? "Linear" : "Audica",
                     unixTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
+                    failed = failed,
                     exCues = slimCues
                 };
 

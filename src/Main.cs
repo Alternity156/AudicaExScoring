@@ -35,6 +35,7 @@ namespace ExScoringMod
         public static bool exTypePurple = true;
         public static List<UnprocessedTargetHitPos> unprocessedTargetHitPoses = new List<UnprocessedTargetHitPos>();
         public static bool runSaved = false;
+        public static bool currentRunFailed = false;
 
         private static Dictionary<int, List<(float aimScore, Vector3 intersectionPoint)>> pendingAimResults = new Dictionary<int, List<(float, Vector3)>>();
 
@@ -471,6 +472,7 @@ namespace ExScoringMod
                 SongRequestIntegration.LogSnapshot();
 
             TrippyMenu.Tick();
+            TickGradeVisualAnimation();
         }
 
         public override void OnLateUpdate()

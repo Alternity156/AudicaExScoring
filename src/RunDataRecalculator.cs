@@ -30,6 +30,7 @@ namespace ExScoringMod
 
             public int missCount;
             public bool fullCombo;
+            public bool failed;
 
             /// <summary>
             /// Reconstructed per-cue list, same shape as live ExCue, so it can be handed directly
@@ -260,6 +261,7 @@ namespace ExScoringMod
                 maxJudgementScore = maxJudgementScore,
                 missCount = missCount,
                 fullCombo = missCount == 0,
+                failed = data.failed,
                 exCues = exCues
             };
         }

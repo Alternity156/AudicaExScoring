@@ -204,6 +204,8 @@
     <Compile Include="src\FolderRowManager.cs" />
     <Compile Include="src\GameplayStatsPanel.cs" />
     <Compile Include="src\GlobalOptions.cs" />
+    <Compile Include="src\GradeDisplay.cs" />
+    <Compile Include="src\GradeSystem.cs" />
     <Compile Include="src\LaunchPanelVisibility.cs" />
     <Compile Include="src\MarathonSetup.cs" />
     <Compile Include="src\ModifiersPage.cs" />
