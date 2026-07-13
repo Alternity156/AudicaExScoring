@@ -101,5 +101,62 @@ namespace ExScoringMod
             HandTypeCache.Remove(target.GetInstanceID());
             DefaultChainColors.Remove(target.chainLine != null ? target.chainLine.GetInstanceID() : -1);
         }
+
+        /// <summary>
+        /// Mirrors the chain's own current reveal ("travel") and glow shader
+        /// values onto the arrow's material, by reading them straight off the
+        /// chain's material and copying them via the shared property IDs
+        /// (Target.mChainTravelProperty.mID / mChainGlowProperty.mID). We do
+        /// NOT call MaterialFloatPropertyUpdater.UpdateValue here -- it appears
+        /// to be a stateful/damped updater (it has an internal mValue field),
+        /// and the game's own UpdateChainLineAnim already calls it once per
+        /// frame for the chain. Calling it a second time for the arrow would
+        /// double-step that internal damping, which is what caused the arrow
+        /// to visibly race ahead of the chain's real reveal on long lead-in
+        /// windows (isolated chains / the first link in a sequence). Reading
+        /// the already-updated value straight from the chain's material and
+        /// copying it avoids touching that state a second time.
+        /// </summary>
+        public static void SyncRevealAnimation(Target target, LineRenderer arrow, LineRenderer chain)
+        {
+            if (arrow == null || chain == null)
+                return;
+
+            var travelProp = target.mChainTravelProperty;
+            var glowProp = target.mChainGlowProperty;
+
+            bool shouldLog = Time.frameCount % 30 == 0;
+
+            // UpdateValue appears to write through a MaterialPropertyBlock rather
+            // than the Material asset directly (reading chain.material.GetFloat
+            // always returned a frozen default, never the live animated value).
+            // Reusing two static blocks avoids allocating every call.
+            var chainBlock = sChainBlock ?? (sChainBlock = new MaterialPropertyBlock());
+            var arrowBlock = sArrowBlock ?? (sArrowBlock = new MaterialPropertyBlock());
+
+            chain.GetPropertyBlock(chainBlock);
+            arrow.GetPropertyBlock(arrowBlock);
+
+            if (travelProp != null)
+            {
+                float travelValue = chainBlock.GetFloat(travelProp.mID);
+                arrowBlock.SetFloat(travelProp.mID, travelValue);
+                if (shouldLog)
+                    MelonLoader.MelonLogger.Log($"[ChainArrow] travelValue(block)={travelValue}");
+            }
+
+            if (glowProp != null)
+            {
+                float glowValue = chainBlock.GetFloat(glowProp.mID);
+                arrowBlock.SetFloat(glowProp.mID, glowValue);
+                if (shouldLog)
+                    MelonLoader.MelonLogger.Log($"[ChainArrow] glowValue(block)={glowValue}");
+            }
+
+            arrow.SetPropertyBlock(arrowBlock);
+        }
+
+        private static MaterialPropertyBlock sChainBlock;
+        private static MaterialPropertyBlock sArrowBlock;
     }
 }

@@ -1387,6 +1387,8 @@ namespace ExScoringMod
                 if (arrow == null)
                     return;
 
+                ChainArrow.SyncRevealAnimation(__instance, arrow, chain);
+
                 Vector3 mid = (p0 + p1) * 0.5f;
                 Vector3 perp = Vector3.Cross(dir, __instance.transform.forward).normalized;
 
