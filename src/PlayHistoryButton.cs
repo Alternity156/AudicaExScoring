@@ -24,7 +24,7 @@ namespace ExScoringMod
         // adjust its Transform's Local Position / Local Scale live until it lines up with the row's
         // visible text, then report the numbers back so they can be hardcoded here as defaults.
         private static Vector3 historyHitboxLocalPosition = new Vector3(275f, -12f, 0f);
-        private static Vector3 historyHitboxLocalScale = new Vector3(19.5f, 10f, 1f);
+        private static Vector3 historyHitboxLocalScale = new Vector3(19.5f, 8.75f, 1f);
 
         /// <summary>Same recursive name search as VirtualSongList.FindChild, duplicated locally
         /// since that one's private to VirtualSongList.</summary>

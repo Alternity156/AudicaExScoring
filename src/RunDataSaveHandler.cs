@@ -194,6 +194,14 @@ namespace ExScoringMod
 
             if (cue.miss)
             {
+                if (cue.behavior == Target.TargetBehavior.Chain)
+                {
+                    // Chart-structural, not performance-derived — needs to be saved even on a
+                    // miss so recalculation can still tell a missed chain tail apart from a
+                    // missed mid-chain link (see GetMaxJudgementScoreForSavedCue).
+                    data.isChainTail = cue.isChainTail;
+                }
+
                 if (cue.hasMissAimData)
                 {
                     data.hasMissAimData = true;

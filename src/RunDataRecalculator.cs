@@ -115,12 +115,76 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// Legacy-repair fallback: older saved runs never wrote isChainTail for a missed Chain
+        /// cue (fixed in BuildExCueSaveData), so it's not recoverable from the file itself. This
+        /// rebuilds tick -> isChainTail (cue.chainNext == null) from the live chart as a best-effort
+        /// substitute for exactly that gap. Returns an empty lookup (never throws) if the song is
+        /// no longer installed, the difficulty string doesn't parse, or anything else goes wrong —
+        /// callers treat a miss here the same as before this fix existed.
+        /// </summary>
+        private static Dictionary<float, bool> BuildChainTailLookup(string songId, string difficultyStr)
+        {
+            var lookup = new Dictionary<float, bool>();
+
+            try
+            {
+                if (!Enum.TryParse(difficultyStr, out KataConfig.Difficulty difficulty)) return lookup;
+
+                var songData = SongList.I.GetSong(songId);
+                if (songData == null) return lookup;
+
+                var cues = SongCues.GetCues(songData, difficulty);
+
+                // Confirmed via live testing: a cold GetCues() call (i.e. outside an active
+                // gameplay session, like from this history screen) returns cues whose chainNext
+                // is never populated — it's only assigned as a side effect of HookUpChains,
+                // which normally only runs during gameplay setup. Without calling it here first,
+                // every Chain cue's chainNext reads null, not just true tails, which silently
+                // resolves every ambiguous cue as a tail instead of just the real one.
+                SongCues.HookUpChains(cues);
+
+                foreach (SongCues.Cue cue in cues)
+                {
+                    if (cue.behavior == Target.TargetBehavior.Chain)
+                    {
+                        lookup[cue.tick] = cue.chainNext == null;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Log($"[ExScoring] Failed to build chain-tail lookup for {songId}/{difficultyStr}: {ex}");
+            }
+
+            return lookup;
+        }
+
+        /// <summary>
+        /// Tolerant tick lookup into a chain-tail table — saved ticks are the same floats the
+        /// chart already had, but a small epsilon guards against any float round-tripping through
+        /// JSON. Falls back to false (old buggy behavior) if the tick can't be resolved at all.
+        /// </summary>
+        private static bool ResolveIsChainTail(Dictionary<float, bool> chainTailLookup, float tick)
+        {
+            if (chainTailLookup.TryGetValue(tick, out bool exact)) return exact;
+
+            const float epsilon = 0.01f;
+            foreach (var kvp in chainTailLookup)
+            {
+                if (Math.Abs(kvp.Key - tick) < epsilon) return kvp.Value;
+            }
+
+            return false;
+        }
+
+        /// <summary>
         /// Rebuilds a live-shaped ExCue list from saved raw cue data, deriving timing/aim/chain
         /// judgements purely from numbers already on disk. Missed cues (which only save
         /// behavior/handType/tick/health/miss — see BuildExCueSaveData) are marked Miss outright
-        /// rather than left at the enum's default value.
+        /// rather than left at the enum's default value. chainTailLookup is only consulted for
+        /// missed Chain cues whose saved.isChainTail is absent (pre-fix saves).
         /// </summary>
-        private static List<ExCue> RecalculateExCues(ExCueSaveData[] savedCues)
+        private static List<ExCue> RecalculateExCues(ExCueSaveData[] savedCues, Dictionary<float, bool> chainTailLookup)
         {
             var result = new List<ExCue>(savedCues.Length);
 
@@ -140,6 +204,11 @@ namespace ExScoringMod
                     cue.timingJudgement = Judgement.Miss;
                     cue.aimJudgement = Judgement.Miss;
                     cue.chainJudgement = Judgement.Miss;
+
+                    if (saved.behavior == Target.TargetBehavior.Chain)
+                    {
+                        cue.isChainTail = saved.isChainTail ?? ResolveIsChainTail(chainTailLookup, saved.tick);
+                    }
 
                     // A miss can still carry a real recorded aim attempt (player aimed near the
                     // target but failed for other reasons — wrong hand, bad timing, etc.) — this is
@@ -245,10 +314,15 @@ namespace ExScoringMod
             }
         }
 
-        /// <summary>Recalculates one saved run's judgement stats from raw disk data.</summary>
-        public static RecalculatedRun Recalculate(ScoreSaveData data, string sourceFileName)
+        /// <summary>
+        /// Recalculates one saved run's judgement stats from raw disk data. chainTailLookup is
+        /// the legacy-repair fallback from BuildChainTailLookup — pass an empty dictionary if
+        /// you know the run predates none of it, or the shared one built once per song+difficulty
+        /// in LoadHistoryForSong.
+        /// </summary>
+        public static RecalculatedRun Recalculate(ScoreSaveData data, string sourceFileName, Dictionary<float, bool> chainTailLookup)
         {
-            List<ExCue> exCues = RecalculateExCues(data.exCues ?? new ExCueSaveData[0]);
+            List<ExCue> exCues = RecalculateExCues(data.exCues ?? new ExCueSaveData[0], chainTailLookup);
             SumJudgementScore(exCues, out float judgementScore, out float maxJudgementScore, out int missCount);
 
             return new RecalculatedRun
@@ -276,6 +350,10 @@ namespace ExScoringMod
             List<FileInfo> files = ListRunFiles(songId, difficulty);
             List<RecalculatedRun> results = new List<RecalculatedRun>(files.Count);
 
+            // Built once for the whole batch — every file here shares the same songId+difficulty,
+            // and it's only ever consulted for legacy saves missing isChainTail (see ResolveIsChainTail).
+            Dictionary<float, bool> chainTailLookup = BuildChainTailLookup(songId, difficulty);
+
             const int batchSize = 3;
             int processedThisFrame = 0;
 
@@ -286,7 +364,7 @@ namespace ExScoringMod
                     ScoreSaveData data = LoadRunData(file);
                     if (data != null)
                     {
-                        results.Add(Recalculate(data, file.Name));
+                        results.Add(Recalculate(data, file.Name, chainTailLookup));
                     }
                 }
                 catch (Exception ex)
