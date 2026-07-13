@@ -193,6 +193,13 @@ namespace ExScoringMod
 
             if (cue.miss)
             {
+                if (cue.hasMissAimData)
+                {
+                    data.hasMissAimData = true;
+                    data.intersectionPoint = new Vector3Data(cue.intersectionPoint);
+                    data.contactPos = new Vector3Data(cue.contactPos);
+                    data.contactRotation = new QuaternionData(cue.contactRotation);
+                }
                 return data;
             }
 
@@ -201,6 +208,7 @@ namespace ExScoringMod
                 data.timingMs = cue.timingMs;
                 data.intersectionPoint = new Vector3Data(cue.intersectionPoint);
                 data.contactPos = new Vector3Data(cue.contactPos);
+                data.contactRotation = new QuaternionData(cue.contactRotation);
                 data.aimAssist = cue.aimAssist;
             }
 

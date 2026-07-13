@@ -1,11 +1,22 @@
 ﻿using MelonLoader;
 using System.Collections.Generic;
 using System.Linq;
+using UnityEngine;
 
 namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
+        // Fixed horizontal offset (TMP <pos> tag, in the text's own local units) where every row's
+        // count/total starts — gives real column alignment regardless of how long each judgement
+        // name is, unlike relying on a monospace font. Matches the aligned-column look of ITG-style
+        // results screens. Not tunable live via UnityExplorer since it's baked into the string, not
+        // a transform — adjust the numberPos value directly here if it needs nudging for your font.
+        private static string FormatJudgementRow(string label, Color color, int count, int total, float numberPos = 25f)
+        {
+            return $"{Colorize(label, color)}<pos={numberPos}>{count}/{total}\n";
+        }
+
         public static string GetTimingJudgementString(List<ExCue> exCues)
         {
             var relevant = exCues.Where(c =>
@@ -20,19 +31,18 @@ namespace ExScoringMod
             int good = relevant.Count(c => c.timingJudgement == Judgement.Good);
 
             return $"Timing\n" +
-                   $"{Colorize("Impeccable", GetJudgementColor(Judgement.Impeccable))}: {impeccable}/{total}\n" +
-                   $"{Colorize("Fantastic", GetJudgementColor(Judgement.Fantastic))}: {fantastic}/{total}\n" +
-                   $"{Colorize("Excellent", GetJudgementColor(Judgement.Excellent))}: {excellent}/{total}\n" +
-                   $"{Colorize("Great", GetJudgementColor(Judgement.Great))}: {great}/{total}\n" +
-                   $"{Colorize("Good", GetJudgementColor(Judgement.Good))}: {good}/{total}\n";
+                   FormatJudgementRow("Impeccable", GetJudgementColor(Judgement.Impeccable), impeccable, total) +
+                   FormatJudgementRow("Fantastic", GetJudgementColor(Judgement.Fantastic), fantastic, total) +
+                   FormatJudgementRow("Excellent", GetJudgementColor(Judgement.Excellent), excellent, total) +
+                   FormatJudgementRow("Great", GetJudgementColor(Judgement.Great), great, total) +
+                   FormatJudgementRow("Good", GetJudgementColor(Judgement.Good), good, total);
         }
 
         public static string GetAimJudgementString(List<ExCue> exCues)
         {
             var relevant = exCues.Where(c =>
                 c.behavior != Target.TargetBehavior.Chain &&
-                c.behavior != Target.TargetBehavior.Melee &&
-                !c.miss).ToList();
+                c.behavior != Target.TargetBehavior.Melee).ToList();
 
             int total = relevant.Count;
             int impeccable = relevant.Count(c => c.aimJudgement == Judgement.Impeccable);
@@ -42,11 +52,11 @@ namespace ExScoringMod
             int good = relevant.Count(c => c.aimJudgement == Judgement.Good);
 
             return $"Aim\n" +
-                   $"{Colorize("Impeccable", GetJudgementColor(Judgement.Impeccable))}: {impeccable}/{total}\n" +
-                   $"{Colorize("Fantastic", GetJudgementColor(Judgement.Fantastic))}: {fantastic}/{total}\n" +
-                   $"{Colorize("Excellent", GetJudgementColor(Judgement.Excellent))}: {excellent}/{total}\n" +
-                   $"{Colorize("Great", GetJudgementColor(Judgement.Great))}: {great}/{total}\n" +
-                   $"{Colorize("Good", GetJudgementColor(Judgement.Good))}: {good}/{total}\n";
+                   FormatJudgementRow("Impeccable", GetJudgementColor(Judgement.Impeccable), impeccable, total) +
+                   FormatJudgementRow("Fantastic", GetJudgementColor(Judgement.Fantastic), fantastic, total) +
+                   FormatJudgementRow("Excellent", GetJudgementColor(Judgement.Excellent), excellent, total) +
+                   FormatJudgementRow("Great", GetJudgementColor(Judgement.Great), great, total) +
+                   FormatJudgementRow("Good", GetJudgementColor(Judgement.Good), good, total);
         }
 
         public static string GetChainJudgementString(List<ExCue> exCues)
@@ -64,11 +74,11 @@ namespace ExScoringMod
             int good = relevant.Count(c => c.chainJudgement == Judgement.Good);
 
             return $"Chain\n" +
-                   $"{Colorize("Impeccable", GetJudgementColor(Judgement.Impeccable))}: {impeccable}/{total}\n" +
-                   $"{Colorize("Fantastic", GetJudgementColor(Judgement.Fantastic))}: {fantastic}/{total}\n" +
-                   $"{Colorize("Excellent", GetJudgementColor(Judgement.Excellent))}: {excellent}/{total}\n" +
-                   $"{Colorize("Great", GetJudgementColor(Judgement.Great))}: {great}/{total}\n" +
-                   $"{Colorize("Good", GetJudgementColor(Judgement.Good))}: {good}/{total}\n";
+                   FormatJudgementRow("Impeccable", GetJudgementColor(Judgement.Impeccable), impeccable, total) +
+                   FormatJudgementRow("Fantastic", GetJudgementColor(Judgement.Fantastic), fantastic, total) +
+                   FormatJudgementRow("Excellent", GetJudgementColor(Judgement.Excellent), excellent, total) +
+                   FormatJudgementRow("Great", GetJudgementColor(Judgement.Great), great, total) +
+                   FormatJudgementRow("Good", GetJudgementColor(Judgement.Good), good, total);
         }
 
         public static string GetMiscString(List<ExCue> exCues)
@@ -91,9 +101,9 @@ namespace ExScoringMod
             int miss = relevant.Count(c => c.miss == true);
             int total = relevant.Count;
 
-            return $"Hold:  {fullHolds}/{totalHolds}\n" +
-                   $"Melee: {hitMelee}/{totalMelee}\n" +
-                   $"{Colorize("Miss", GetJudgementColor(Judgement.Miss))}: {miss}/{total}";
+            return FormatJudgementRow("Hold", Color.white, fullHolds, totalHolds) +
+                   FormatJudgementRow("Melee", Color.white, hitMelee, totalMelee) +
+                   FormatJudgementRow("Miss", GetJudgementColor(Judgement.Miss), miss, total);
         }
     }
 }

@@ -115,8 +115,8 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(ShowStatsOnFail), false, "Shows the stats screen after failing a song instead of the fail screen");
 
             MelonPrefs.RegisterString(Category, nameof(dataHeader), "", "[Header]Data");
-            MelonPrefs.RegisterBool(Category, nameof(EnableRunDataSaving), false, "Saves raw scoring data for each run to disk, for external recalculation/analysis");
-            MelonPrefs.RegisterInt(Category, nameof(MaxRunsPerSong), 10, "Sets how many run data files are kept per song, per difficulty [1,50,1,10] {G}");
+            MelonPrefs.RegisterBool(Category, nameof(EnableRunDataSaving), true, "Saves raw scoring data for each run to disk, for external recalculation/analysis");
+            MelonPrefs.RegisterInt(Category, nameof(MaxRunsPerSong), 50, "Sets how many run data files are kept per song, per difficulty [1,50,1,50] {G}");
             MelonPrefs.RegisterFloat(Category, nameof(MaxRunDataSizeMB), 100f, "Sets the max total disk space (MB) run data files can use [10,2000,10,100] {G}");
             MelonPrefs.RegisterBool(Category, nameof(SaveFailedRunData), false, "Also saves run data for failed songs (requires Save Run Data)");
 

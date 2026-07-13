@@ -194,6 +194,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="src\AimGraph.cs" />
     <Compile Include="src\ChainArrow.cs" />
     <Compile Include="src\AddPlaylistButton.cs" />
     <Compile Include="src\AlbumArt.cs" />
@@ -201,12 +202,15 @@
     <Compile Include="src\EitherHandFix.cs" />
     <Compile Include="src\FavoriteStore.cs" />
     <Compile Include="src\FolderRowManager.cs" />
+    <Compile Include="src\GameplayStatsPanel.cs" />
     <Compile Include="src\GlobalOptions.cs" />
     <Compile Include="src\LaunchPanelVisibility.cs" />
     <Compile Include="src\MarathonSetup.cs" />
     <Compile Include="src\ModifiersPage.cs" />
     <Compile Include="src\OptionsMenuClone.cs" />
     <Compile Include="src\OptionsMenuFunctions.cs" />
+    <Compile Include="src\PlayHistoryButton.cs" />
+    <Compile Include="src\PlayHistoryUI.cs" />
     <Compile Include="src\PlaylistConfig.cs" />
     <Compile Include="src\PlaylistDownloadManager.cs" />
     <Compile Include="src\PlaylistEndlessManager.cs" />
@@ -237,6 +241,7 @@
     <Compile Include="src\RandomSong.cs" />
     <Compile Include="src\RandomSongButton.cs" />
     <Compile Include="src\RefreshButton.cs" />
+    <Compile Include="src\RunDataRecalculator.cs" />
     <Compile Include="src\RunDataSaveHandler.cs" />
     <Compile Include="src\SearchKeyboard.cs" />
     <Compile Include="src\SongDownloader.cs" />
@@ -253,7 +258,9 @@
     <Compile Include="src\SongSearch.cs" />
     <Compile Include="src\SongSearchField.cs" />
     <Compile Include="src\SongSearchMenu.cs" />
+    <Compile Include="src\SongTimelineGraph.cs" />
     <Compile Include="src\TargetIcons.cs" />
+    <Compile Include="src\TimingGraph.cs" />
     <Compile Include="src\TrippyMenu.cs" />
     <Compile Include="src\UI.cs" />
     <Compile Include="src\Utils.cs" />

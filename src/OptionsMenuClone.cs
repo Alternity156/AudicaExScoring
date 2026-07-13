@@ -19,6 +19,46 @@ namespace ExScoringMod
         internal static ShellPage SongShellPage;
         internal static OptionsMenu Menu;
 
+        /// <summary>Temporarily moves the shared clone (world space) — call RestoreDefaultPlacement()
+        /// to put it back before showing it for its normal Options usage.</summary>
+        public static void SetOverridePosition(Vector3 position, Vector3 eulerAngles)
+        {
+            if (cloneRoot == null) return;
+            cloneRoot.transform.position = position;
+            cloneRoot.transform.eulerAngles = eulerAngles;
+        }
+
+        /// <summary>
+        /// Re-parents the clone under the live song page (via a fresh "menu" lookup each time,
+        /// never a cached reference — a reference captured when the clone was originally built could
+        /// itself become invalid later). Needed to regain the song page's "shootable" interactivity
+        /// for normal Options-menu usage, in case anything else has moved the clone elsewhere.
+        /// </summary>
+        public static void RestoreDefaultPlacement()
+        {
+            if (cloneRoot == null) return;
+
+            GameObject menuRoot = GameObject.Find("menu");
+            if (menuRoot == null) { MelonLogger.Log("[Options] RestoreDefaultPlacement: 'menu' root not found"); return; }
+
+            Transform songPage = menuRoot.transform.Find("ShellPage_Song/page");
+            Transform launchCenter = menuRoot.transform.Find(LaunchCenterPath);
+            if (songPage == null || launchCenter == null)
+            {
+                MelonLogger.Log($"[Options] RestoreDefaultPlacement: refs missing (songPage={(songPage != null)}, launchCenter={(launchCenter != null)})");
+                return;
+            }
+
+            cloneRoot.transform.SetParent(songPage, false);
+            cloneRoot.transform.localPosition = new Vector3(10.5f, 9.25f, 24f);
+            cloneRoot.transform.rotation = launchCenter.rotation;
+            Vector3 ls = launchCenter.lossyScale, ps = songPage.lossyScale;
+            cloneRoot.transform.localScale = new Vector3(
+                ps.x != 0 ? ls.x / ps.x : ls.x,
+                ps.y != 0 ? ls.y / ps.y : ls.y,
+                ps.z != 0 ? ls.z / ps.z : ls.z);
+        }
+
         /// <summary>Build the clone once. Returns false (and logs why) if a source isn't found yet.</summary>
         public static bool EnsureClone()
         {
@@ -57,6 +97,7 @@ namespace ExScoringMod
                     ps.x != 0 ? ls.x / ps.x : ls.x,
                     ps.y != 0 ? ls.y / ps.y : ls.y,
                     ps.z != 0 ? ls.z / ps.z : ls.z);
+
                 MelonLogger.Log($"[Options] clone under song page, placed at world {launchCenter.position}");
             }
             else
@@ -64,13 +105,115 @@ namespace ExScoringMod
                 MelonLogger.Log($"[Options] placement refs missing (songPage={(songPage != null)}, launchCenter={(launchCenter != null)})");
             }
 
+            // Detach from the "menu" hierarchy entirely (preserving current world position/rotation/
+            // scale) and mark it to survive scene changes. Confirmed via log timeline that leaving it
+            // parented under songPage/"menu" gets it destroyed the moment a song actually starts —
+            // "menu" (or songPage within it) appears to get destroyed, not just deactivated, at that
+            // transition, and Unity cascades Destroy() down to children. That was silently nulling out
+            // cloneRoot/Menu, forcing a full rebuild attempt later on the results screen that then
+            // failed since "menu" no longer exists post-song at all.
+            cloneRoot.transform.SetParent(null, true);
+            GameObject.DontDestroyOnLoad(cloneRoot);
+
             cloneRoot.SetActive(false);
             MelonLogger.Log("[Options] clone created");
             return true;
         }
 
-        public static void Show() { if (cloneRoot != null) cloneRoot.SetActive(true); }
+        public static void Show()
+        {
+            if (cloneRoot == null) return;
+            cloneRoot.transform.localRotation = Quaternion.identity;
+            cloneRoot.SetActive(true);
+        }
         public static void Hide() { if (cloneRoot != null) cloneRoot.SetActive(false); }
+
+        // ── Independent Play History panel ────────────────────────────────────────────────
+        // Completely separate GameObject from cloneRoot/Menu above. Sharing one clone between
+        // Play History and the real Options menu caused real bugs — Play History's overridden
+        // rotation and its graphs/labels were leaking onto the Options menu (and vice versa)
+        // since they were literally the same object. This is its own independent instance: own
+        // GameObject, own position, own rotation, own content, never touched by the Options-menu
+        // code path at all.
+        private static GameObject historyCloneRoot;
+
+        private static bool EnsureHistoryClone()
+        {
+            if (historyCloneRoot != null) return true;
+
+            GameObject menuRoot = GameObject.Find("menu");
+            if (menuRoot == null) { MelonLogger.Log("[Options] EnsureHistoryClone: 'menu' root not found"); return false; }
+
+            Transform src = menuRoot.transform.Find(SettingsCenterPath);
+            if (src == null) { MelonLogger.Log("[Options] EnsureHistoryClone: settings source not found"); return false; }
+
+            historyCloneRoot = GameObject.Instantiate(src.gameObject);
+            historyCloneRoot.name = "ExScoringHistoryPanel";
+            historyCloneRoot.hideFlags |= HideFlags.DontUnloadUnusedAsset;
+            historyCloneRoot.transform.SetParent(null, true);
+            GameObject.DontDestroyOnLoad(historyCloneRoot);
+            historyCloneRoot.SetActive(false);
+
+            MelonLogger.Log("[Options] history clone created");
+            return true;
+        }
+
+        /// <summary>
+        /// Shows the independent Play History panel at the given world position/rotation, with the
+        /// given title. Switches its own OptionsMenu instance to a blank Customization page and
+        /// clears its native rows first (otherwise it shows whatever real Settings content was
+        /// active on the source panel at the moment it was cloned). Matches its scale to
+        /// launchCenter's world scale (this clone is parentless, so localScale IS its world scale).
+        /// Returns the nested OptionsMenu's own transform (not the clone root) as the content
+        /// parent — graphs/labels were originally parented onto OptionsMenuClone.Menu.transform,
+        /// which may sit at its own offset from the clone root, so using the root instead made
+        /// everything land at the wrong position ("too low"). Clears any previously-added
+        /// "(Clone)"-tagged content from that same transform. Returns null if the clone couldn't be
+        /// built.
+        /// </summary>
+        public static Transform ShowHistoryPanel(Vector3 position, Vector3 eulerAngles, string title)
+        {
+            if (!EnsureHistoryClone()) return null;
+
+            GameObject menuRoot = GameObject.Find("menu");
+            Transform launchCenter = menuRoot != null ? menuRoot.transform.Find(LaunchCenterPath) : null;
+            if (launchCenter != null)
+            {
+                historyCloneRoot.transform.localScale = launchCenter.lossyScale;
+            }
+
+            historyCloneRoot.transform.position = position;
+            historyCloneRoot.transform.eulerAngles = eulerAngles;
+            historyCloneRoot.SetActive(true);
+
+            var menu = historyCloneRoot.GetComponentInChildren<OptionsMenu>(true);
+            if (menu != null)
+            {
+                menu.ShowPage(OptionsMenu.Page.Customization);
+                menu.mRows.Clear();
+                menu.scrollable.ClearRows();
+                menu.scrollable.mRows.Clear();
+                menu.scrollable.mIndex = 0;
+                menu.scrollable.destroyChildren = true;
+                if (menu.screenTitle != null) menu.screenTitle.text = title ?? "";
+            }
+
+            Transform contentParent = menu != null ? menu.transform : historyCloneRoot.transform;
+            for (int i = contentParent.childCount - 1; i >= 0; i--)
+            {
+                Transform child = contentParent.GetChild(i);
+                if (child.gameObject.name.Contains("(Clone)"))
+                    GameObject.DestroyImmediate(child.gameObject);
+            }
+
+            return contentParent;
+        }
+
+        public static void HideHistoryPanel()
+        {
+            if (historyCloneRoot != null) historyCloneRoot.SetActive(false);
+        }
+        // ── End independent Play History panel ────────────────────────────────────────────
 
         /// <summary>Reset to a blank custom page, set the title, then let the category emit rows.</summary>
         // in OptionsMenuClone.Draw, at the top and bottom

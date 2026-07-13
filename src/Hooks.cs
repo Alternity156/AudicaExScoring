@@ -314,6 +314,35 @@ namespace ExScoringMod
                     exCue.health = ScoreKeeper.I.GetHealth();
                     exCue.miss = true;
 
+                    // Without this, these default to Judgement.Impeccable (enum value 0, since
+                    // they're never otherwise assigned for a miss), silently inflating the
+                    // Impeccable count in every judgement breakdown. RunDataRecalculator.cs already
+                    // does this correctly for saved/reloaded runs — this brings the live path in
+                    // line with it.
+                    exCue.timingJudgement = Judgement.Miss;
+                    exCue.aimJudgement = Judgement.Miss;
+                    exCue.chainJudgement = Judgement.Miss;
+
+                    // If the player actually made an aim attempt near this target before it was
+                    // ultimately marked a failure (e.g. aimed at it but missed the timing/hand/
+                    // slop-window requirements), CalculateAim/FindBestIntersection would already
+                    // have recorded a position for it — same capture dictionaries used for
+                    // successful hits. Grab it here so misses can still be plotted on the aim graph,
+                    // in the direction the shot was actually made.
+                    if (resolvedIntersectionByIndex.TryGetValue(cue.index, out var missIntersection))
+                    {
+                        exCue.intersectionPoint = missIntersection;
+                        exCue.contactPos = cue.target != null ? cue.target.GetContactPosition() : Vector3.zero;
+                        exCue.contactRotation = firstContactRotationByIndex.TryGetValue(cue.index, out var missRotation)
+                            ? missRotation
+                            : Quaternion.identity;
+                        exCue.hasMissAimData = true;
+
+                        resolvedIntersectionByIndex.Remove(cue.index);
+                        firstContactRotationByIndex.Remove(cue.index);
+                        pendingAimResults.Remove(cue.index);
+                    }
+
                     processedCuesIndexes.Add(cue.index);
                     exCues.Add(exCue);
 
@@ -354,6 +383,15 @@ namespace ExScoringMod
             }
         }
 
+        // CONFIRMED via pointer-matched native/ours comparison: a Hold target's contact ROTATION
+        // changes as it visually spins in place during the hold (position stays fixed — already
+        // verified separately), so reading target.transform.rotation late (at hold-completion, when
+        // our exCue gets built) no longer matches the orientation native used at the true grab
+        // moment. Caching it here, in CalculateAim, sidesteps this — every CalculateAim call
+        // (including repeated ones from temporal aim-assist sampling) happens before Target.OnHit's
+        // Hold branch ever sets mIsSustaining/starts the spin, so any of them is safely pre-spin.
+        private static Dictionary<int, Quaternion> firstContactRotationByIndex = new Dictionary<int, Quaternion>();
+
         [HarmonyPatch(typeof(Gun), "CalculateAim", new Type[]
         {
             typeof(Target),
@@ -375,12 +413,47 @@ namespace ExScoringMod
 
                 int index = target.mCue.index;
 
+                if (!firstContactRotationByIndex.ContainsKey(index))
+                {
+                    firstContactRotationByIndex[index] = target.transform.rotation;
+                }
+
                 if (!pendingAimResults.ContainsKey(index))
                 {
                     pendingAimResults[index] = new List<(float, Vector3)>();
                 }
 
                 pendingAimResults[index].Add((__result, intersectionPoint));
+            }
+        }
+
+        // NEW APPROACH — Gun.FindBestIntersection is what actually SEARCHES mFirepointHistory
+        // (temporal aim-assist's history buffer) and outputs the final resolved intersection point
+        // directly, along with which history index won. This is likely what internally drives all
+        // those repeated CalculateAim calls (once per history candidate) — capturing its own output
+        // here gives us the unambiguous final answer without needing to match/guess at all, and
+        // without touching Target.OnHit (which caused the wrong-hand bug). There's already a
+        // working Prefix patch on this exact method elsewhere in the codebase (DisableTemporalAimAssist),
+        // so this hook point is proven safe.
+        private static Dictionary<int, Vector3> resolvedIntersectionByIndex = new Dictionary<int, Vector3>();
+
+        [HarmonyPatch(typeof(Gun), "FindBestIntersection")]
+        private static class FindBestIntersectionCapturePatch
+        {
+            private static void Postfix(
+                Gun __instance,
+                Target target,
+                float aimRadius,
+                bool temporalAssist,
+                ref Vector3 intersection,
+                ref int firepointHistoryIndex,
+                bool __result
+                )
+            {
+                if (!__result) return;
+                if (target == null || target.mCue == null) return;
+
+                resolvedIntersectionByIndex[target.mCue.index] = intersection;
             }
         }
 
@@ -444,12 +517,34 @@ namespace ExScoringMod
 
                         Vector3 finalIntersection = Vector3.zero;
 
-                        if (pendingAimResults.TryGetValue(cue.index, out var results))
+                        // NEW — prefer the value captured directly from Gun.FindBestIntersection's
+                        // own output, which is the unambiguous final answer native itself computed.
+                        // Falls back to the old approximate-matching approach only if unavailable.
+                        if (resolvedIntersectionByIndex.TryGetValue(cue.index, out var resolvedIntersection))
                         {
-                            var match = results.FirstOrDefault(r => Mathf.Approximately(r.aimScore, aim));
+                            finalIntersection = resolvedIntersection;
+                            resolvedIntersectionByIndex.Remove(cue.index);
+                            pendingAimResults.Remove(cue.index);
+                        }
+                        else if (pendingAimResults.TryGetValue(cue.index, out var results))
+                        {
+                            var exactMatches = results.Where(r => Mathf.Approximately(r.aimScore, aim)).ToList();
+                            var match = exactMatches.Count > 0
+                                ? exactMatches[0]
+                                : results.OrderByDescending(r => r.aimScore).First();
                             finalIntersection = match.intersectionPoint;
                             pendingAimResults.Remove(cue.index);
                         }
+
+                        // Use the ROTATION cached at CalculateAim time (pre-spin), not a live query —
+                        // confirmed via pointer-matched comparison that a Hold target's contact
+                        // rotation drifts as it visually spins during the hold, while its position
+                        // does not. Falls back to a live query if no cached entry exists (e.g. Melee/
+                        // Chain, which never go through CalculateAim the same way).
+                        Quaternion finalContactRotation = firstContactRotationByIndex.TryGetValue(cue.index, out var cachedRotation)
+                            ? cachedRotation
+                            : cue.target.transform.rotation;
+                        firstContactRotationByIndex.Remove(cue.index);
 
                         Judgement timingJudgement = GetTimingJudgement(timingMs);
                         Judgement aimJudgement = GetAimJudgement(cue.target, finalIntersection);
@@ -461,8 +556,9 @@ namespace ExScoringMod
                         exCue.timing = timing;
                         exCue.timingMs = timingMs;
                         exCue.aim = aim;
-                        exCue.targetHitPos = GetTargetHitPos(cue.target, finalIntersection);
                         exCue.contactPos = cue.target.GetContactPosition();
+                        exCue.contactRotation = finalContactRotation;
+                        exCue.targetHitPos = GetTargetHitPos(exCue.contactPos, exCue.contactRotation, finalIntersection);
                         exCue.intersectionPoint = finalIntersection;
                         exCue.health = ScoreKeeper.I.GetHealth();
                         exCue.velocity = cue.meleeVelocityAmount;
@@ -475,6 +571,7 @@ namespace ExScoringMod
 
                         processedCuesIndexes.Add(cue.index);
                         exCues.Add(exCue);
+
                         float exCueScore = GetExScoreForExCue(exCue);
 
                         float judgementCueScore = 0f;
@@ -613,39 +710,68 @@ namespace ExScoringMod
                     if (_hasRun) return false;
                     _hasRun = true;
 
-                    // Hide GameplayStats children except frame and header
-                    Transform t = __instance.transform;
-                    for (int i = 0; i < t.childCount; i++)
-                    {
-                        Transform child = t.GetChild(i);
-                        if (child.name != "frame" && child.name != "header")
-                            child.gameObject.SetActive(false);
-                    }
-
-                    // Hide siblings on ShellPanel_Center except what we want to keep
+                    // __instance.transform.parent is InGameUI/ShellPage_Results/page/ShellPanel_Center
+                    // (its children already included "GameplayStats"/"continue"/"Glass"/etc. per the
+                    // original sibling list below) — this is already active and in hand, so our panel
+                    // attaches directly onto it rather than via OptionsMenuClone (which depends on the
+                    // launch-menu hierarchy being active, which it isn't during gameplay/results).
                     Transform parent = __instance.transform.parent;
+
+                    // Hide everything under ShellPanel_Center except "continue", "Glass",
+                    // "SongAndDifficulty", and "highlights" — full replacement of the native results
+                    // stats breakdown with our own panel, while keeping the surrounding chrome.
                     for (int i = 0; i < parent.childCount; i++)
                     {
                         Transform sibling = parent.GetChild(i);
-                        if (sibling.name != "GameplayStats" &&
-                            sibling.name != "continue" &&
+                        if (sibling.name != "continue" &&
                             sibling.name != "Glass" &&
                             sibling.name != "SongAndDifficulty" &&
-                            sibling.name != "Reflector")
+                            sibling.name != "highlights")
                             sibling.gameObject.SetActive(false);
                     }
 
-                    Transform songAndDifficulty = parent.Find("SongAndDifficulty");
-                    TMP_Text original = songAndDifficulty.GetComponent<TMP_Text>();
-                    RectTransform originalRt = songAndDifficulty.GetComponent<RectTransform>();
+                    // Reposition/rescale the kept chrome to frame our panel instead of the native
+                    // stats layout it was originally sized for.
+                    Transform glass = parent.Find("Glass");
+                    if (glass != null)
+                    {
+                        glass.localPosition = new Vector3(0f, 290f, 0f);
+                        glass.localScale = new Vector3(650f, 840f, 1f);
+                    }
 
-                    int layer = songAndDifficulty.gameObject.layer;
+                    Transform highlightBottom = parent.Find("highlights/highlight_bottom");
+                    if (highlightBottom != null)
+                    {
+                        highlightBottom.localPosition = new Vector3(0.05f, -12f, 0.21f);
+                        highlightBottom.localScale = new Vector3(2.5f, 0.0798f, 3f);
+                    }
 
-                    CreateTextObject("ExTimingDisplay", GetTimingJudgementString(exCues), parent, layer, original, originalRt, new Vector3(-203, 290, 0), new Vector3(50, 50, 50));
-                    CreateTextObject("ExAimDisplay", GetAimJudgementString(exCues), parent, layer, original, originalRt, new Vector3(100, 290, 0), new Vector3(50, 50, 50));
-                    CreateTextObject("ExChainDisplay", GetChainJudgementString(exCues), parent, layer, original, originalRt, new Vector3(405, 290, 0), new Vector3(50, 50, 50));
-                    CreateTextObject("ExMiscDisplay", GetMiscString(exCues), parent, layer, original, originalRt, new Vector3(130, 465, 0), new Vector3(50, 50, 50));
-                    CreateTextObject("ExScoreDisplay", $"Score: {GetCurrentMaxPossibleJudgementPercentage()}%", parent, layer, original, originalRt, new Vector3(287, 548, 0), new Vector3(120, 120, 120), TextAlignmentOptions.Center);
+                    Transform highlightBottom2 = parent.Find("highlights/highlight_bottom (1)");
+                    if (highlightBottom2 != null)
+                    {
+                        highlightBottom2.localPosition = new Vector3(0.05f, 12.9f, 0.21f);
+                        highlightBottom2.localScale = new Vector3(2.5f, 0.0798f, 3f);
+                    }
+
+                    Transform highlightLeft = parent.Find("highlights/highlight_left");
+                    if (highlightLeft != null)
+                    {
+                        highlightLeft.localPosition = new Vector3(-9.75f, 0.55f, 0.21f);
+                        highlightLeft.localScale = new Vector3(3.17f, 0.08f, 1.74f);
+                    }
+
+                    Transform highlightRight = parent.Find("highlights/highlight_right");
+                    if (highlightRight != null)
+                    {
+                        highlightRight.localPosition = new Vector3(9.75f, 0.55f, 0.21f);
+                        highlightRight.localScale = new Vector3(3.17f, 0.08f, 1.74f);
+                    }
+
+                    string title = selectedSongData != null
+                        ? $"{selectedSongData.title} ({KataConfig.I.GetDifficulty()})"
+                        : "Results";
+
+                    ShowGameplayStatsPanelOnResultsScreen(parent, exCues, GetCurrentMaxPossibleJudgementPercentage());
 
                     return false;
                 }

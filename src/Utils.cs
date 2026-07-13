@@ -102,15 +102,17 @@ namespace ExScoringMod
             return chain;
         }
 
-        public static TargetHitPos GetTargetHitPos(Target target, Vector3 intersectionPoint)
+        public static TargetHitPos GetTargetHitPos(Vector3 contactPos, Quaternion contactRotation, Vector3 intersectionPoint)
         {
-            Vector3 targetPos = target.GetContactPosition();
-            Vector3 localPoint = intersectionPoint - targetPos;
+            Vector3 localPoint = intersectionPoint - contactPos;
 
+            // Confirmed against native GameplayStats.ReportTargetHit via matched tick+hand logging:
+            // native's X is the mirror of a naive right-axis dot product, and its values are already
+            // normalized to target-radius units (dividing by judgementGoodAimRadius reproduces it).
             return new TargetHitPos
             {
-                x = Vector3.Dot(localPoint, target.transform.right),
-                y = Vector3.Dot(localPoint, target.transform.up)
+                x = -Vector3.Dot(localPoint, contactRotation * Vector3.right) / judgementGoodAimRadius,
+                y = Vector3.Dot(localPoint, contactRotation * Vector3.up) / judgementGoodAimRadius
             };
         }
 

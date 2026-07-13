@@ -23,6 +23,8 @@ MenuGrabDisabler
 
 Grind-Mode
 
+ColoredChains
+
 ## Optional Dependencies
 [SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience) Required to show album art.
 
@@ -74,3 +76,7 @@ This mod uses code or concepts from other mods and software such as:
 [MenuGrabDisabler](https://github.com/Alternity156/MenuGrabDisabler) (Full mod support)
 
 [Grind-Mode](https://github.com/Contiinuum/Grind-Mode) (GameplayStats on Fail)
+
+[ColoredChains](https://github.com/octoberU/ColoredChains) (Full mod support)
+
+[Simply-Love-SM5](https://github.com/Simply-Love/Simply-Love-SM5) (Timing stats graph)

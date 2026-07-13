@@ -131,6 +131,22 @@ namespace ExScoringMod
         private static SongSelect songSelect;
         private static ShellScrollable scroller;
 
+        /// <summary>
+        /// The native song-row prefab (same one the header/action pools clone via StyleFolderQuad),
+        /// for other systems that need to clone its shootable "Quad" child. Lazily resolves
+        /// SongSelect if VirtualSongList hasn't been activated yet this session.
+        /// </summary>
+        public static GameObject SongItemPrefab
+        {
+            get
+            {
+                if (songSelect == null) songSelect = UnityEngine.Object.FindObjectOfType<SongSelect>();
+                return (songSelect != null && songSelect.songSelectItemPrefab != null)
+                    ? songSelect.songSelectItemPrefab.gameObject
+                    : null;
+            }
+        }
+
         public static ShellScrollable Scroller => scroller;
 
         private static Transform scrollParent;

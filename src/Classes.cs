@@ -17,6 +17,7 @@ namespace ExScoringMod
             public float aim;
             public TargetHitPos targetHitPos;
             public Vector3 contactPos;
+            public Quaternion contactRotation = Quaternion.identity;
             public Vector3 intersectionPoint;
             public float health;
             public float velocity;
@@ -25,6 +26,7 @@ namespace ExScoringMod
             public bool isChainTail = false;
             public float chainAverage;
             public bool miss = false;
+            public bool hasMissAimData = false;
             public ScoringCalculation scoringCalculation;
             public Judgement timingJudgement;
             public Judgement aimJudgement;
@@ -92,6 +94,29 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// Plain, non-Unity Quaternion for clean JSON serialization.
+        /// </summary>
+        public class QuaternionData
+        {
+            public float x;
+            public float y;
+            public float z;
+            public float w;
+
+            public QuaternionData() { }
+
+            public QuaternionData(Quaternion q)
+            {
+                x = q.x;
+                y = q.y;
+                z = q.z;
+                w = q.w;
+            }
+
+            public Quaternion ToQuaternion() => new Quaternion(x, y, z, w);
+        }
+
+        /// <summary>
         /// Slim per-target record written to disk. Non-universal fields are nullable
         /// and only populated when relevant to the cue's behavior (see BuildExCueSaveData),
         /// so JsonSerializerSettings.NullValueHandling.Ignore drops them from the output.
@@ -105,11 +130,13 @@ namespace ExScoringMod
             public float tick;
             public float health;
             public bool miss;
+            public bool? hasMissAimData;
 
             // Standard / Vertical / Horizontal / ChainStart / Hold
             public float? timingMs;
             public Vector3Data intersectionPoint;
             public Vector3Data contactPos;
+            public QuaternionData contactRotation;
             public float? aimAssist;
 
             // Hold only

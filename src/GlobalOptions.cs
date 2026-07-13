@@ -601,6 +601,7 @@ namespace ExScoringMod
             }
 
             ModifiersPage.Hide();
+            OptionsMenuClone.RestoreDefaultPlacement();
             OptionsMenuClone.Show();
 
             if (cat.NativePage.HasValue)
