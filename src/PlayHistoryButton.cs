@@ -4,6 +4,7 @@ using Harmony;
 using MelonLoader;
 using UnityEngine;
 using UnityEngine.Events;
+using UnityEngine.UI;
 
 namespace ExScoringMod
 {
@@ -15,6 +16,12 @@ namespace ExScoringMod
         private static readonly Dictionary<int, GameObject> historyHitboxes = new Dictionary<int, GameObject>();
         private static readonly Dictionary<int, RecalculatedRun> historyHitboxRuns = new Dictionary<int, RecalculatedRun>();
         private static readonly Dictionary<int, Transform> historyHitboxQuads = new Dictionary<int, Transform>();
+        private static readonly Dictionary<int, MeshCollider> historyHitboxColliders = new Dictionary<int, MeshCollider>();
+
+        // Cached lazily the first time we need it — the RectMask2D on the history scroll's
+        // Viewport, which clips native row content but has no effect on our cloned MeshRenderer/
+        // MeshCollider quad. We mimic its clipping manually in UpdateHistoryHitboxVisibility.
+        private static RectTransform historyViewportMaskRect;
 
         // Visible, semi-transparent grey — matches the tone of the rest of the mod's buttons
         // (e.g. ViewRow.FolderColor) but translucent since this sits over existing row text.
@@ -175,6 +182,9 @@ namespace ExScoringMod
                 MelonLogger.Log("[ExScoring] Cloned history hit-box's Quad has no GunButton — check the prefab structure.");
             }
 
+            MeshCollider quadCollider = quad.GetComponent<MeshCollider>();
+            if (quadCollider != null) historyHitboxColliders[slot] = quadCollider;
+
             historyHitboxes[slot] = clone;
         }
 
@@ -308,6 +318,52 @@ namespace ExScoringMod
                 }
 
                 renderer.material.color = target;
+            }
+        }
+
+        /// <summary>
+        /// Mimics the native Viewport's RectMask2D clipping, which the real row content respects
+        /// but our cloned MeshRenderer/MeshCollider quad can't — a mask only clips UI Graphics, not
+        /// meshes. The row GameObjects themselves stay active regardless of scroll position (native
+        /// visibility is purely this clipping, not SetActive), so we test the quad's world position
+        /// against the mask's local rect ourselves and toggle renderer + collider to match.
+        /// </summary>
+        private static bool IsHistoryRowVisible(Transform quad)
+        {
+            if (historyViewportMaskRect == null)
+            {
+                RectMask2D mask = quad.GetComponentInParent<RectMask2D>();
+                if (mask == null) return true; // fail open — don't hide if we can't find the mask
+                historyViewportMaskRect = mask.rectTransform;
+            }
+
+            Vector3 local = historyViewportMaskRect.InverseTransformPoint(quad.position);
+            return historyViewportMaskRect.rect.Contains(local);
+        }
+
+        private static void UpdateHistoryHitboxVisibility()
+        {
+            foreach (var kvp in historyHitboxQuads)
+            {
+                Transform quad = kvp.Value;
+                if (quad == null) continue;
+
+                bool visible = IsHistoryRowVisible(quad);
+
+                var renderer = quad.GetComponent<MeshRenderer>();
+                if (renderer != null) renderer.enabled = visible;
+
+                if (historyHitboxColliders.TryGetValue(kvp.Key, out MeshCollider col) && col != null)
+                    col.enabled = visible;
+            }
+        }
+
+        [HarmonyPatch(typeof(SongInfoPanel), "Update")]
+        private static class HistoryHitboxVisibilityPatch
+        {
+            private static void Postfix()
+            {
+                UpdateHistoryHitboxVisibility();
             }
         }
     }

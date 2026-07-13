@@ -95,10 +95,16 @@ namespace ExScoringMod
                 item.difficulty.text = run.difficulty;
 
             if (item.score != null)
+            {
+                item.score.gameObject.SetActive(true);
                 item.score.text = run.judgementScore.ToString("0.00");
+            }
 
             if (item.percent != null)
+            {
+                item.percent.gameObject.SetActive(true);
                 item.percent.text = $"{run.judgementPercent:0.00}%";
+            }
 
             if (item.info != null)
             {
