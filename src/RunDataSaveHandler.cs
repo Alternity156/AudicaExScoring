@@ -82,6 +82,13 @@ namespace ExScoringMod
                 MelonLogger.Log($"[ExScoring] Saved run data to {filePath}");
 
                 EnforceRunDataLimits(saveData.songId, saveData.difficulty);
+
+                // A fresh run for this song+difficulty may beat (or be) the cached "best" song-list
+                // row result — drop both the cache entry and the "confirmed empty" marker so the next
+                // bind re-reads from disk instead of showing a now-stale (or wrongly-empty) result.
+                string rowCacheKey = saveData.songId + "|" + saveData.difficulty;
+                exRowScoreCache.Remove(rowCacheKey);
+                exRowScoreEmpty.Remove(rowCacheKey);
             }
             catch (Exception ex)
             {

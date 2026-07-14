@@ -4,25 +4,45 @@ namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
-        public static string inGameCurrentScoreSize = "120";
-        public static string inGameCurrentPercentSize = "75";
-
         public static void ScoreKeeperDisplayUpdate(ScoreKeeperDisplay scoreKeeperDisplay)
         {
             if (!KataConfig.I.practiceMode)
             {
-                //float score = exScore;
-                //float percentage = GetCurrentMaxPossibleExPercentage();
+                float percentage = currentMaxPossibleJudgementScore > 0f
+                    ? GetCurrentMaxPossibleJudgementPercentage()
+                    : 0f;
 
-                float score = judgementScore;
-                float percentage = GetCurrentMaxPossibleJudgementPercentage();
+                scoreKeeperDisplay.scoreDisplay.text = percentage.ToString("F2") + "%";
 
-                //Make pretty-ish strings
-                string scoreString = "<size=" + inGameCurrentScoreSize + ">" + score + "</size>";
-                string percentageString = "<size=" + inGameCurrentPercentSize + "> (" + percentage + "%)</size>";
-
-                scoreKeeperDisplay.scoreDisplay.text = scoreString + percentageString;
+                if (scoreKeeperDisplay.highScoreDisplay != null)
+                    scoreKeeperDisplay.highScoreDisplay.text = GetExTopScoreDisplayText();
             }
+        }
+
+        // Reuses SongListHighScoreUI's exRowScoreCache/exRowScoreEmpty/exRowScoreLoading (keyed
+        // songId|difficulty) and LoadRowScoreCoroutine as-is — it already no-ops safely when there's
+        // no bound song-list row, which is always the case here during gameplay.
+        private static string GetExTopScoreDisplayText()
+        {
+            if (selectedSongData == null) return "";
+
+            string songId = selectedSongData.songID;
+            KataConfig.Difficulty difficulty = KataConfig.I.GetDifficulty();
+            string key = ExRowCacheKey(songId, difficulty);
+
+            if (exRowScoreCache.TryGetValue(key, out CachedExRowScore cached))
+                return cached.judgementPercent.ToString("F2") + "%";
+
+            if (exRowScoreEmpty.Contains(key))
+                return ""; // confirmed: no saved runs for this song+difficulty
+
+            if (!exRowScoreLoading.Contains(key))
+            {
+                exRowScoreLoading.Add(key);
+                MelonCoroutines.Start(LoadRowScoreCoroutine(songId, difficulty, key));
+            }
+
+            return ""; // load in flight — resolves within a frame or two, picked up next Update
         }
 
         public static string GetPopupText(ExCue exCue)

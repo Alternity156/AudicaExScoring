@@ -324,6 +324,25 @@ namespace ExScoringMod
         /// <summary>Current scroll index (0 when inactive). Used to snapshot per-level scroll.</summary>
         public static float GetScroll() => (active && scroller != null) ? scroller.GetScrollIndex() : 0f;
 
+        /// <summary>
+        /// Clears every pooled row's remembered binding (SongPoolItem.boundSong), so the next time
+        /// each slot binds — even to the exact same song as before — BindRow sees a mismatch and
+        /// does a genuine Init() rebind instead of skipping it.
+        ///
+        /// Needed for mod features (like a scoring-type toggle) that need every row to fully
+        /// re-initialize: nothing is actually bound while an overlay like the Options menu is open
+        /// (viewSongIDs is empty then), so a plain "refresh whatever's currently bound" call has
+        /// nothing to act on. By the time the same folder reopens afterward, its rows land back on
+        /// the exact songs they had before — which BindRow's boundSong check treats as "nothing
+        /// changed" and skips entirely, so nothing we patch on Init()/UpdateHighScoreInfo would ever
+        /// even get called. Clearing boundSong here removes that shortcut for one rebind.
+        /// </summary>
+        public static void InvalidateAllBoundSongs()
+        {
+            for (int i = 0; i < songPool.Count; i++)
+                if (songPool[i] != null) songPool[i].boundSong = null;
+        }
+
         /// <summary>The pooled SongSelectItem currently displaying songID, or null if off-screen.</summary>
         public static SongSelectItem GetBoundItem(string songID)
         {

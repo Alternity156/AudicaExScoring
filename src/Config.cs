@@ -202,6 +202,16 @@ namespace ExScoringMod
             ExType = ex;
             AudicaType = !ex;
             MelonPrefs.SaveConfig();
+
+            // Song-list rows already bound to a song won't otherwise pick up the new scoring type
+            // until they land on a DIFFERENT song — VirtualSongList's pooled rows skip Init() when
+            // re-bound to the same song, and nothing is actually bound while the Options overlay is
+            // open, so a currently-bound-items-only refresh has nothing to act on in the common case
+            // (folder collapses behind Options, then reopens to the exact same songs). Clearing
+            // every pooled row's remembered binding first means that reopen re-Inits for real; the
+            // refresh below then covers the (rarer) case where rows are still bound right now.
+            VirtualSongList.InvalidateAllBoundSongs();
+            ExScoring.RefreshAllVisibleSongRowScores();
         }
 
         public static void UpdateHideScoreData(bool value)
@@ -259,10 +269,15 @@ namespace ExScoringMod
 
         public static void UpdateMaxRunsPerSong(int value)
         {
-            if (value < 1) value = 1;
-            if (value > 50) value = 50;
             MelonPrefs.SetInt(Category, nameof(MaxRunsPerSong), value);
             MaxRunsPerSong = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateMaxRunDataSizeMB(float value)
+        {
+            MelonPrefs.SetFloat(Category, nameof(MaxRunDataSizeMB), value);
+            MaxRunDataSizeMB = value;
             MelonPrefs.SaveConfig();
         }
 
@@ -277,15 +292,6 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(SaveFailedRunData), value);
             SaveFailedRunData = value;
-            MelonPrefs.SaveConfig();
-        }
-
-        public static void UpdateMaxRunDataSizeMB(float value)
-        {
-            if (value < 10f) value = 10f;
-            if (value > 2000f) value = 2000f;
-            MelonPrefs.SetFloat(Category, nameof(MaxRunDataSizeMB), value);
-            MaxRunDataSizeMB = value;
             MelonPrefs.SaveConfig();
         }
 

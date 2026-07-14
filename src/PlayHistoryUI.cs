@@ -13,7 +13,9 @@ namespace ExScoringMod
         /// Replaces the native play-history list (built from SongPlayHistory) with our own saved
         /// run data (recalculated from disk via RunDataRecalculator), whenever EX scoring is on —
         /// with no recorded runs for this song+difficulty, that means an empty list, not a
-        /// fallback to native. When EX scoring is off, native history is left untouched.
+        /// fallback to native. When EX scoring is off, any EX-only additions from a previous visit
+        /// (hit-boxes, row grade visuals, the history-detail stats panel) are torn down instead, and
+        /// native history is left untouched.
         ///
         /// We don't skip the native BuildHistoryList/BuildDisplayHistory coroutines — their IL2CPP
         /// IEnumerator return type makes that awkward to fake from managed code — so when ExType
@@ -25,7 +27,15 @@ namespace ExScoringMod
         {
             public static void Postfix(SongInfoPanel __instance)
             {
-                if (!Config.ExType) return;
+                if (!Config.ExType)
+                {
+                    // Was EX mode last time this panel populated? Tear down anything left behind
+                    // (hitboxes, row grade visuals, the history-detail stats panel + graphs) so
+                    // native history renders cleanly with nothing extra layered on top.
+                    CleanupExHistoryUI();
+                    return;
+                }
+
                 if (SongDataHolder.I == null || SongDataHolder.I.songData == null) return;
 
                 string songId = SongDataHolder.I.songData.songID;
@@ -33,6 +43,30 @@ namespace ExScoringMod
 
                 MelonCoroutines.Start(PopulateHistoryCoroutine(__instance, songId, difficulty));
             }
+        }
+
+        /// <summary>
+        /// Full teardown of every EX-only history addition: the selection indicator + history-detail
+        /// stats panel (graphs included, via ResetHistorySelection), every cloned hit-box, and every
+        /// row grade visual. Safe to call repeatedly (e.g. every OnEnable while Audica scoring is
+        /// active) — everything it touches is idempotent to clear twice.
+        /// </summary>
+        private static void CleanupExHistoryUI()
+        {
+            ResetHistorySelection(); // hides the stats panel, destroys timing/aim/song-timeline graphs
+
+            foreach (var kvp in historyHitboxes)
+            {
+                if (kvp.Value != null) UnityEngine.Object.Destroy(kvp.Value);
+            }
+            historyHitboxes.Clear();
+            historyHitboxQuads.Clear();
+            historyHitboxColliders.Clear();
+            historyHitboxRuns.Clear();
+            historyHitboxHoverColor.Clear();
+            historyHitboxLastHighlightTime.Clear();
+
+            ClearAllRowGradeVisuals();
         }
 
         private static IEnumerator PopulateHistoryCoroutine(SongInfoPanel panel, string songId, string difficulty)

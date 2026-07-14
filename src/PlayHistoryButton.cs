@@ -356,6 +356,8 @@ namespace ExScoringMod
                 if (historyHitboxColliders.TryGetValue(kvp.Key, out MeshCollider col) && col != null)
                     col.enabled = visible;
             }
+
+            UpdateHistoryRowGradeVisualVisibility();
         }
 
         [HarmonyPatch(typeof(SongInfoPanel), "Update")]

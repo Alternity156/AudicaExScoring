@@ -6,6 +6,7 @@ using System.Text.RegularExpressions;
 using Harmony;
 using MelonLoader;
 using TMPro;
+using UnhollowerBaseLib;
 using UnityEngine;
 
 namespace ExScoringMod
@@ -629,7 +630,104 @@ namespace ExScoringMod
                 ScoreKeeperDisplay __instance
                 )
             {
+                if (__instance.multiplierDisplay != null)
+                    __instance.multiplierDisplay.gameObject.SetActive(!Config.ExType);
+
+                if (Config.ExType)
+                    HideScoreKeeperStarDisplay(__instance.starDisplay);
+                else
+                    ShowScoreKeeperStarPips(__instance.starDisplay);
+
                 if (Config.ExType) ScoreKeeperDisplayUpdate(__instance);
+            }
+        }
+
+        /// <summary>
+        /// Fully hides the classic-scoring star display on the in-gameplay HUD (no replacement —
+        /// unlike the song list/history/results-screen panels, this one just needs to be gone).
+        /// Same target set as HideNativeStarArrays (SongListHighScoreUI.cs) — five per-difficulty
+        /// tier arrays, starMeters, and the star_pips background outlines — but each call is guarded
+        /// with an activeSelf/enabled check first (same idiom as GunUpdate_HideMultiplierDisplay's
+        /// shouldBeActive check), since this runs every frame and native may keep live-updating
+        /// individual tiers as score changes through the run, so we can't just hide once and stop
+        /// checking.
+        /// </summary>
+        private static void HideScoreKeeperStarDisplay(StarDisplay stars)
+        {
+            if (stars == null) return;
+
+            HideStarArrayGuarded(stars.starsEasy);
+            HideStarArrayGuarded(stars.starsNormal);
+            HideStarArrayGuarded(stars.starsHard);
+            HideStarArrayGuarded(stars.starsExpert);
+            HideStarArrayGuarded(stars.starsExpertGold);
+
+            var meters = stars.starMeters;
+            if (meters != null)
+            {
+                for (int i = 0; i < meters.Length; i++)
+                {
+                    if (meters[i] != null && meters[i].enabled)
+                        meters[i].enabled = false;
+                }
+            }
+
+            Transform pips = FindStarPips(stars.transform);
+            if (pips != null && pips.gameObject.activeSelf)
+                pips.gameObject.SetActive(false);
+        }
+
+        private static void HideStarArrayGuarded(Il2CppReferenceArray<GameObject> stars)
+        {
+            if (stars == null) return;
+
+            for (int i = 0; i < stars.Length; i++)
+            {
+                if (stars[i] != null && stars[i].activeSelf)
+                    stars[i].SetActive(false);
+            }
+        }
+
+        /// <summary>
+        /// star_pips isn't managed by native at all (see HideNativeStarArrays' comment in
+        /// SongListHighScoreUI.cs) — the five tier arrays and starMeters get re-driven by native's
+        /// own logic every frame once we stop hiding them, but pips would stay stuck hidden forever
+        /// without this explicit reactivate once ExType goes back off.
+        /// </summary>
+        private static void ShowScoreKeeperStarPips(StarDisplay stars)
+        {
+            if (stars == null) return;
+
+            Transform pips = FindStarPips(stars.transform);
+            if (pips != null && !pips.gameObject.activeSelf)
+                pips.gameObject.SetActive(true);
+        }
+
+        // Hides the on-gun multiplier indicator (the floating "x2"/"x4" etc. readout spawned from
+        // Gun.multiplierDisplayPrefab) whenever ExType is on, and restores it when off — same
+        // self-correcting pattern as the ScoreKeeperDisplay multiplier hide above. Runs on Gun.Update
+        // (fires every frame for both hands), but only calls SetActive on the frame the state
+        // actually needs to change, rather than unconditionally every frame.
+        [HarmonyPatch(typeof(Gun), "Update")]
+        private static class GunUpdate_HideMultiplierDisplay
+        {
+            private static readonly Dictionary<int, MultiplierDisplay> multiplierDisplayCache = new Dictionary<int, MultiplierDisplay>();
+
+            private static void Postfix(Gun __instance)
+            {
+                int id = __instance.GetInstanceID();
+
+                if (!multiplierDisplayCache.TryGetValue(id, out MultiplierDisplay display) || display == null)
+                {
+                    display = __instance.GetComponentInChildren<MultiplierDisplay>();
+                    multiplierDisplayCache[id] = display;
+                }
+
+                if (display == null) return;
+
+                bool shouldBeActive = !Config.ExType;
+                if (display.gameObject.activeSelf != shouldBeActive)
+                    display.gameObject.SetActive(shouldBeActive);
             }
         }
 
@@ -710,6 +808,14 @@ namespace ExScoringMod
                     if (_hasRun) return false;
                     _hasRun = true;
 
+                    // The end sequence's own score/stars panel is done at this point (stats screen
+                    // is about to take over) — drop our replacement grade visual so it doesn't
+                    // linger underneath/behind the stats panel, and latch it off so
+                    // SongEndSequenceUpdatePatch doesn't recreate it (scorePercentStars itself stays
+                    // active underneath the stats screen).
+                    ClearEndSequenceGradeVisual();
+                    endSequenceGradeVisualSuppressed = true;
+
                     // __instance.transform.parent is InGameUI/ShellPage_Results/page/ShellPanel_Center
                     // (its children already included "GameplayStats"/"continue"/"Glass"/etc. per the
                     // original sibling list below) — this is already active and in hand, so our panel
@@ -783,6 +889,12 @@ namespace ExScoringMod
             }
         }
 
+        // Latched true once the stats screen has taken over (GameplayStatsUpdateDisplayPatch),
+        // so SongEndSequenceUpdatePatch never recreates the grade visual after that point even
+        // though scorePercentStars itself stays active underneath. Reset on the next song's
+        // SongEndSequence.Start() (see SongEndSequenceStartPatch Postfix).
+        private static bool endSequenceGradeVisualSuppressed = false;
+
         [HarmonyPatch(typeof(SongEndSequence), "Update")]
         public static class SongEndSequenceUpdatePatch
         {
@@ -794,13 +906,55 @@ namespace ExScoringMod
 
                     GameObject scoreAndPercent = __instance.scorePercentStars
                         .transform.Find("ScoreAndPercent")?.gameObject;
-                    if (scoreAndPercent == null) return;
+                    if (scoreAndPercent != null)
+                    {
+                        TextMeshPro tmp = scoreAndPercent.GetComponent<TextMeshPro>();
+                        string formatted = $"{GetCurrentMaxPossibleJudgementPercentage():0.00}%";
+                        if (tmp.text != formatted)
+                            tmp.text = formatted;
+                    }
 
-                    TextMeshPro tmp = scoreAndPercent.GetComponent<TextMeshPro>();
-                    if (tmp.text != $"{GetCurrentMaxPossibleJudgementPercentage()}%")
-                        tmp.text = $"{GetCurrentMaxPossibleJudgementPercentage()}%";
+                    Transform starDisplay = __instance.scorePercentStars.transform.Find("StarDisplay");
+                    if (starDisplay != null)
+                    {
+                        // endSequenceGradeVisualSuppressed is latched by SongEndSequenceSetStatePatch
+                        // the moment newState becomes ResultsScreen — the real state-machine signal
+                        // that the score/stars/fullCombo panel is done, straight from native.
+                        if (!endSequenceGradeVisualSuppressed)
+                        {
+                            HideEndSequenceNativeStars(starDisplay);
+
+                            if (endSequenceGradeVisualObject == null)
+                            {
+                                Grade grade = GetGrade(GetCurrentMaxPossibleJudgementPercentage(), currentRunFailed);
+                                CreateOrUpdateEndSequenceGradeVisual(starDisplay, grade);
+                            }
+                        }
+                        else
+                        {
+                            ClearEndSequenceGradeVisual();
+                        }
+                    }
                 }
             }
+        }
+
+        /// <summary>
+        /// Hides exactly stars/star_pips/star_meters under ScorePercentStars/StarDisplay — named
+        /// children only, not a recursive sweep, same reasoning as HideNativeStarArrays
+        /// (SongListHighScoreUI.cs): a blind sweep risks catching wrapper containers native assumes
+        /// stay active. "flares" is deliberately left untouched.
+        /// </summary>
+        private static void HideEndSequenceNativeStars(Transform starDisplay)
+        {
+            Transform stars = starDisplay.Find("stars");
+            if (stars != null) stars.gameObject.SetActive(false);
+
+            Transform starPips = starDisplay.Find("star_pips");
+            if (starPips != null) starPips.gameObject.SetActive(false);
+
+            Transform starMeters = starDisplay.Find("star_meters");
+            if (starMeters != null) starMeters.gameObject.SetActive(false);
         }
 
         /// <summary>
@@ -1162,6 +1316,18 @@ namespace ExScoringMod
         {
             private static bool Prefix(SongEndSequence __instance, ref SongEndSequence.State newState)
             {
+                if (Config.ExType && newState == SongEndSequence.State.ResultsScreen)
+                {
+                    // This is the actual state-machine transition marking the score/stars/fullCombo
+                    // panel as done, straight from native — more reliable than inferring it from
+                    // scorePercentStars.activeSelf (which apparently stays true underneath the stats
+                    // screen). Latches endSequenceGradeVisualSuppressed so
+                    // SongEndSequenceUpdatePatch stops recreating the visual from here on, reset
+                    // again on the next song's SongEndSequence.Start().
+                    ClearEndSequenceGradeVisual();
+                    endSequenceGradeVisualSuppressed = true;
+                }
+
                 if (PlaylistManager.state == PlaylistManager.PlaylistState.Endless)
                 {
                     if (PlaylistConfig.ShowScores)
@@ -1203,6 +1369,12 @@ namespace ExScoringMod
                     }
                 }
                 return true;
+            }
+
+            private static void Postfix(SongEndSequence __instance)
+            {
+                ClearEndSequenceGradeVisual();
+                endSequenceGradeVisualSuppressed = false;
             }
         }
 
