@@ -172,22 +172,23 @@ namespace ExScoringMod
                     break;
 
                 case 2:
-                    CreateStarObject(parent, "Star1 (Clone)", new Vector3(-half * 0.5f, half * 0.5f, 0f), half * 0.35f, color);
-                    CreateStarObject(parent, "Star2 (Clone)", new Vector3(half * 0.5f, -half * 0.5f, 0f), half * 0.35f, color);
+                    CreateStarObject(parent, "Star1 (Clone)", new Vector3(-half * 0.35f, half * 0.35f, 0f), half * 0.525f, color);
+                    CreateStarObject(parent, "Star2 (Clone)", new Vector3(half * 0.35f, -half * 0.35f, 0f), half * 0.525f, color);
                     break;
 
                 case 3:
-                    CreateStarObject(parent, "Star1 (Clone)", new Vector3(0f, half * 0.6f, 0f), half * 0.3f, color);
-                    CreateStarObject(parent, "Star2 (Clone)", new Vector3(-half * 0.55f, -half * 0.5f, 0f), half * 0.3f, color);
-                    CreateStarObject(parent, "Star3 (Clone)", new Vector3(half * 0.55f, -half * 0.5f, 0f), half * 0.3f, color);
+                    CreateStarObject(parent, "Star1 (Clone)", new Vector3(0f, half * 0.45f, 0f), half * 0.45f, color);
+                    CreateStarObject(parent, "Star2 (Clone)", new Vector3(-half * 0.4f, -half * 0.35f, 0f), half * 0.45f, color);
+                    CreateStarObject(parent, "Star3 (Clone)", new Vector3(half * 0.4f, -half * 0.35f, 0f), half * 0.45f, color);
                     break;
 
                 case 4:
-                    CreateStarObject(parent, "Star1 (Clone)", new Vector3(-half * 0.55f, half * 0.55f, 0f), half * 0.25f, color);
-                    CreateStarObject(parent, "Star2 (Clone)", new Vector3(half * 0.55f, half * 0.55f, 0f), half * 0.25f, color);
-                    CreateStarObject(parent, "Star3 (Clone)", new Vector3(-half * 0.55f, -half * 0.55f, 0f), half * 0.25f, color);
-                    CreateStarObject(parent, "Star4 (Clone)", new Vector3(half * 0.55f, -half * 0.55f, 0f), half * 0.25f, color);
+                    CreateStarObject(parent, "Star1 (Clone)", new Vector3(-half * 0.5f, half * 0.5f, 0f), half * 0.45f, color);
+                    CreateStarObject(parent, "Star2 (Clone)", new Vector3(half * 0.5f, half * 0.5f, 0f), half * 0.45f, color);
+                    CreateStarObject(parent, "Star3 (Clone)", new Vector3(-half * 0.5f, -half * 0.5f, 0f), half * 0.45f, color);
+                    CreateStarObject(parent, "Star4 (Clone)", new Vector3(half * 0.5f, -half * 0.5f, 0f), half * 0.45f, color);
                     break;
+
             }
         }
 
