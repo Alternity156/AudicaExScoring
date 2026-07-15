@@ -195,6 +195,13 @@ namespace ExScoringMod
             MelonLogger.Log($"[ExScoring] History row shot: {run.songId} ({run.difficulty}), " +
                             $"judgement {run.judgementScore:0.00}/{run.maxJudgementScore:0.00} ({run.judgementPercent:0.00}%)");
 
+            // Shooting the already-selected row again closes the panel instead of re-showing it.
+            if (historySelectedSlot == slot)
+            {
+                ResetHistorySelection();
+                return;
+            }
+
             SelectHistoryRow(slot);
             ShowGameplayStatsPanel(run);
         }
