@@ -1545,7 +1545,7 @@ namespace ExScoringMod
 
                 // Chain line color
                 Color chainColor = Config.ChainLineColorMode == 1
-                    ? ChainArrow.GetHandColor(hand)
+                    ? ChainArrow.GetChainHandColor(hand)
                     : ChainArrow.GetDefaultChainColor(chain);
                 ChainArrow.ApplyColor(chain, chainColor);
 
@@ -1574,7 +1574,7 @@ namespace ExScoringMod
                 arrow.widthMultiplier = Config.ArrowWidth;
 
                 Color arrowColor = Config.ArrowColorMode == 1
-                    ? ChainArrow.GetHandColor(hand)
+                    ? ChainArrow.GetChainHandColor(hand)
                     : Color.white;
                 ChainArrow.ApplyColor(arrow, arrowColor);
 

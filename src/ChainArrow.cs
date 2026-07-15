@@ -65,6 +65,12 @@ namespace ExScoringMod
             }
         }
 
+        public static Color GetChainHandColor(Target.TargetHandType hand)
+        {
+            Color c = GetHandColor(hand);
+            return hand == Target.TargetHandType.Either ? c : c / 2;
+        }
+
         public static void ApplyColor(LineRenderer lr, Color color)
         {
             lr.startColor = color;
