@@ -323,6 +323,10 @@ namespace ExScoringMod
                     exCue.timingJudgement = Judgement.Miss;
                     exCue.aimJudgement = Judgement.Miss;
                     exCue.chainJudgement = Judgement.Miss;
+                    if (cue.behavior == Target.TargetBehavior.Chain)
+                    {
+                        exCue.isChainTail = cue.chainNext == null;
+                    }
 
                     // If the player actually made an aim attempt near this target before it was
                     // ultimately marked a failure (e.g. aimed at it but missed the timing/hand/
