@@ -43,6 +43,8 @@ namespace ExScoringMod
         public static int chainLineColorMode;
         public static float arrowWidth;
         public static float arrowLength;
+        public static float chainArrowMinPitchDistance;
+        public static float chainArrowMaxSimultaneous;
         public static bool enableChainArrow;
         public static bool disableMenuGrab;
         public static bool trippyMenuEnabled;
@@ -366,6 +368,28 @@ namespace ExScoringMod
         {
             arrowLength = value;
             Config.UpdateArrowLength(value);
+        }
+
+        public static void GetChainArrowMinPitchDistance()
+        {
+            chainArrowMinPitchDistance = Config.ChainArrowMinPitchDistance;
+        }
+
+        public static void SetChainArrowMinPitchDistance(float value)
+        {
+            chainArrowMinPitchDistance = value;
+            Config.UpdateChainArrowMinPitchDistance(value);
+        }
+
+        public static void GetChainArrowMaxSimultaneous()
+        {
+            chainArrowMaxSimultaneous = Config.ChainArrowMaxSimultaneous;
+        }
+
+        public static void SetChainArrowMaxSimultaneous(float value)
+        {
+            chainArrowMaxSimultaneous = value;
+            Config.UpdateChainArrowMaxSimultaneous((int)value);
         }
 
         public static void GetGunBeamRedirection()

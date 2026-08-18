@@ -1559,6 +1559,23 @@ namespace ExScoringMod
                     return;
                 }
 
+                // Grid-based "too short to bother" filter — chart data (pitch/gridOffset),
+                // not live world position, so it's unaffected by view direction or by
+                // whatever distance a mapper placed this particular note at.
+                if (ChainArrow.IsChainSegmentTooShort(__instance))
+                {
+                    ChainArrow.Hide(__instance);
+                    return;
+                }
+
+                // Concurrent-density thinning — once too many arrow-worthy chains are
+                // active in the same frame, skip every Nth one evenly.
+                if (!ChainArrow.ShouldShowArrowForDensity())
+                {
+                    ChainArrow.Hide(__instance);
+                    return;
+                }
+
                 LineRenderer arrow = ChainArrow.GetOrCreate(__instance);
                 if (arrow == null)
                     return;

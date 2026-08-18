@@ -9,28 +9,58 @@ namespace ExScoringMod
 
         private static readonly Dictionary<int, Color> DefaultChainColors = new Dictionary<int, Color>();
 
+        // One shared material for every arrow, ever. Created once from whatever
+        // chainLine sharedMaterial we first see, then reused via sharedMaterial so
+        // arrows batch together instead of each holding a private clone. Color
+        // comes from LineRenderer.startColor/endColor (not the material), and
+        // travel/glow come from a per-renderer MaterialPropertyBlock, so a shared
+        // material asset is all any arrow ever actually needs.
+        private static Material sSharedArrowMaterial;
+
+        // Caches the arrow LineRenderer per target so GetOrCreate/Hide don't need
+        // to walk the transform hierarchy with Find() every frame.
+        private static readonly Dictionary<int, LineRenderer> ArrowCache = new Dictionary<int, LineRenderer>();
+
         public static LineRenderer GetOrCreate(Target target)
         {
+            int id = target.GetInstanceID();
+
+            if (ArrowCache.TryGetValue(id, out LineRenderer cached) && cached != null)
+                return cached;
+
+            // Fallback for the rare case the cache missed (e.g. first call after
+            // a pooled target got reused) but the arrow object still exists.
             Transform existing = target.transform.Find(ArrowObjectName);
             if (existing != null)
-                return existing.GetComponent<LineRenderer>();
+            {
+                LineRenderer existingLr = existing.GetComponent<LineRenderer>();
+                ArrowCache[id] = existingLr;
+                return existingLr;
+            }
 
             LineRenderer src = target.chainLine;
             if (src == null)
                 return null;
 
-            Material srcMat = src.material; // may be null if chainLine has no material assigned
-            if (srcMat == null)
+            if (sSharedArrowMaterial == null)
             {
-                MelonLoader.MelonLogger.Log("[ChainArrow] chainLine.material is null, skipping arrow creation");
-                return null;
+                // sharedMaterial never triggers Unity's auto-instancing, unlike .material.
+                // We only ever need to read this once, to grab a shader/template for the
+                // one arrow material every arrow will reuse from then on.
+                Material template = src.sharedMaterial;
+                if (template == null)
+                {
+                    MelonLoader.MelonLogger.Log("[ChainArrow] chainLine.sharedMaterial is null, skipping arrow creation");
+                    return null;
+                }
+                sSharedArrowMaterial = new Material(template);
             }
 
             GameObject go = new GameObject(ArrowObjectName);
             go.transform.SetParent(target.transform, false);
 
             LineRenderer lr = go.AddComponent<LineRenderer>();
-            lr.material = new Material(srcMat);
+            lr.sharedMaterial = sSharedArrowMaterial;
             lr.widthMultiplier = src.widthMultiplier;
             lr.useWorldSpace = src.useWorldSpace;
             lr.textureMode = src.textureMode;
@@ -41,14 +71,27 @@ namespace ExScoringMod
             lr.positionCount = 3;
             lr.enabled = false;
 
+            ArrowCache[id] = lr;
             return lr;
         }
 
         public static void Hide(Target target)
         {
+            int id = target.GetInstanceID();
+
+            if (ArrowCache.TryGetValue(id, out LineRenderer cached) && cached != null)
+            {
+                cached.enabled = false;
+                return;
+            }
+
             Transform existing = target.transform.Find(ArrowObjectName);
             if (existing != null)
-                existing.GetComponent<LineRenderer>().enabled = false;
+            {
+                LineRenderer lr = existing.GetComponent<LineRenderer>();
+                ArrowCache[id] = lr;
+                lr.enabled = false;
+            }
         }
 
         public static Color GetHandColor(Target.TargetHandType hand)
@@ -104,7 +147,9 @@ namespace ExScoringMod
 
         public static void ClearCache(Target target)
         {
-            HandTypeCache.Remove(target.GetInstanceID());
+            int id = target.GetInstanceID();
+            HandTypeCache.Remove(id);
+            ArrowCache.Remove(id);
             DefaultChainColors.Remove(target.chainLine != null ? target.chainLine.GetInstanceID() : -1);
         }
 
@@ -131,12 +176,6 @@ namespace ExScoringMod
             var travelProp = target.mChainTravelProperty;
             var glowProp = target.mChainGlowProperty;
 
-            bool shouldLog = Time.frameCount % 30 == 0;
-
-            // UpdateValue appears to write through a MaterialPropertyBlock rather
-            // than the Material asset directly (reading chain.material.GetFloat
-            // always returned a frozen default, never the live animated value).
-            // Reusing two static blocks avoids allocating every call.
             var chainBlock = sChainBlock ?? (sChainBlock = new MaterialPropertyBlock());
             var arrowBlock = sArrowBlock ?? (sArrowBlock = new MaterialPropertyBlock());
 
@@ -147,16 +186,12 @@ namespace ExScoringMod
             {
                 float travelValue = chainBlock.GetFloat(travelProp.mID);
                 arrowBlock.SetFloat(travelProp.mID, travelValue);
-                if (shouldLog)
-                    MelonLoader.MelonLogger.Log($"[ChainArrow] travelValue(block)={travelValue}");
             }
 
             if (glowProp != null)
             {
                 float glowValue = chainBlock.GetFloat(glowProp.mID);
                 arrowBlock.SetFloat(glowProp.mID, glowValue);
-                if (shouldLog)
-                    MelonLoader.MelonLogger.Log($"[ChainArrow] glowValue(block)={glowValue}");
             }
 
             arrow.SetPropertyBlock(arrowBlock);
@@ -164,5 +199,64 @@ namespace ExScoringMod
 
         private static MaterialPropertyBlock sChainBlock;
         private static MaterialPropertyBlock sArrowBlock;
+
+        // ── Grid-based "too short to bother" filter ──
+        // Uses chart data (pitch + gridOffset) rather than live world position, so
+        // it's unaffected by which way the player's looking (VR head orientation)
+        // and by whatever distance a mapper chose to place a given note at.
+        // Mirrors DifficultyCalculator's GetTrueCoordinates.
+        private static Vector2 GetGridCoordinates(SongCues.Cue cue)
+        {
+            float x = cue.pitch % 12;
+            float y = (int)(cue.pitch / 12);
+            x += cue.gridOffset.x;
+            y += cue.gridOffset.y;
+            return new Vector2(x, y);
+        }
+
+        public static bool IsChainSegmentTooShort(Target target)
+        {
+            var cue = target.mCue;
+            if (cue == null || cue.chainPrevious == null)
+                return false; // nothing to compare against; don't skip
+
+            float dist = Vector2.Distance(GetGridCoordinates(cue), GetGridCoordinates(cue.chainPrevious));
+            return dist < Config.ChainArrowMinPitchDistance;
+        }
+
+        // ── Concurrent-density thinning ──
+        // Once more than Config.ChainArrowMaxSimultaneous arrow-worthy chains are
+        // active in the same frame, skip every Nth one so total arrow draw calls
+        // stay bounded during extreme bursts. Skip level is based on last frame's
+        // count (this frame's total isn't known until it's over), and only counts
+        // chains that already passed the pitch-distance filter, so degenerate/
+        // stacked chains don't eat into the budget.
+        private static int sDensityFrame = -1;
+        private static int sDensityIndexThisFrame = 0;
+        private static int sDensityCountThisFrame = 0;
+        private static int sDensityCountLastFrame = 0;
+        private static int sDensitySkipLevel = 0;
+
+        public static bool ShouldShowArrowForDensity()
+        {
+            int frame = Time.frameCount;
+            if (frame != sDensityFrame)
+            {
+                sDensityCountLastFrame = sDensityCountThisFrame;
+                sDensityCountThisFrame = 0;
+                sDensityIndexThisFrame = 0;
+                sDensityFrame = frame;
+
+                int threshold = Mathf.Max(1, Config.ChainArrowMaxSimultaneous);
+                sDensitySkipLevel = sDensityCountLastFrame <= threshold
+                    ? 0
+                    : (sDensityCountLastFrame - 1) / threshold;
+            }
+
+            sDensityCountThisFrame++;
+            int index = sDensityIndexThisFrame++;
+
+            return (index % (sDensitySkipLevel + 1)) == 0;
+        }
     }
 }

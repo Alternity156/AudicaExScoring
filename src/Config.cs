@@ -31,6 +31,8 @@ namespace ExScoringMod
         public static float ArrowWidth;
         public static float ArrowLength;
         public static bool EnableChainArrow;
+        public static float ChainArrowMinPitchDistance;
+        public static int ChainArrowMaxSimultaneous;
 
         public static string particleKillerHeader = "[Header]Particle Killer";
         public static bool ParticleKillerEnabled;
@@ -95,6 +97,8 @@ namespace ExScoringMod
             MelonPrefs.RegisterInt(Category, nameof(ChainLineColorMode), 0, "Chain line color: 0 = Default (Black), 1 = Hand Color");
             MelonPrefs.RegisterFloat(Category, nameof(ArrowWidth), 0.5f, "Sets the chain arrow width [0.1,1,0.05,0.5] {P}");
             MelonPrefs.RegisterFloat(Category, nameof(ArrowLength), 0.25f, "Sets the chain arrow length [0.05,1,0.05,0.25] {P}");
+            MelonPrefs.RegisterFloat(Category, nameof(ChainArrowMinPitchDistance), 0.2f, "Minimum pitch-grid distance between chain nodes for an arrow to be drawn [0,2,0.05,0.2] {G}");
+            MelonPrefs.RegisterInt(Category, nameof(ChainArrowMaxSimultaneous), 50, "Max chain arrows shown at once before thinning kicks in [10,300,5,50] {G}");
 
             MelonPrefs.RegisterString(Category, nameof(particleKillerHeader), "", "[Header]Particle Killer");
             MelonPrefs.RegisterBool(Category, nameof(ParticleKillerEnabled), true, "Enables the mod.");
@@ -151,6 +155,8 @@ namespace ExScoringMod
             ArrowWidth = MelonPrefs.GetFloat(Category, nameof(ArrowWidth));
             ArrowLength = MelonPrefs.GetFloat(Category, nameof(ArrowLength));
             EnableChainArrow = MelonPrefs.GetBool(Category, nameof(EnableChainArrow));
+            ChainArrowMinPitchDistance = MelonPrefs.GetFloat(Category, nameof(ChainArrowMinPitchDistance));
+            ChainArrowMaxSimultaneous = MelonPrefs.GetInt(Category, nameof(ChainArrowMaxSimultaneous));
             ParticleKillerEnabled = MelonPrefs.GetBool(Category, nameof(ParticleKillerEnabled));
             ParticleKillerKillCPUParticles = MelonPrefs.GetBool(Category, nameof(ParticleKillerKillCPUParticles));
             ParticleKillerParticleCount = MelonPrefs.GetInt(Category, nameof(ParticleKillerParticleCount));
@@ -378,6 +384,20 @@ namespace ExScoringMod
         {
             MelonPrefs.SetFloat(Category, nameof(ArrowLength), value);
             ArrowLength = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateChainArrowMinPitchDistance(float value)
+        {
+            MelonPrefs.SetFloat(Category, nameof(ChainArrowMinPitchDistance), value);
+            ChainArrowMinPitchDistance = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateChainArrowMaxSimultaneous(int value)
+        {
+            MelonPrefs.SetInt(Category, nameof(ChainArrowMaxSimultaneous), value);
+            ChainArrowMaxSimultaneous = value;
             MelonPrefs.SaveConfig();
         }
 

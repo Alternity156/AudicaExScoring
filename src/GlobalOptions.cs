@@ -261,6 +261,8 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetChainLineColorMode();
                 OptionsMenuFunctions.GetArrowWidth();
                 OptionsMenuFunctions.GetArrowLength();
+                OptionsMenuFunctions.GetChainArrowMinPitchDistance();
+                OptionsMenuFunctions.GetChainArrowMaxSimultaneous();
 
                 var header = OptionsMenuClone.CreateHeader(0, "Chain Arrow");
                 OptionsMenuClone.AddRow(header);
@@ -289,6 +291,18 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.arrowLength = v; OptionsMenuFunctions.SetArrowLength(v); },
                     0.05f, 1f, 0.05f, 0.25f, "N2");
                 OptionsMenuClone.AddRow(widthSlider, lengthSlider);
+
+                var minPitchDistSlider = OptionsMenuClone.CreateSlider(0, "Min Node Distance",
+                    () => OptionsMenuFunctions.chainArrowMinPitchDistance,
+                    v => { OptionsMenuFunctions.chainArrowMinPitchDistance = v; OptionsMenuFunctions.SetChainArrowMinPitchDistance(v); },
+                    0f, 2f, 0.05f, 0.2f, "N2",
+                    "Chain nodes closer than this (in grid units) never get an arrow");
+                var maxSimultaneousSlider = OptionsMenuClone.CreateSlider(1, "Max Simultaneous",
+                    () => OptionsMenuFunctions.chainArrowMaxSimultaneous,
+                    v => { OptionsMenuFunctions.chainArrowMaxSimultaneous = v; OptionsMenuFunctions.SetChainArrowMaxSimultaneous(v); },
+                    10f, 300f, 5f, 50f, "N0",
+                    "Above this many arrows at once, arrows start thinning out evenly");
+                OptionsMenuClone.AddRow(minPitchDistSlider, maxSimultaneousSlider);
             }),
 
             new OptionsCategory("opt_menu", "Menu", () =>
