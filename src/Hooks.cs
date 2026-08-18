@@ -1414,6 +1414,7 @@ namespace ExScoringMod
                     CreateDeleteButton(ButtonUtils.ButtonLocation.Pause);
                     CreateFavoriteButton(ButtonUtils.ButtonLocation.Pause);
                     PlaylistEndlessSkipButton.CreateSkipButton(ButtonUtils.ButtonLocation.Pause);
+                    pauseCount++;
                 }
                 else if (state == InGameUI.State.EndGameContinuePage)
                 {

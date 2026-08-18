@@ -64,6 +64,7 @@ namespace ExScoringMod
                     scoringCalculation = Config.LinearCalculation ? "Linear" : "Audica",
                     unixTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                     failed = failed,
+                    pauseCount = pauseCount,
                     exCues = slimCues
                 };
 

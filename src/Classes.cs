@@ -60,6 +60,7 @@ namespace ExScoringMod
             public string scoringCalculation;
             public long unixTimestamp;
             public bool failed;
+            public int pauseCount;
             public ExCueSaveData[] exCues;
         }
 

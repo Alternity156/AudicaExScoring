@@ -36,6 +36,7 @@ namespace ExScoringMod
         public static List<UnprocessedTargetHitPos> unprocessedTargetHitPoses = new List<UnprocessedTargetHitPos>();
         public static bool runSaved = false;
         public static bool currentRunFailed = false;
+        public static int pauseCount = 0;
 
         private static Dictionary<int, List<(float aimScore, Vector3 intersectionPoint)>> pendingAimResults = new Dictionary<int, List<(float, Vector3)>>();
 

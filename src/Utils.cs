@@ -48,6 +48,7 @@ namespace ExScoringMod
             exCues.Clear();
             runSaved = false;
             currentRunFailed = false;
+            pauseCount = 0;
             exScore = 0;
             judgementScore = 0;
             currentMaxPossibleExScore = 0;
