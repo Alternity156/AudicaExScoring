@@ -308,6 +308,9 @@
     <Compile Include="csvorbis\VorbisFile.cs" />
     <Compile Include="src\VirtualSongList.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <None Include="src\ApiContract.md" />
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
     <PostBuildEvent>copy "$(TargetPath)" "C:\SteamLibrary\steamapps\common\Audica\Mods\$(TargetFileName)"</PostBuildEvent>

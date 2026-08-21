@@ -77,7 +77,10 @@ namespace ExScoringMod
                 MelonLogger.Log($"SetState: {menuState} -> {state}");
 
                 if (menuState == MenuState.State.SongPage && state != MenuState.State.SongPage)
+                {
                     GlobalOptions.ForceTeardown();
+                    ResetHistorySelection();
+                }
 
                 if (menuState == MenuState.State.Launched && state != MenuState.State.Launched)
                 {
