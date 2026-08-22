@@ -68,6 +68,10 @@ namespace ExScoringMod
         public static float SearchKeyboardPosZ;
         public static float SearchKeyboardTilt;
 
+        public static string leaderboardHeader = "[Header]Leaderboard";
+        public static string ApiKey;
+        public static bool EnableScoreUpload;
+
         public static void RegisterConfig()
         {
             MelonPrefs.RegisterString(Category, nameof(typeHeader), "", "[Header]Scoring Type");
@@ -134,6 +138,10 @@ namespace ExScoringMod
             MelonPrefs.RegisterFloat(Category, nameof(SearchKeyboardPosZ), 2f, "Sets the search keyboard Z position [-5,5,0.25,2] {P}");
             MelonPrefs.RegisterFloat(Category, nameof(SearchKeyboardTilt), 30f, "Sets the search keyboard tilt angle [0,90,1,30] {P}");
 
+            MelonPrefs.RegisterString(Category, nameof(leaderboardHeader), "", "[Header]Leaderboard");
+            MelonPrefs.RegisterString(Category, nameof(ApiKey), "", "API key for the online leaderboard (paste from the website)");
+            MelonPrefs.RegisterBool(Category, nameof(EnableScoreUpload), false, "Automatically uploads runs to the online leaderboard after each song");
+
             OnModSettingsApplied();
         }
 
@@ -181,6 +189,9 @@ namespace ExScoringMod
             SearchKeyboardPosY = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardPosY));
             SearchKeyboardPosZ = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardPosZ));
             SearchKeyboardTilt = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardTilt));
+
+            ApiKey = MelonPrefs.GetString(Category, nameof(ApiKey));
+            EnableScoreUpload = MelonPrefs.GetBool(Category, nameof(EnableScoreUpload));
         }
 
         public static void UpdateExScorePopupSize(float value)
@@ -291,6 +302,21 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(EnableRunDataSaving), value);
             EnableRunDataSaving = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateApiKey(string value)
+        {
+            value = value ?? "";
+            MelonPrefs.SetString(Category, nameof(ApiKey), value);
+            ApiKey = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateEnableScoreUpload(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(EnableScoreUpload), value);
+            EnableScoreUpload = value;
             MelonPrefs.SaveConfig();
         }
 

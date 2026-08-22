@@ -195,6 +195,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="src\AimGraph.cs" />
+    <Compile Include="src\ApiClient.cs" />
     <Compile Include="src\ChainArrow.cs" />
     <Compile Include="src\AddPlaylistButton.cs" />
     <Compile Include="src\AlbumArt.cs" />

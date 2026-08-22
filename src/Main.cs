@@ -38,6 +38,12 @@ namespace ExScoringMod
         public static bool currentRunFailed = false;
         public static int pauseCount = 0;
 
+        /// <summary>
+        /// GUID generated once per run (see Utils.ResetExScore), used as the leaderboard
+        /// API's clientRunId so a retried submission can be recognized as the same run.
+        /// </summary>
+        public static string currentRunId = "";
+
         private static Dictionary<int, List<(float aimScore, Vector3 intersectionPoint)>> pendingAimResults = new Dictionary<int, List<(float, Vector3)>>();
 
         public static bool nextPopupIsScore = false;

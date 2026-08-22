@@ -444,6 +444,27 @@ namespace ExScoringMod
                 OptionsMenuClone.AddRow(maxRunsSlider, maxSizeSlider);
             }),
 
+            new OptionsCategory("opt_leaderboard", "Leaderboard", () =>
+            {
+                OptionsMenuFunctions.GetEnableScoreUpload();
+
+                var header = OptionsMenuClone.CreateHeader(0, "Leaderboard");
+                OptionsMenuClone.AddRow(header);
+
+                var enableUploadToggle = OptionsMenuClone.CreateToggle(0, "Enable Score Upload",
+                    () => OptionsMenuFunctions.enableScoreUpload,
+                    v => { OptionsMenuFunctions.enableScoreUpload = v; OptionsMenuFunctions.SetEnableScoreUpload(v); },
+                    "Automatically uploads runs to the online leaderboard after each song");
+
+                // Not a real bool toggle: the checkmark reflects whether an API key is currently
+                // set, and shooting it pastes/replaces the key from the clipboard.
+                var apiKeyRow = OptionsMenuClone.CreateToggle(1, "API Key (Paste)",
+                    OptionsMenuFunctions.HasApiKey,
+                    v => OptionsMenuFunctions.PasteApiKeyFromClipboard(),
+                    "Checked = an API key is set. Shoot to paste one from your clipboard, replacing any existing key.");
+                OptionsMenuClone.AddRow(enableUploadToggle, apiKeyRow);
+            }),
+
             new OptionsCategory("opt_scoring", "Scoring", () =>
             {
                 var scoringTypeCycle = OptionsMenuClone.CreateCycle(0, "Scoring Type", OptionsMenuFunctions.ScoringTypeOptions,

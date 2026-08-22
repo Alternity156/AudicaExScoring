@@ -49,6 +49,7 @@ namespace ExScoringMod
             runSaved = false;
             currentRunFailed = false;
             pauseCount = 0;
+            currentRunId = System.Guid.NewGuid().ToString();
             exScore = 0;
             judgementScore = 0;
             currentMaxPossibleExScore = 0;

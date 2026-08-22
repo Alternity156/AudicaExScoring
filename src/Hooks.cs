@@ -77,10 +77,7 @@ namespace ExScoringMod
                 MelonLogger.Log($"SetState: {menuState} -> {state}");
 
                 if (menuState == MenuState.State.SongPage && state != MenuState.State.SongPage)
-                {
                     GlobalOptions.ForceTeardown();
-                    ResetHistorySelection();
-                }
 
                 if (menuState == MenuState.State.Launched && state != MenuState.State.Launched)
                 {
@@ -89,6 +86,7 @@ namespace ExScoringMod
 
                 if (state == MenuState.State.Launched && menuState != MenuState.State.Launched)
                 {
+                    currentRunId = System.Guid.NewGuid().ToString();
                     TrippyMenu.ResetOnSongStart();
                     exTypePurple = true;
                 }
@@ -979,6 +977,8 @@ namespace ExScoringMod
                 {
                     SaveRunData(failed);
                 }
+
+                SubmitRun(failed);
             }
         }
 

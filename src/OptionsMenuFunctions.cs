@@ -68,6 +68,7 @@ namespace ExScoringMod
         public static float searchKeyboardPosY;
         public static float searchKeyboardPosZ;
         public static float searchKeyboardTilt;
+        public static bool enableScoreUpload;
 
         public static void GetExScorePopupSize()
         {
@@ -225,6 +226,41 @@ namespace ExScoringMod
         {
             saveFailedRunData = value;
             Config.UpdateSaveFailedRunData(value);
+        }
+
+        public static void GetEnableScoreUpload()
+        {
+            enableScoreUpload = Config.EnableScoreUpload;
+        }
+
+        public static void SetEnableScoreUpload(bool value)
+        {
+            enableScoreUpload = value;
+            Config.UpdateEnableScoreUpload(value);
+        }
+
+        /// <summary>Whether an API key is currently set — drives the checkmark on the API Key row.</summary>
+        public static bool HasApiKey()
+        {
+            return !string.IsNullOrEmpty(Config.ApiKey);
+        }
+
+        /// <summary>
+        /// Reads the system clipboard and, if it holds non-blank text, saves it as the API key,
+        /// replacing any existing one. Bound to the API Key row's "toggle" action, so the row
+        /// doubles as both a status indicator (checked = key set) and a paste button.
+        /// </summary>
+        public static void PasteApiKeyFromClipboard()
+        {
+            string clipboard = GUIUtility.systemCopyBuffer;
+            if (string.IsNullOrWhiteSpace(clipboard))
+            {
+                MelonLogger.Log("[ExScoring] Paste API key: clipboard is empty, ignoring");
+                return;
+            }
+
+            Config.UpdateApiKey(clipboard.Trim());
+            MelonLogger.Log("[ExScoring] API key updated from clipboard");
         }
 
         public static void GetArrowScrollRows()

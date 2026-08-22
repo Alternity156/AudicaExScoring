@@ -64,6 +64,44 @@ namespace ExScoringMod
             public ExCueSaveData[] exCues;
         }
 
+        /// <summary>
+        /// Payload for POST /api/runs (see ApiContract.md). Deliberately separate from
+        /// ScoreSaveData: no scoringCalculation (server always scores Linear), and it
+        /// carries a clientRunId for server-side dedupe on retry.
+        /// </summary>
+        public class RunSubmitData
+        {
+            public string clientRunId;
+            public string songId;
+            public string songTitle;
+            public string songArtist;
+            public string songMapper;
+            public string difficulty;
+            public long unixTimestamp;
+            public bool failed;
+            public int pauseCount;
+            public ExCueSaveData[] exCues;
+        }
+
+        /// <summary>
+        /// Response shape for POST /api/runs (see ApiContract.md).
+        /// </summary>
+        public class RunSubmitGrade
+        {
+            public string id;
+            public string text;
+        }
+
+        public class RunSubmitResponse
+        {
+            public string runId;
+            public float judgementScore;
+            public float judgementPercent;
+            public RunSubmitGrade grade;
+            public int rank;
+            public bool isPersonalBest;
+        }
+
         public class UnprocessedTargetHitPos
         {
             public int index;
