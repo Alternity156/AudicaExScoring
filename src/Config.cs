@@ -229,6 +229,7 @@ namespace ExScoringMod
             // refresh below then covers the (rarer) case where rows are still bound right now.
             VirtualSongList.InvalidateAllBoundSongs();
             ExScoring.RefreshAllVisibleSongRowScores();
+            ExScoring.SyncLeaderboardButtonVisibility();
         }
 
         public static void UpdateHideScoreData(bool value)

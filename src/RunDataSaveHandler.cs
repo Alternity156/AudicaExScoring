@@ -62,6 +62,7 @@ namespace ExScoringMod
                     songMapper = selectedSongData.author,
                     difficulty = KataConfig.I.GetDifficulty().ToString(),
                     scoringCalculation = Config.LinearCalculation ? "Linear" : "Audica",
+                    platform = GetPlatformString(),
                     unixTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                     failed = failed,
                     pauseCount = pauseCount,
@@ -94,6 +95,39 @@ namespace ExScoringMod
             catch (Exception ex)
             {
                 MelonLogger.Log($"[ExScoring] Failed to save run data: {ex}");
+            }
+        }
+
+        /// <summary>
+        /// Reads the game's own platform detection (PlatformChooser.I.platform, used internally
+        /// for leaderboards/achievements/DLC) and maps it to a plain string for save data / API
+        /// use. Wrapped in its own try/catch so an interop hiccup here never costs the run save.
+        /// </summary>
+        private static string GetPlatformString()
+        {
+            try
+            {
+                PlatformChooser chooser = PlatformChooser.I;
+                if (chooser == null) return "Unknown";
+
+                switch (chooser.platform)
+                {
+                    case PlatformChooser.PlatformType.SteamVR:
+                        return "Steam";
+                    case PlatformChooser.PlatformType.OculusHome:
+                        return "Oculus";
+                    case PlatformChooser.PlatformType.Viveport:
+                        return "Viveport";
+                    case PlatformChooser.PlatformType.Playstation:
+                        return "Playstation";
+                    default:
+                        return "Unknown";
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Log($"[ExScoring] Failed to read platform: {ex}");
+                return "Unknown";
             }
         }
 

@@ -122,5 +122,63 @@ namespace ExScoringMod
                 request.Dispose();
             }
         }
+
+        /// <summary>
+        /// Fetches the AudicaEx online leaderboard for a song+difficulty (GET /api/leaderboard,
+        /// public endpoint, no auth — see ApiContract.md section 4). Always calls onComplete exactly
+        /// once: with the parsed response on success, or null on any failure (network error, HTTP
+        /// error, or an unparsable body). Every failure path is logged first, so a null result can
+        /// always be traced back to a specific cause via MelonLogger/UnityExplorer.
+        /// </summary>
+        public static void FetchLeaderboard(string songId, string difficulty, int limit, Action<LeaderboardApiResponse> onComplete)
+        {
+            if (string.IsNullOrEmpty(songId))
+            {
+                MelonLogger.Log("[ExScoring] FetchLeaderboard: songId is null/empty, aborting.");
+                onComplete?.Invoke(null);
+                return;
+            }
+
+            MelonLogger.Log($"[ExScoring] FetchLeaderboard: starting songId={songId} difficulty={difficulty} limit={limit}");
+            MelonCoroutines.Start(FetchLeaderboardCoroutine(songId, difficulty, limit, onComplete));
+        }
+
+        private static IEnumerator FetchLeaderboardCoroutine(string songId, string difficulty, int limit, Action<LeaderboardApiResponse> onComplete)
+        {
+            string url = $"{ApiBaseUrl}/api/leaderboard?songId={Uri.EscapeDataString(songId)}&difficulty={Uri.EscapeDataString(difficulty)}&limit={limit}&offset=0";
+
+            MelonLogger.Log($"[ExScoring] FetchLeaderboard: GET {url}");
+
+            UnityWebRequest request = UnityWebRequest.Get(url);
+            try
+            {
+                yield return request.SendWebRequest();
+
+                if (request.isNetworkError || request.isHttpError)
+                {
+                    string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
+                    MelonLogger.Log($"[ExScoring] FetchLeaderboard failed ({request.responseCode}): {request.error} | songId={songId} difficulty={difficulty} | Body: {errorBody}");
+                    onComplete?.Invoke(null);
+                    yield break;
+                }
+
+                try
+                {
+                    LeaderboardApiResponse response = JsonConvert.DeserializeObject<LeaderboardApiResponse>(request.downloadHandler.text);
+                    int entryCount = response?.entries?.Length ?? 0;
+                    MelonLogger.Log($"[ExScoring] FetchLeaderboard succeeded: songId={songId} difficulty={difficulty} entries={entryCount} total={response?.total ?? -1}");
+                    onComplete?.Invoke(response);
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Log($"[ExScoring] FetchLeaderboard: failed to parse response ({request.downloadHandler.text}): {ex}");
+                    onComplete?.Invoke(null);
+                }
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
     }
 }

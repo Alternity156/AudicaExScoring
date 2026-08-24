@@ -58,6 +58,7 @@ namespace ExScoringMod
             public string songMapper;
             public string difficulty;
             public string scoringCalculation;
+            public string platform;
             public long unixTimestamp;
             public bool failed;
             public int pauseCount;

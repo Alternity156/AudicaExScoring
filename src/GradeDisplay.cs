@@ -71,6 +71,19 @@ namespace ExScoringMod
         private static readonly Vector3 SongRowGradeVisualLocalScale = new Vector3(300f, 300f, 300f);
         private static readonly Dictionary<int, GameObject> songRowGradeVisuals = new Dictionary<int, GameObject>();
 
+        // Same idea again, but for the online leaderboard panel's LeaderboardRow components
+        // (LeaderboardDisplay.rowsStandard). Keyed by the row GameObject's instance ID, same
+        // convention as songRowGradeVisuals, since rowsStandard is a small fixed pool of row objects
+        // reused across every leaderboard refresh. This sits on StarDisplayUI's transform — a
+        // different UGUI hierarchy/component than the song-list's StarDisplay — so it gets its own
+        // placeholder position/scale/footprint rather than borrowing SongRowGradeVisual's; tune live
+        // in UnityExplorer once visible. See ExLeaderboardDisplay.cs.
+        private const float LeaderboardRowGradeVisualFootprintHalf = 0.1f;
+        private const float LeaderboardRowGradeVisualTextFontSize = 1.71f;
+        private static readonly Vector3 LeaderboardRowGradeVisualLocalPosition = new Vector3(30f, -4f, 0f);
+        private static readonly Vector3 LeaderboardRowGradeVisualLocalScale = new Vector3(300f, 300f, 300f);
+        private static readonly Dictionary<int, GameObject> leaderboardRowGradeVisuals = new Dictionary<int, GameObject>();
+
         // Single visual shown on the level-end results screen (SongEndSequence's
         // ScorePercentStars/StarDisplay), replacing native's stars/star_pips/star_meters — see
         // HideEndSequenceNativeStars in Hooks.cs. Parented directly onto StarDisplay's transform
@@ -237,7 +250,8 @@ namespace ExScoringMod
         /// driven from the mod's own OnUpdate rather than a per-object MonoBehaviour, since
         /// registering custom Il2Cpp-injected components isn't worth it for a simple oscillation).
         /// Covers the single detail-panel visual, every currently-tracked Play History row visual,
-        /// and every currently-tracked Song Info top-score row visual. No-ops on anything showing a
+        /// every currently-tracked Song Info top-score row visual, every currently-tracked song-list
+        /// row visual, and every currently-tracked online-leaderboard row visual. No-ops on anything showing a
         /// text grade (only star children get rotated — GradeText isn't named "Star...", so it's
         /// skipped naturally by the name check below).
         /// </summary>
@@ -258,6 +272,11 @@ namespace ExScoringMod
             }
 
             foreach (var visual in songRowGradeVisuals.Values)
+            {
+                RotateStarChildren(visual, angle);
+            }
+
+            foreach (var visual in leaderboardRowGradeVisuals.Values)
             {
                 RotateStarChildren(visual, angle);
             }
@@ -425,6 +444,50 @@ namespace ExScoringMod
             {
                 if (visual != null) GameObject.Destroy(visual);
                 songRowGradeVisuals.Remove(slot);
+            }
+        }
+
+        /// <summary>
+        /// Builds (or rebuilds) the grade visual for one online-leaderboard row, parented onto
+        /// `parent` (the row's StarDisplayUI transform, with its native stars/goldRings/starMeters
+        /// and star_pips hidden first — see HideLeaderboardRowStars in ExLeaderboardDisplay.cs).
+        /// Handles both star and text grades itself, same as the other Create* variants here.
+        /// </summary>
+        public static void CreateOrUpdateLeaderboardRowGradeVisual(int slot, Transform parent, Grade grade)
+        {
+            ClearLeaderboardRowGradeVisual(slot);
+            if (parent == null)
+            {
+                MelonLogger.Log($"[ExScoring][Diag] CreateOrUpdateLeaderboardRowGradeVisual: parent is NULL (slot={slot})");
+                return;
+            }
+
+            GameObject visual = new GameObject("LeaderboardRowGradeVisual (Clone)");
+            visual.transform.SetParent(parent, false);
+            visual.layer = parent.gameObject.layer;
+            visual.transform.localPosition = LeaderboardRowGradeVisualLocalPosition;
+            visual.transform.localScale = LeaderboardRowGradeVisualLocalScale;
+
+            if (IsStarGrade(grade))
+            {
+                BuildStarLayout(visual.transform, GetStarCount(grade), GetGradeColor(grade), LeaderboardRowGradeVisualFootprintHalf);
+            }
+            else
+            {
+                CreateGradeTextLabel(visual.transform, grade, LeaderboardRowGradeVisualTextFontSize);
+            }
+
+            leaderboardRowGradeVisuals[slot] = visual;
+        }
+
+        /// <summary>Destroys and untracks a leaderboard row's grade visual, if any. Call whenever
+        /// that row is being replaced/refreshed, set to SetNone(), or EX scoring is switched off.</summary>
+        public static void ClearLeaderboardRowGradeVisual(int slot)
+        {
+            if (leaderboardRowGradeVisuals.TryGetValue(slot, out GameObject visual))
+            {
+                if (visual != null) GameObject.Destroy(visual);
+                leaderboardRowGradeVisuals.Remove(slot);
             }
         }
 

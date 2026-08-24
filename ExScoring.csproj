@@ -201,6 +201,7 @@
     <Compile Include="src\AlbumArt.cs" />
     <Compile Include="src\DifficultyCalculator.cs" />
     <Compile Include="src\EitherHandFix.cs" />
+    <Compile Include="src\ExLeaderboardDisplay.cs" />
     <Compile Include="src\FavoriteStore.cs" />
     <Compile Include="src\FolderRowManager.cs" />
     <Compile Include="src\GameplayStatsPanel.cs" />
