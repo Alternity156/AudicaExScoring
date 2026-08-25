@@ -124,13 +124,17 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Fetches the AudicaEx online leaderboard for a song+difficulty (GET /api/leaderboard,
-        /// public endpoint, no auth — see ApiContract.md section 4). Always calls onComplete exactly
-        /// once: with the parsed response on success, or null on any failure (network error, HTTP
-        /// error, or an unparsable body). Every failure path is logged first, so a null result can
-        /// always be traced back to a specific cause via MelonLogger/UnityExplorer.
+        /// Fetches the AudicaEx online leaderboard for a song+difficulty (GET /api/leaderboard —
+        /// see ApiContract.md section 4). `view` is "top" (public, default paging) or "self"
+        /// (requires an API key; server ignores offset and returns a window centered on the
+        /// requester's rank). An `Authorization` header is sent whenever an API key is configured,
+        /// regardless of view, since the contract says a valid key also unlocks `requesterRank` on
+        /// the Top view. Always calls onComplete exactly once: with the parsed response on success,
+        /// or null on any failure (network error, HTTP error, an unparsable body, or the view=self/
+        /// missing-key case below). Every failure path is logged first, so a null result can always
+        /// be traced back to a specific cause via MelonLogger/UnityExplorer.
         /// </summary>
-        public static void FetchLeaderboard(string songId, string difficulty, int limit, Action<LeaderboardApiResponse> onComplete)
+        public static void FetchLeaderboard(string songId, string difficulty, int limit, string view, Action<LeaderboardApiResponse> onComplete)
         {
             if (string.IsNullOrEmpty(songId))
             {
@@ -139,19 +143,34 @@ namespace ExScoringMod
                 return;
             }
 
-            MelonLogger.Log($"[ExScoring] FetchLeaderboard: starting songId={songId} difficulty={difficulty} limit={limit}");
-            MelonCoroutines.Start(FetchLeaderboardCoroutine(songId, difficulty, limit, onComplete));
+            if (view == "self" && string.IsNullOrEmpty(Config.ApiKey))
+            {
+                // Shouldn't be reachable in practice — the Self button is gated on having a key
+                // (see UpdateSelfButtonAvailability in ExLeaderboardDisplay.cs) — but guard here too
+                // rather than firing a request the server will just reject.
+                MelonLogger.Log("[ExScoring] FetchLeaderboard: view=self requested but no API key is set, aborting.");
+                onComplete?.Invoke(null);
+                return;
+            }
+
+            MelonLogger.Log($"[ExScoring] FetchLeaderboard: starting songId={songId} difficulty={difficulty} limit={limit} view={view}");
+            MelonCoroutines.Start(FetchLeaderboardCoroutine(songId, difficulty, limit, view, onComplete));
         }
 
-        private static IEnumerator FetchLeaderboardCoroutine(string songId, string difficulty, int limit, Action<LeaderboardApiResponse> onComplete)
+        private static IEnumerator FetchLeaderboardCoroutine(string songId, string difficulty, int limit, string view, Action<LeaderboardApiResponse> onComplete)
         {
-            string url = $"{ApiBaseUrl}/api/leaderboard?songId={Uri.EscapeDataString(songId)}&difficulty={Uri.EscapeDataString(difficulty)}&limit={limit}&offset=0";
+            string url = $"{ApiBaseUrl}/api/leaderboard?songId={Uri.EscapeDataString(songId)}&difficulty={Uri.EscapeDataString(difficulty)}&limit={limit}&offset=0&view={Uri.EscapeDataString(view)}";
 
             MelonLogger.Log($"[ExScoring] FetchLeaderboard: GET {url}");
 
             UnityWebRequest request = UnityWebRequest.Get(url);
             try
             {
+                if (!string.IsNullOrEmpty(Config.ApiKey))
+                {
+                    request.SetRequestHeader("Authorization", "ApiKey " + Config.ApiKey);
+                }
+
                 yield return request.SendWebRequest();
 
                 if (request.isNetworkError || request.isHttpError)
@@ -172,6 +191,76 @@ namespace ExScoringMod
                 catch (Exception ex)
                 {
                     MelonLogger.Log($"[ExScoring] FetchLeaderboard: failed to parse response ({request.downloadHandler.text}): {ex}");
+                    onComplete?.Invoke(null);
+                }
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Fetches the AudicaEx Total leaderboard for a song-list+difficulty (GET /api/leaderboard/total
+        /// — see ApiContract.md section 4c). Mirrors FetchLeaderboard above (same view/auth/staleness
+        /// conventions), scoped to `listId` instead of a single `songId`. `view` is "top" (public,
+        /// default paging) or "self" (requires an API key, server ignores offset). Always calls
+        /// onComplete exactly once: with the parsed response on success, or null on any failure.
+        /// </summary>
+        public static void FetchTotalLeaderboard(string listId, string difficulty, int limit, string view, Action<TotalLeaderboardApiResponse> onComplete)
+        {
+            if (string.IsNullOrEmpty(listId))
+            {
+                MelonLogger.Log("[ExScoring] FetchTotalLeaderboard: listId is null/empty, aborting.");
+                onComplete?.Invoke(null);
+                return;
+            }
+
+            if (view == "self" && string.IsNullOrEmpty(Config.ApiKey))
+            {
+                MelonLogger.Log("[ExScoring] FetchTotalLeaderboard: view=self requested but no API key is set, aborting.");
+                onComplete?.Invoke(null);
+                return;
+            }
+
+            MelonLogger.Log($"[ExScoring] FetchTotalLeaderboard: starting listId={listId} difficulty={difficulty} limit={limit} view={view}");
+            MelonCoroutines.Start(FetchTotalLeaderboardCoroutine(listId, difficulty, limit, view, onComplete));
+        }
+
+        private static IEnumerator FetchTotalLeaderboardCoroutine(string listId, string difficulty, int limit, string view, Action<TotalLeaderboardApiResponse> onComplete)
+        {
+            string url = $"{ApiBaseUrl}/api/leaderboard/total?listId={Uri.EscapeDataString(listId)}&difficulty={Uri.EscapeDataString(difficulty)}&limit={limit}&offset=0&view={Uri.EscapeDataString(view)}";
+
+            MelonLogger.Log($"[ExScoring] FetchTotalLeaderboard: GET {url}");
+
+            UnityWebRequest request = UnityWebRequest.Get(url);
+            try
+            {
+                if (!string.IsNullOrEmpty(Config.ApiKey))
+                {
+                    request.SetRequestHeader("Authorization", "ApiKey " + Config.ApiKey);
+                }
+
+                yield return request.SendWebRequest();
+
+                if (request.isNetworkError || request.isHttpError)
+                {
+                    string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
+                    MelonLogger.Log($"[ExScoring] FetchTotalLeaderboard failed ({request.responseCode}): {request.error} | listId={listId} difficulty={difficulty} | Body: {errorBody}");
+                    onComplete?.Invoke(null);
+                    yield break;
+                }
+
+                try
+                {
+                    TotalLeaderboardApiResponse response = JsonConvert.DeserializeObject<TotalLeaderboardApiResponse>(request.downloadHandler.text);
+                    int entryCount = response?.entries?.Length ?? 0;
+                    MelonLogger.Log($"[ExScoring] FetchTotalLeaderboard succeeded: listId={listId} difficulty={difficulty} entries={entryCount} total={response?.total ?? -1}");
+                    onComplete?.Invoke(response);
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Log($"[ExScoring] FetchTotalLeaderboard: failed to parse response ({request.downloadHandler.text}): {ex}");
                     onComplete?.Invoke(null);
                 }
             }

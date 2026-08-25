@@ -103,6 +103,51 @@ namespace ExScoringMod
             public bool isPersonalBest;
         }
 
+        public class LeaderboardApiEntry
+        {
+            public int rank;
+            public string nickname;
+            public float judgementPercent;
+            public RunSubmitGrade grade;
+            public long unixTimestamp;
+            public bool fullCombo;
+            public bool isRequester;
+        }
+
+        public class LeaderboardApiResponse
+        {
+            public string songId;
+            public string difficulty;
+            public LeaderboardApiEntry[] entries;
+            public int total;
+            public int? requesterRank;
+        }
+
+        /// <summary>
+        /// Entry shape for GET /api/leaderboard/total (ApiContract.md section 4c) — the main-menu
+        /// Total leaderboard, scoped per song-list per difficulty. No grade/fullCombo concept here
+        /// (totalScore is a sum across many songs, not a single run), unlike LeaderboardApiEntry.
+        /// </summary>
+        public class TotalLeaderboardApiEntry
+        {
+            public int rank;
+            public string nickname;
+            public float totalScore;
+            public int songsPlayed;
+            public bool isRequester;
+        }
+
+        public class TotalLeaderboardApiResponse
+        {
+            public string listId;
+            public string listName;
+            public string difficulty;
+            public TotalLeaderboardApiEntry[] entries;
+            public int total;
+            public int songsEligible;
+            public int? requesterRank;
+        }
+
         public class UnprocessedTargetHitPos
         {
             public int index;
