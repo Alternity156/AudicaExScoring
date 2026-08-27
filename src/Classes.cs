@@ -101,6 +101,7 @@ namespace ExScoringMod
             public RunSubmitGrade grade;
             public int rank;
             public bool isPersonalBest;
+            public bool mapDataNeeded;
         }
 
         public class LeaderboardApiEntry
@@ -180,6 +181,23 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// Plain, non-Unity Vector2 for clean JSON serialization (map cue gridOffset).
+        /// </summary>
+        public class Vector2Data
+        {
+            public float x;
+            public float y;
+
+            public Vector2Data() { }
+
+            public Vector2Data(Vector2 v)
+            {
+                x = v.x;
+                y = v.y;
+            }
+        }
+
+        /// <summary>
         /// Plain, non-Unity Quaternion for clean JSON serialization.
         /// </summary>
         public class QuaternionData
@@ -200,6 +218,48 @@ namespace ExScoringMod
             }
 
             public Quaternion ToQuaternion() => new Quaternion(x, y, z, w);
+        }
+
+        /// <summary>
+        /// Per-cue payload for POST/GET /api/songs/:songId/map (see ApiContract.md Section 9).
+        /// Static chart-authoring fields only, mirroring the native Cue class minus its
+        /// runtime-mutated fields (spawned, success, passed, target, goodForm, aim, sustainPercent,
+        /// meleeVelocityAmount, successTick, wouldHaveMissedWithoutTemporalAssist, chainHitPoint) —
+        /// none of those describe the map itself, only a specific play session against it.
+        /// </summary>
+        public class MapCueData
+        {
+            public int index;
+            public int tick;
+            public int tickLength;
+            public int pitch;
+            public int velocity;
+            public Vector2Data gridOffset;
+            public float zOffset;
+            public string handType;
+            public string behavior;
+            public int overdriveSectionIndex;
+            public float tickLookahead;
+            public float slopBeforeTicks;
+            public float slopAfterTicks;
+            public bool finaleSequenceFinalNote;
+            public bool isChainTail;
+        }
+
+        /// <summary>
+        /// Request body for POST /api/songs/:songId/map.
+        /// </summary>
+        public class MapUploadRequest
+        {
+            public MapCueData[] cues;
+        }
+
+        /// <summary>
+        /// Response shape for POST /api/songs/:songId/map.
+        /// </summary>
+        public class MapUploadResponse
+        {
+            public bool stored;
         }
 
         /// <summary>

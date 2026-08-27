@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.IO;
 using System.IO.Compression;
 using System.Linq;
@@ -57,7 +58,7 @@ namespace ExScoringMod
                 byte[] gzipBody = GzipCompress(json);
 
                 MelonLogger.Log($"[ExScoring] Submitting run {submitData.clientRunId} ({submitData.songId}/{submitData.difficulty})");
-                MelonCoroutines.Start(SubmitRunCoroutine(gzipBody));
+                MelonCoroutines.Start(SubmitRunCoroutine(submitData.songId, submitData.difficulty, gzipBody));
             }
             catch (Exception ex)
             {
@@ -84,7 +85,7 @@ namespace ExScoringMod
         /// (no way to set custom headers or a raw body), but WWW itself wraps UnityWebRequest
         /// internally, confirming the type is present here — so we use it directly instead.
         /// </summary>
-        private static IEnumerator SubmitRunCoroutine(byte[] gzipBody)
+        private static IEnumerator SubmitRunCoroutine(string songId, string difficulty, byte[] gzipBody)
         {
             string url = ApiBaseUrl + "/api/runs";
 
@@ -110,7 +111,13 @@ namespace ExScoringMod
                 {
                     RunSubmitResponse response = JsonConvert.DeserializeObject<RunSubmitResponse>(request.downloadHandler.text);
                     MelonLogger.Log($"[ExScoring] Run submitted: runId={response.runId}, rank={response.rank}, " +
-                        $"grade={response.grade?.text}, judgementPercent={response.judgementPercent:N2}, personalBest={response.isPersonalBest}");
+                        $"grade={response.grade?.text}, judgementPercent={response.judgementPercent:N2}, personalBest={response.isPersonalBest}, " +
+                        $"mapDataNeeded={response.mapDataNeeded}");
+
+                    if (response.mapDataNeeded)
+                    {
+                        UploadMapDataIfNeeded(songId, difficulty);
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -262,6 +269,118 @@ namespace ExScoringMod
                 {
                     MelonLogger.Log($"[ExScoring] FetchTotalLeaderboard: failed to parse response ({request.downloadHandler.text}): {ex}");
                     onComplete?.Invoke(null);
+                }
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Builds the static chart-shape payload for POST /api/songs/:songId/map (see ApiContract.md
+        /// Section 9) and kicks off the upload. Called off RunSubmitResponse.mapDataNeeded after a
+        /// successful run submission — the server has already told us it has no map data yet for
+        /// this songId+difficulty, so no separate existence check is needed first.
+        ///
+        /// Looks the song up fresh via SongList.I.GetSong(songId)/Enum.TryParse(difficulty) rather
+        /// than trusting selectedSongData/KataConfig.I.GetDifficulty() to still be current — this
+        /// runs after an async HTTP round-trip, so the player could already be on another screen by
+        /// the time it fires. Same defensive pattern as RunDataRecalculator.BuildChainTailLookup.
+        /// </summary>
+        private static void UploadMapDataIfNeeded(string songId, string difficultyStr)
+        {
+            try
+            {
+                if (!Enum.TryParse(difficultyStr, out KataConfig.Difficulty difficulty))
+                {
+                    MelonLogger.Log($"[ExScoring] UploadMapData: couldn't parse difficulty '{difficultyStr}', aborting.");
+                    return;
+                }
+
+                var songData = SongList.I.GetSong(songId);
+                if (songData == null)
+                {
+                    MelonLogger.Log($"[ExScoring] UploadMapData: song '{songId}' not found, aborting.");
+                    return;
+                }
+
+                var cues = SongCues.GetCues(songData, difficulty);
+
+                // Same cold-call caveat as RunDataRecalculator.BuildChainTailLookup: chainNext is
+                // only populated as a side effect of HookUpChains, which normally only runs during
+                // gameplay setup. Without it here, every Chain/ChainStart cue's chainNext reads null.
+                SongCues.HookUpChains(cues);
+
+                List<MapCueData> mapCues = new List<MapCueData>();
+                foreach (SongCues.Cue cue in cues)
+                {
+                    bool isChainTail = (cue.behavior == Target.TargetBehavior.Chain || cue.behavior == Target.TargetBehavior.ChainStart)
+                        && cue.chainNext == null;
+
+                    mapCues.Add(new MapCueData
+                    {
+                        index = cue.index,
+                        tick = cue.tick,
+                        tickLength = cue.tickLength,
+                        pitch = cue.pitch,
+                        velocity = cue.velocity,
+                        gridOffset = new Vector2Data(cue.gridOffset),
+                        zOffset = cue.zOffset,
+                        handType = cue.handType.ToString(),
+                        behavior = cue.behavior.ToString(),
+                        overdriveSectionIndex = cue.overdriveSectionIndex,
+                        tickLookahead = cue.tickLookahead,
+                        slopBeforeTicks = cue.slopBeforeTicks,
+                        slopAfterTicks = cue.slopAfterTicks,
+                        finaleSequenceFinalNote = cue.finaleSequenceFinalNote,
+                        isChainTail = isChainTail
+                    });
+                }
+
+                MapUploadRequest uploadData = new MapUploadRequest { cues = mapCues.ToArray() };
+                string json = JsonConvert.SerializeObject(uploadData, runDataSerializerSettings);
+                byte[] gzipBody = GzipCompress(json);
+
+                MelonLogger.Log($"[ExScoring] Uploading map data for {songId}/{difficultyStr} ({mapCues.Count} cues)");
+                MelonCoroutines.Start(UploadMapDataCoroutine(songId, difficultyStr, gzipBody));
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Log($"[ExScoring] Failed to prepare map upload for {songId}/{difficultyStr}: {ex}");
+            }
+        }
+
+        private static IEnumerator UploadMapDataCoroutine(string songId, string difficultyStr, byte[] gzipBody)
+        {
+            string url = $"{ApiBaseUrl}/api/songs/{Uri.EscapeDataString(songId)}/map?difficulty={Uri.EscapeDataString(difficultyStr)}";
+
+            UnityWebRequest request = new UnityWebRequest(url, "POST");
+            try
+            {
+                request.uploadHandler = new UploadHandlerRaw(gzipBody);
+                request.downloadHandler = new DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type", "application/json");
+                request.SetRequestHeader("Content-Encoding", "gzip");
+                request.SetRequestHeader("Authorization", "ApiKey " + Config.ApiKey);
+
+                yield return request.SendWebRequest();
+
+                if (request.isNetworkError || request.isHttpError)
+                {
+                    string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
+                    MelonLogger.Log($"[ExScoring] Map upload failed ({request.responseCode}) for {songId}/{difficultyStr}: {request.error} | Body: {errorBody}");
+                    yield break;
+                }
+
+                try
+                {
+                    MapUploadResponse response = JsonConvert.DeserializeObject<MapUploadResponse>(request.downloadHandler.text);
+                    MelonLogger.Log($"[ExScoring] Map upload for {songId}/{difficultyStr}: stored={response.stored}");
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Log($"[ExScoring] Map upload succeeded but failed to parse response ({request.downloadHandler.text}): {ex}");
                 }
             }
             finally
