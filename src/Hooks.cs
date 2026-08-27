@@ -119,7 +119,7 @@ namespace ExScoringMod
                     if (songPageSetupQueued) return;
 
                     songPageSetupQueued = true;
-                    MelonCoroutines.Start(SetupSongPageWhenReady(MenuState.sLastState));
+                    MelonCoroutines.Start(SetupSongPageWhenReady());
                 }
 
                 if (state == MenuState.State.SettingsPage)
@@ -129,7 +129,7 @@ namespace ExScoringMod
             }
         }
 
-        private static IEnumerator SetupSongPageWhenReady(MenuState.State lastState)
+        private static IEnumerator SetupSongPageWhenReady()
         {
             // The menu hierarchy is torn down when returning straight from gameplay
             // and is rebuilt a few frames later. Wait until the launch page exists
@@ -163,13 +163,13 @@ namespace ExScoringMod
             {
                 GlobalOptions.RestoreIfPending();
             }
-            else if (lastState == MenuState.State.MainPage)
-            {
-                AutoSelectSong();
-            }
             else
             {
-                UpdateLaunchPanelInfo();
+                // Always restore wherever we were in the list (a selected song, or just the
+                // scroll position) regardless of which page we're returning from — MainPage,
+                // Launched (finishing a song and backing out of the stats screen), DifficultyPage,
+                // Modifiers, CompareScoresPage, etc.
+                AutoSelectSong();
             }
 
             songPageSetupQueued = false;
