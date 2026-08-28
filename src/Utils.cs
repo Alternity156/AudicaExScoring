@@ -44,6 +44,8 @@ namespace ExScoringMod
             launchPanelUISetup = false;
             favoriteButtonSetup = false;
             GameplayStatsUpdateDisplayPatch._hasRun = false;
+            SetApiSubmitStatus(ApiSubmitStatus.NotSubmitted, "", Color.white);
+            apiStatusLabel = null;
             processedCuesIndexes.Clear();
             exCues.Clear();
             runSaved = false;

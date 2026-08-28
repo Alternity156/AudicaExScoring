@@ -46,6 +46,45 @@ namespace ExScoringMod
         private static void ShowGameplayStatsPanelOnResultsScreen(Transform resultsPanelParent, List<ExCue> cuesToShow, float judgementPercent, bool failed)
         {
             BuildGameplayStatsContent(resultsPanelParent, cuesToShow, judgementPercent, failed, ResultsScreenScaleMultiplier, ResultsScreenYOffset);
+
+            // Live-results-only. Position/scale tuned live in UnityExplorer (final runtime values
+            // confirmed as localPosition (-770, 600, 0), localScale (60, 60, 60) — this is that,
+            // expressed as the pre-multiplier base the rest of this panel uses).
+            apiStatusLabel = CreateTimingLabel(resultsPanelParent, "ExApiStatusDisplay (Clone)",
+                new Vector3(-23.1f, -0.5f, 0f) * ResultsScreenScaleMultiplier + new Vector3(0f, ResultsScreenYOffset, 0f),
+                currentApiStatusColor, TextAlignmentOptions.Right);
+            apiStatusLabel.text = currentApiStatusText;
+            apiStatusLabel.transform.localScale = new Vector3(1.8f, 1.8f, 1.8f) * ResultsScreenScaleMultiplier;
+        }
+
+        /// <summary>
+        /// Tracks the state of the current run's online submission (see ApiClient.SubmitRun) so the
+        /// results-screen label (above) can be initialized with whatever's already known by the time
+        /// it's created, and updated live if the request is still in flight. Reset to NotSubmitted
+        /// by ResetExScore() at the start of every new run.
+        /// </summary>
+        public enum ApiSubmitStatus { NotSubmitted, Sending, Success, Failed }
+
+        private static ApiSubmitStatus currentApiSubmitStatus = ApiSubmitStatus.NotSubmitted;
+        private static string currentApiStatusText = "";
+        private static Color currentApiStatusColor = Color.white;
+
+        // Only set while the results screen is up (see above) — null otherwise, including for the
+        // whole duration of the next song's gameplay, so a late-arriving callback from a run whose
+        // results screen has already been left behind has nothing (real) to write into.
+        private static TextMeshPro apiStatusLabel;
+
+        public static void SetApiSubmitStatus(ApiSubmitStatus status, string text, Color color)
+        {
+            currentApiSubmitStatus = status;
+            currentApiStatusText = text;
+            currentApiStatusColor = color;
+
+            if (apiStatusLabel != null)
+            {
+                apiStatusLabel.text = text;
+                apiStatusLabel.color = color;
+            }
         }
 
         /// <summary>

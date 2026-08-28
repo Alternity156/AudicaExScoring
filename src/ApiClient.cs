@@ -58,6 +58,7 @@ namespace ExScoringMod
                 byte[] gzipBody = GzipCompress(json);
 
                 MelonLogger.Log($"[ExScoring] Submitting run {submitData.clientRunId} ({submitData.songId}/{submitData.difficulty})");
+                SetApiSubmitStatus(ApiSubmitStatus.Sending, "Sending score...", Color.white);
                 MelonCoroutines.Start(SubmitRunCoroutine(submitData.songId, submitData.difficulty, gzipBody));
             }
             catch (Exception ex)
@@ -104,6 +105,7 @@ namespace ExScoringMod
                 {
                     string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
                     MelonLogger.Log($"[ExScoring] Run submission failed ({request.responseCode}): {request.error} | Body: {errorBody}");
+                    SetApiSubmitStatus(ApiSubmitStatus.Failed, "Send Failed", Color.red);
                     yield break;
                 }
 
@@ -114,6 +116,12 @@ namespace ExScoringMod
                         $"grade={response.grade?.text}, judgementPercent={response.judgementPercent:N2}, personalBest={response.isPersonalBest}, " +
                         $"mapDataNeeded={response.mapDataNeeded}");
 
+                    string statusText = response.isPersonalBest
+                        ? $"Personal Best!\nRank #{response.rank}"
+                        : $"Rank #{response.rank}";
+                    Color statusColor = response.isPersonalBest ? Color.green : Color.white;
+                    SetApiSubmitStatus(ApiSubmitStatus.Success, statusText, statusColor);
+
                     if (response.mapDataNeeded)
                     {
                         UploadMapDataIfNeeded(songId, difficulty);
@@ -122,6 +130,7 @@ namespace ExScoringMod
                 catch (Exception ex)
                 {
                     MelonLogger.Log($"[ExScoring] Run submitted but failed to parse response ({request.downloadHandler.text}): {ex}");
+                    SetApiSubmitStatus(ApiSubmitStatus.Failed, "Send Failed", Color.red);
                 }
             }
             finally

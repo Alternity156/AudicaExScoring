@@ -322,7 +322,21 @@ namespace ExScoringMod
 
             EnsureValidDifficultySelected();
 
-            CueStatsData stats = GetCueStats(SongDataHolder.I.songData, KataConfig.I.mDifficulty);
+            // Prefer our own tracked selection over native's SongDataHolder.I.songData. The latter
+            // isn't guaranteed to be re-synced yet at every point this runs — confirmed via logging
+            // that right after returning from gameplay to the song list, RefreshIntensityGraph/
+            // RefreshHeatmap (which already key off selectedSong/selectedSongData) show the correct
+            // just-played song, while the target-count labels below (previously sourced from
+            // SongDataHolder.I.songData) did not. Falling back to SongDataHolder.I.songData only
+            // covers the case selectedSongData is somehow unset.
+            SongList.SongData songData = selectedSongData ?? SongDataHolder.I?.songData;
+            if (songData == null)
+            {
+                MelonLogger.Log("[ExScoring] UpdateLaunchPanelInfo: no song data available (selectedSongData and SongDataHolder.I.songData both null), aborting.");
+                return;
+            }
+
+            CueStatsData stats = GetCueStats(songData, KataConfig.I.mDifficulty);
 
             GameObject launchPanelCenterArtistLabel = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center/ArtistLabel");
             GameObject launchPanelCenterTitleLabel = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center/Title");
@@ -333,10 +347,10 @@ namespace ExScoringMod
             GameObject launchPanelCenterTotalLeftHandTargets = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center/TotalLeftHandTargets");
             GameObject launchPanelCenterTotalEitherHandTargets = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center/TotalEitherHandTargets");
 
-            launchPanelCenterArtistLabel.GetComponent<TextMeshPro>().text = SongDataHolder.I.songData.artist;
-            launchPanelCenterTitleLabel.GetComponent<TextMeshPro>().text = SongDataHolder.I.songData.title;
-            launchPanelCenterMapperLabel.GetComponent<TextMeshPro>().text = SongDataHolder.I.songData.author;
-            launchPanelCenterTempoLabel.GetComponent<TextMeshPro>().text = $"BPM: {GetTempoString(SongDataHolder.I.songData.tempos)}";
+            launchPanelCenterArtistLabel.GetComponent<TextMeshPro>().text = songData.artist;
+            launchPanelCenterTitleLabel.GetComponent<TextMeshPro>().text = songData.title;
+            launchPanelCenterMapperLabel.GetComponent<TextMeshPro>().text = songData.author;
+            launchPanelCenterTempoLabel.GetComponent<TextMeshPro>().text = $"BPM: {GetTempoString(songData.tempos)}";
             launchPanelCenterTotalTargets.GetComponent<TextMeshPro>().text = GetCueStatsString(stats);
             launchPanelCenterTotalRightHandTargets.GetComponent<TextMeshPro>().text = GetRightHandCueStatsString(stats);
             launchPanelCenterTotalLeftHandTargets.GetComponent<TextMeshPro>().text = GetLeftHandCueStatsString(stats);
@@ -357,7 +371,7 @@ namespace ExScoringMod
             HideLaunchPanelElement(launchCenter, "MapperAlert");
 
             if (songDataLoaderInstalled)
-                AlbumArt.UpdateAlbumArt(SongDataHolder.I.songData.songID);
+                AlbumArt.UpdateAlbumArt(songData.songID);
         }
 
         /// <summary>
@@ -540,13 +554,22 @@ namespace ExScoringMod
         /// </summary>
         public static void EnsureValidDifficultySelected()
         {
-            if (SongDataHolder.I == null || SongDataHolder.I.songData == null) return;
+            // Same staleness gap as UpdateLaunchPanelInfo (see its comment): prefer our own tracked
+            // selection over native's SongDataHolder.I.songData, which isn't guaranteed to be
+            // re-synced yet at every point this runs. Previously this used SongDataHolder.I.songData
+            // exclusively and just no-opped when it was null/stale — silently skipping the
+            // difficulty correction below, which left KataConfig.I.mDifficulty (and therefore the
+            // target-count labels computed from it) wrong on whatever fraction of returns-from-
+            // gameplay happened to hit that staleness window. That's consistent with the bug being
+            // intermittent rather than constant.
+            SongList.SongData songData = selectedSongData ?? SongDataHolder.I?.songData;
+            if (songData == null) return;
 
             KataConfig.Difficulty[] difficulties = new KataConfig.Difficulty[] { KataConfig.Difficulty.Easy, KataConfig.Difficulty.Normal, KataConfig.Difficulty.Hard, KataConfig.Difficulty.Expert };
 
             bool[] available = new bool[difficulties.Length];
             for (int i = 0; i < difficulties.Length; i++)
-                available[i] = SongHasDifficulty(SongDataHolder.I.songData, difficulties[i]);
+                available[i] = SongHasDifficulty(songData, difficulties[i]);
 
             KataConfig.Difficulty current = KataConfig.I.GetDifficulty();
             int currentIndex = System.Array.IndexOf(difficulties, current);

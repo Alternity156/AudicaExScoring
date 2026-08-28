@@ -172,7 +172,78 @@ namespace ExScoringMod
                 AutoSelectSong();
             }
 
+            // Same root cause as the leaderboard fix below: UpdateLaunchPanelInfo() (target-count
+            // labels, EnsureValidDifficultySelected) currently only gets called from this same slow
+            // AutoSelectSong -> native re-select chain, so it's just as prone to landing several
+            // seconds late — except this one's unaffected labels sit there stale/mismatched instead
+            // of a visibly-blank panel, so it only gets noticed intermittently rather than every
+            // time. Unlike the leaderboard, the label GameObjects themselves are guaranteed to
+            // already exist here (LaunchPanelUISetup(), called synchronously just above, creates
+            // them once per session on the very first song-page visit), so no polling needed — call
+            // it immediately using our own already-known selectedSong/selectedSongData.
+            if (!string.IsNullOrEmpty(selectedSong))
+            {
+                UpdateLaunchPanelInfo();
+            }
+
+            // AutoSelectSong()'s underlying coroutine (VirtualSongList.SelectBoundItem, eventually)
+            // is what actually calls leaderboard.ViewTop() again — but it waits up to 3s for
+            // VirtualSongList to become active plus more frames for the row to bind. Confirmed via
+            // logging a ~3.4s gap between returning here and that call landing, specifically on the
+            // "finish a song, back out to the list" path — the one where this coroutine's own
+            // comment above notes the menu hierarchy (including the leaderboard panel) gets torn
+            // down and rebuilt fresh. A freshly (re)created LeaderboardDisplay starts out showing
+            // native's own placeholder rows until something calls UpdateLeaderboard on it, so
+            // without this, the panel visibly sits on stale/placeholder content for that whole gap.
+            //
+            // A synchronous FindObjectOfType() call right here isn't enough — the panel isn't
+            // necessarily instantiated/active yet at this exact point either (same reason
+            // AutoSelectSong's own chain needs to wait in the first place), so poll for it over a
+            // few frames instead and refresh the moment it actually appears, well ahead of
+            // AutoSelectSong's slower chain. selectedSong is captured now and re-checked each frame
+            // so a fast subsequent song switch can't have this stale request clobber a newer one.
+            if (!string.IsNullOrEmpty(selectedSong))
+            {
+                MelonCoroutines.Start(RefreshLeaderboardWhenReady(selectedSong));
+            }
+
             songPageSetupQueued = false;
+        }
+
+        /// <summary>
+        /// Polls for a LeaderboardDisplay to exist/activate (up to ~1s at 60fps — comfortably
+        /// faster than AutoSelectSong's own 3s+ chain) and calls ViewTop() on it as soon as found,
+        /// rather than assuming FindObjectOfType() would already succeed synchronously right after
+        /// returning to the song page. This binding's FindObjectOfType() has no includeInactive
+        /// overload, so an object that exists but is still inactive at a given poll won't be seen
+        /// until it activates — the retry loop covers that the same way it covers the object not
+        /// existing yet at all.
+        /// </summary>
+        private static IEnumerator RefreshLeaderboardWhenReady(string songIdAtCallTime)
+        {
+            const int maxFrames = 60;
+            for (int f = 0; f < maxFrames; f++)
+            {
+                // Bail if the player moved on (different song, or left the song page entirely)
+                // since this was queued, so a stale request can't clobber a newer, correct one.
+                if (menuState != MenuState.State.SongPage || selectedSong != songIdAtCallTime)
+                {
+                    MelonLogger.Log($"[ExScoring] RefreshLeaderboardWhenReady: aborting for {songIdAtCallTime} (state/song changed).");
+                    yield break;
+                }
+
+                var leaderboard = UnityEngine.Object.FindObjectOfType<LeaderboardDisplay>();
+                if (leaderboard != null)
+                {
+                    MelonLogger.Log($"[ExScoring] RefreshLeaderboardWhenReady: found LeaderboardDisplay after {f} frame(s) for {songIdAtCallTime}, calling ViewTop().");
+                    leaderboard.ViewTop();
+                    yield break;
+                }
+
+                yield return null;
+            }
+
+            MelonLogger.Log($"[ExScoring] RefreshLeaderboardWhenReady: LeaderboardDisplay never found within {maxFrames} frames for {songIdAtCallTime}.");
         }
 
         [HarmonyPatch(typeof(SongPreview), "OnLaunchScreen")]

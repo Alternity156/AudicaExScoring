@@ -16,11 +16,6 @@ namespace ExScoringMod
         // in SongListHighScoreUI.cs, but simpler since only one leaderboard panel is ever open.
         private static int leaderboardRequestVersion = 0;
 
-        // TODO: hardcoded until Section 4b's list-tab UI exists (GET /api/song-lists) and there's a
-        // difficulty picker for the main-menu Total leaderboard. Defaults to the OST list at Expert.
-        private const string TotalLeaderboardListId = "ost";
-        private const string TotalLeaderboardDifficulty = "Expert";
-
         /// <summary>
         /// Single choke point ViewTop()/ViewSelf()/ViewFriends() and the post-song
         /// ReportScoreAndDisplayLeaderboard() all funnel through to actually fetch/display leaderboard
@@ -50,69 +45,22 @@ namespace ExScoringMod
 
                 HideNativeLeaderboardButtons(display);
 
+                // AudicaEx has only one leaderboard ("Top") — there's no Self/Friends/Party
+                // equivalent. Native still calls this with mode=Self on its own (confirmed via
+                // logging: ReportScoreAndDisplayLeaderboard defaults the post-song results
+                // leaderboard to Self), even though the buttons that would let the player manually
+                // request those modes are hidden above. Rather than treating a non-Top mode as "no
+                // such view" and blanking the panel, just show the Top leaderboard regardless —
+                // that's the only leaderboard AudicaEx has, so it's the correct thing to show either
+                // way.
                 if (mode != OnlineLeaderboard.LeaderboardMode.Top)
                 {
-                    MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX scoring has no '{mode}' leaderboard (buttons should have been hidden — check HideNativeLeaderboardButtons). Blanking rows.");
-                    if (display != null && display.totalLeaderboards)
-                    {
-                        EnsureTotalRowsParentActive(display);
-                        BlankAllTotalLeaderboardRows(display);
-                    }
-                    else
-                    {
-                        BlankAllLeaderboardRows(display);
-                    }
-                    return false;
+                    MelonLogger.Log($"[ExScoring] UpdateLeaderboard: mode={mode} requested, showing Top instead (AudicaEx has a single leaderboard).");
                 }
 
                 if (display == null)
                 {
                     MelonLogger.Log("[ExScoring] UpdateLeaderboard: display is NULL, aborting EX leaderboard fetch.");
-                    return false;
-                }
-
-                if (display.totalLeaderboards)
-                {
-                    // Main-menu Total leaderboard (ApiContract.md section 4c) — no selected song
-                    // involved, so this branches out before the per-song selectedSongData check below.
-                    //
-                    // Native normally swaps which row-parent GameObject is active (rowsStandardParent
-                    // vs rowsTotalParent) based on totalLeaderboards inside the same code path we skip
-                    // by returning false below — so without this call, rowsTotalParent never becomes
-                    // active and the panel keeps showing whatever rowsStandardParent last had (stale/
-                    // placeholder native content) even though rowsTotal itself is being populated
-                    // correctly. Confirmed via UnityExplorer: manually activating rowsTotalParent shows
-                    // our real data immediately.
-                    EnsureTotalRowsParentActive(display);
-
-                    int totalRequestVersion = ++leaderboardRequestVersion;
-                    MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX Total fetch #{totalRequestVersion} starting listId={TotalLeaderboardListId} difficulty={TotalLeaderboardDifficulty}");
-
-                    FetchTotalLeaderboard(TotalLeaderboardListId, TotalLeaderboardDifficulty, LeaderboardDisplay.kNumRows, "top", response =>
-                    {
-                        if (totalRequestVersion != leaderboardRequestVersion)
-                        {
-                            MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX Total fetch #{totalRequestVersion} result discarded (stale — current is #{leaderboardRequestVersion}).");
-                            return;
-                        }
-
-                        if (!Config.ExType)
-                        {
-                            MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX Total fetch #{totalRequestVersion} result discarded (scoring type changed mid-fetch).");
-                            return;
-                        }
-
-                        if (response == null)
-                        {
-                            MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX Total fetch #{totalRequestVersion} failed (see ApiClient log above), blanking rows.");
-                            BlankAllTotalLeaderboardRows(display);
-                            return;
-                        }
-
-                        MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX Total fetch #{totalRequestVersion} applying {response.entries?.Length ?? 0} row(s).");
-                        PopulateTotalLeaderboardRows(display, response);
-                    });
-
                     return false;
                 }
 
@@ -212,23 +160,6 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Activates rowsTotalParent and deactivates rowsStandardParent on the given display. Native
-        /// normally does this swap itself (based on totalLeaderboards) as part of the same code path
-        /// our Prefix skips by returning false — see the call site in OnlineLeaderboardUpdateLeaderboardPatch
-        /// for the full explanation. Idempotent/safe to call every time we're about to draw or blank
-        /// the Total leaderboard's rows.
-        /// </summary>
-        private static void EnsureTotalRowsParentActive(LeaderboardDisplay display)
-        {
-            if (display == null) return;
-
-            if (display.rowsStandardParent != null) display.rowsStandardParent.SetActive(false);
-            if (display.rowsTotalParent != null) display.rowsTotalParent.SetActive(true);
-
-            MelonLogger.Log("[ExScoring][Diag] EnsureTotalRowsParentActive: rowsStandardParent hidden, rowsTotalParent shown.");
-        }
-
-        /// <summary>
         /// Populates display.rowsStandard from an AudicaEx leaderboard response: entries fill rows
         /// front-to-back, any remaining rows beyond the response's entry count are blanked. Capped
         /// naturally since FetchLeaderboard was asked for at most kNumRows entries.
@@ -265,50 +196,6 @@ namespace ExScoringMod
 
                 if (i < entryCount)
                     ApplyLeaderboardEntryToRow(row, entries[i]);
-                else
-                    ClearLeaderboardRow(row);
-            }
-
-            ShowLeaderboardPanelContent(display);
-        }
-
-        /// <summary>
-        /// Total-leaderboard counterpart to PopulateLeaderboardRows above — same front-to-back fill/
-        /// blank-remainder logic, but reads display.rowsTotal instead of rowsStandard and applies
-        /// TotalLeaderboardApiEntry (totalScore/songsPlayed) instead of a per-song run entry.
-        /// </summary>
-        private static void PopulateTotalLeaderboardRows(LeaderboardDisplay display, TotalLeaderboardApiResponse response)
-        {
-            if (display == null)
-            {
-                MelonLogger.Log("[ExScoring] PopulateTotalLeaderboardRows: display is NULL, aborting.");
-                return;
-            }
-
-            Il2CppReferenceArray<LeaderboardRow> rows = display.rowsTotal;
-            if (rows == null)
-            {
-                MelonLogger.Log("[ExScoring] PopulateTotalLeaderboardRows: rowsTotal is NULL, aborting.");
-                return;
-            }
-
-            TotalLeaderboardApiEntry[] entries = response?.entries;
-            int entryCount = entries?.Length ?? 0;
-            int rowCount = rows.Length;
-
-            MelonLogger.Log($"[ExScoring] PopulateTotalLeaderboardRows: rowCount={rowCount} entryCount={entryCount}");
-
-            for (int i = 0; i < rowCount; i++)
-            {
-                LeaderboardRow row = rows[i];
-                if (row == null)
-                {
-                    MelonLogger.Log($"[ExScoring][Diag] PopulateTotalLeaderboardRows: row[{i}] is NULL, skipping.");
-                    continue;
-                }
-
-                if (i < entryCount)
-                    ApplyTotalLeaderboardEntryToRow(row, entries[i]);
                 else
                     ClearLeaderboardRow(row);
             }
@@ -385,50 +272,6 @@ namespace ExScoringMod
             row.gameObject.SetActive(true);
         }
 
-        /// <summary>
-        /// Total-leaderboard counterpart to ApplyLeaderboardEntryToRow above. No grade/fullCombo
-        /// concept for a Total entry (it's a sum across many songs, not one run), so stars are hidden
-        /// the same way a blank row would be. totalScore is formatted "512,345" (thousands separator,
-        /// no decimals). songsPlayed/songsEligible aren't surfaced yet — percentile stays hidden, same
-        /// as the per-song row — revisit once there's a spot for "(42/45 songs)".
-        /// </summary>
-        private static void ApplyTotalLeaderboardEntryToRow(LeaderboardRow row, TotalLeaderboardApiEntry entry)
-        {
-            int slot = row.gameObject.GetInstanceID();
-            string rowName = row.gameObject.name;
-
-            if (row.rank != null)
-                row.rank.text = entry.rank.ToString();
-            else
-                MelonLogger.Log($"[ExScoring][Diag] ApplyTotalLeaderboardEntryToRow: rank field NULL for row '{rowName}' slot={slot}, nickname={entry.nickname}.");
-
-            if (row.username != null)
-            {
-                string nickname = string.IsNullOrEmpty(entry.nickname) ? "???" : entry.nickname;
-                row.username.text = LeaderboardDisplay.LaurelWrap(nickname, false);
-            }
-            else
-            {
-                MelonLogger.Log($"[ExScoring][Diag] ApplyTotalLeaderboardEntryToRow: username field NULL for row '{rowName}' slot={slot}, nickname={entry.nickname}.");
-            }
-
-            if (row.score != null)
-                row.score.text = entry.totalScore.ToString("N0");
-            else
-                MelonLogger.Log($"[ExScoring][Diag] ApplyTotalLeaderboardEntryToRow: score field NULL for row '{rowName}' slot={slot}, nickname={entry.nickname}.");
-
-            if (row.percentile != null)
-                row.percentile.gameObject.SetActive(false);
-            else
-                MelonLogger.Log($"[ExScoring][Diag] ApplyTotalLeaderboardEntryToRow: percentile field NULL for row '{rowName}' slot={slot}, nickname={entry.nickname}.");
-
-            HideLeaderboardRowStars(row.starDisplay);
-
-            if (row.compareButton != null) row.compareButton.SetActive(false);
-
-            row.gameObject.SetActive(true);
-        }
-
         private static void ClearLeaderboardRow(LeaderboardRow row)
         {
             if (row == null) return;
@@ -447,29 +290,6 @@ namespace ExScoringMod
             if (rows == null)
             {
                 MelonLogger.Log("[ExScoring][Diag] BlankAllLeaderboardRows: rowsStandard is NULL.");
-                return;
-            }
-
-            for (int i = 0; i < rows.Length; i++)
-            {
-                if (rows[i] != null) ClearLeaderboardRow(rows[i]);
-            }
-
-            ShowLeaderboardPanelContent(display);
-        }
-
-        /// <summary>
-        /// Total-leaderboard counterpart to BlankAllLeaderboardRows above — same logic, but reads
-        /// display.rowsTotal instead of rowsStandard.
-        /// </summary>
-        private static void BlankAllTotalLeaderboardRows(LeaderboardDisplay display)
-        {
-            if (display == null) return;
-
-            Il2CppReferenceArray<LeaderboardRow> rows = display.rowsTotal;
-            if (rows == null)
-            {
-                MelonLogger.Log("[ExScoring][Diag] BlankAllTotalLeaderboardRows: rowsTotal is NULL.");
                 return;
             }
 
@@ -540,20 +360,8 @@ namespace ExScoringMod
         {
             if (display == null) return;
 
-            int restoredStandard = RestoreLeaderboardRowArray(display.rowsStandard);
-            int restoredTotal = RestoreLeaderboardRowArray(display.rowsTotal);
-
-            MelonLogger.Log($"[ExScoring][Diag] RestoreLeaderboardRows: restored {restoredStandard} standard row(s), {restoredTotal} total row(s).");
-        }
-
-        /// <summary>
-        /// Per-array body of RestoreLeaderboardRows above, shared between rowsStandard and rowsTotal
-        /// so a row we hid in either mode (see ClearLeaderboardRow) doesn't stay stuck hidden once
-        /// native takes back over. Returns the row count restored (-1 if the array itself was NULL).
-        /// </summary>
-        private static int RestoreLeaderboardRowArray(Il2CppReferenceArray<LeaderboardRow> rows)
-        {
-            if (rows == null) return -1;
+            Il2CppReferenceArray<LeaderboardRow> rows = display.rowsStandard;
+            if (rows == null) return;
 
             int restoredRows = 0;
             for (int i = 0; i < rows.Length; i++)
@@ -575,7 +383,7 @@ namespace ExScoringMod
                 restoredRows++;
             }
 
-            return restoredRows;
+            MelonLogger.Log($"[ExScoring][Diag] RestoreLeaderboardRows: restored {restoredRows} row(s).");
         }
 
         private static int SetImageArrayEnabled(Il2CppReferenceArray<Image> images, bool enabled, string label)
