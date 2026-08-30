@@ -22,6 +22,15 @@ namespace ExScoringMod
         public static bool songRequestInstalled = false;
         public static bool suppressShellPageAnimations = false;
         public static bool songPageSetupQueued = false;
+
+        /// <summary>
+        /// True when MenuState.Launched was entered without going through our SongPage/LaunchPage
+        /// flow (e.g. Audica's built-in AV/gun calibration test, launched straight from Options).
+        /// Set the moment that abnormal transition is detected (SettingsPage -> Launching) and
+        /// consumed exactly once, the next time SetupSongPageWhenReady runs — see Hooks.cs.
+        /// Real song launches always go SongPage -> Launching, so this can never be true for them.
+        /// </summary>
+        public static bool launchedOutsideSongFlow = false;
         public static string selectedSong;
         public static SongList.SongData selectedSongData;
 

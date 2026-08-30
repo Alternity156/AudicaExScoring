@@ -79,6 +79,15 @@ namespace ExScoringMod
                 if (menuState == MenuState.State.SongPage && state != MenuState.State.SongPage)
                     GlobalOptions.ForceTeardown();
 
+                // Calibration (and any other non-song flow) jumps straight from Settings into
+                // gameplay, skipping SongPage/LaunchPage entirely — flag it so we don't treat this
+                // Launched session like a real song later on (AutoSelectSong, purple stage visual).
+                if (menuState == MenuState.State.SettingsPage && state == MenuState.State.Launching)
+                {
+                    launchedOutsideSongFlow = true;
+                    MelonLogger.Log("[ExScoring] SetState: SettingsPage -> Launching detected (calibration?) — launchedOutsideSongFlow = true");
+                }
+
                 if (menuState == MenuState.State.Launched && state != MenuState.State.Launched)
                 {
                     ResetExScore();
@@ -163,7 +172,7 @@ namespace ExScoringMod
             {
                 GlobalOptions.RestoreIfPending();
             }
-            else
+            else if (!launchedOutsideSongFlow)
             {
                 // Always restore wherever we were in the list (a selected song, or just the
                 // scroll position) regardless of which page we're returning from — MainPage,
@@ -171,6 +180,18 @@ namespace ExScoringMod
                 // Modifiers, CompareScoresPage, etc.
                 AutoSelectSong();
             }
+            else
+            {
+                // Calibration etc. — the menu/song-pool rebuild after a real gameplay session is
+                // slower than AutoSelectSong's bind window accounts for on this path, so skip it
+                // rather than let it silently fail. UpdateLaunchPanelInfo/RefreshLeaderboardWhenReady
+                // below still run and don't depend on this succeeding.
+                MelonLogger.Log("[ExScoring] SetupSongPageWhenReady: skipping AutoSelectSong (launchedOutsideSongFlow) — likely returning from calibration");
+            }
+
+            // Consumed exactly once here regardless of which branch ran above, so it can never
+            // linger and suppress a legitimate future reveal.
+            launchedOutsideSongFlow = false;
 
             // Same root cause as the leaderboard fix below: UpdateLaunchPanelInfo() (target-count
             // labels, EnsureValidDifficultySelected) currently only gets called from this same slow
@@ -443,6 +464,10 @@ namespace ExScoringMod
         {
             public static void Postfix(ShaderGlobals __instance)
             {
+                // Calibration etc. — neither the song-purple nor menu-purple override applies;
+                // leave native's own calculation alone.
+                if (launchedOutsideSongFlow) return;
+
                 if (menuState == MenuState.State.Launched)
                 {
                     if (Config.ExType)
@@ -862,7 +887,7 @@ namespace ExScoringMod
         {
             public static void Prefix(GameplayStats __instance)
             {
-                if (!Config.ExType) return;
+                if (!Config.ExType || launchedOutsideSongFlow) return;
 
                 if (__instance.mTickProgress < float.MaxValue / 2f)
                 {
@@ -879,6 +904,10 @@ namespace ExScoringMod
 
             public static bool Prefix(GameplayStats __instance)
             {
+                // Calibration etc. — this isn't a real song, so show native's own stats screen
+                // instead of replacing it with our EX breakdown panel.
+                if (launchedOutsideSongFlow) return true;
+
                 if (Config.ExType)
                 {
                     if (_hasRun) return false;
@@ -1064,6 +1093,7 @@ namespace ExScoringMod
             private static bool Prefix(FailedScreen __instance)
             {
                 if (KataConfig.I.practiceMode) return true;
+                if (launchedOutsideSongFlow) return true;
                 if (!Config.ShowStatsOnFail) return true;
 
                 SongEnd.I.ShowResults();
