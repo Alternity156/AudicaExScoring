@@ -114,6 +114,14 @@ namespace ExScoringMod
             public long unixTimestamp;
             public bool fullCombo;
             public bool isRequester;
+
+            /// <summary>
+            /// Platform the entry's best run was played on (ApiContract.md v2.9, Section 4): one of
+            /// "Steam"/"Oculus"/"Viveport"/"Playstation"/"Unknown". "Unknown" for any run submitted
+            /// before the mod sent this field, or wherever the server couldn't detect it. See
+            /// ApplyPlatformIcon in ExLeaderboardDisplay.cs for how this maps to a row icon.
+            /// </summary>
+            public string platform;
         }
 
         public class LeaderboardApiResponse

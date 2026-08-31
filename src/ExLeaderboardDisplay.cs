@@ -252,6 +252,8 @@ namespace ExScoringMod
 
             if (row.percentile != null) row.percentile.gameObject.SetActive(false);
 
+            ApplyPlatformIcon(row.platform, entry.platform);
+
             HideLeaderboardRowStars(row.starDisplay);
 
             string gradeId = entry.grade?.id;
@@ -270,6 +272,61 @@ namespace ExScoringMod
             if (row.compareButton != null) row.compareButton.SetActive(false);
 
             row.gameObject.SetActive(true);
+        }
+
+        /// <summary>
+        /// Maps an EX leaderboard entry's platform string (ApiContract.md v2.9) directly to one of
+        /// KataConfig's platform sprites and applies it to the row's icon Image. Mirrors native's own
+        /// LeaderboardRow.SetData behavior (confirmed via Ghidra decompile): Oculus/Steam/Viveport get
+        /// their KataConfig.I texture, anything else (Playstation, Unknown, missing) just disables the
+        /// Image rather than showing a wrong or fabricated icon — there's no Playstation or "unknown"
+        /// sprite in the base game either, so this isn't a workaround, it's the same fallback native
+        /// uses when it has no icon to show. Unlike native, we go straight from our own API's platform
+        /// string to a sprite — no need to round-trip through LeaderboardRowMemberData.GetPlatform().
+        /// </summary>
+        private static void ApplyPlatformIcon(Image platformImage, string platform)
+        {
+            if (platformImage == null)
+            {
+                MelonLogger.Log("[ExScoring][Diag] ApplyPlatformIcon: platformImage is NULL.");
+                return;
+            }
+
+            Sprite sprite = null;
+            KataConfig kataConfig = KataConfig.I;
+
+            if (kataConfig != null)
+            {
+                switch (platform)
+                {
+                    case "Oculus":
+                        sprite = kataConfig.oculusTexture;
+                        break;
+                    case "Steam":
+                        sprite = kataConfig.steamTexture;
+                        break;
+                    case "Viveport":
+                        sprite = kataConfig.viveportTexture;
+                        break;
+                    default:
+                        // Playstation, Unknown, null, or anything unrecognized — no icon to show.
+                        break;
+                }
+            }
+            else
+            {
+                MelonLogger.Log("[ExScoring][Diag] ApplyPlatformIcon: KataConfig.I is NULL.");
+            }
+
+            if (sprite != null)
+            {
+                platformImage.sprite = sprite;
+                platformImage.enabled = true;
+            }
+            else
+            {
+                platformImage.enabled = false;
+            }
         }
 
         private static void ClearLeaderboardRow(LeaderboardRow row)
@@ -370,6 +427,12 @@ namespace ExScoringMod
                 if (row == null) continue;
 
                 row.gameObject.SetActive(true);
+
+                // We may have disabled this in ApplyPlatformIcon (Unknown/Playstation/no data). Native's
+                // own SetData always explicitly sets platform.enabled itself (true for Oculus/Steam/
+                // Viveport, false otherwise), so re-enabling here just restores its starting assumption —
+                // its next SetData call will correct it either way, same reasoning as the star visuals.
+                if (row.platform != null) row.platform.enabled = true;
 
                 if (row.starDisplay != null)
                 {
