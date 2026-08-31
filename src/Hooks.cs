@@ -293,12 +293,51 @@ namespace ExScoringMod
                 if (parent == null) return true;
                 DifficultySelectButton diffButton = parent.GetComponent<DifficultySelectButton>();
                 if (diffButton == null) return true;
+
+                MelonLogger.Log($"[ExScoring] GunButtonOnHit: difficulty button hit -> {diffButton.difficulty}");
+
                 KataConfig.I.SetDifficulty(diffButton.difficulty);
                 var songSelectObj = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect");
                 var songSelect = songSelectObj.GetComponent<SongSelect>();
                 songSelect.mDisplayingForDifficulty = diffButton.difficulty;
                 UpdateDifficultyIndicator(diffButton.difficulty);
-                RefreshIntensityGraph();
+                RefreshIntensityGraph(); // also refreshes the heatmap internally
+
+                // Target-count labels (TotalTargets/Left/Right/Either) + difficulty button enabled-state,
+                // same call already used on song select — GetCueStats reads KataConfig.I.mDifficulty fresh.
+                MelonLogger.Log("[ExScoring] GunButtonOnHit: refreshing launch panel info (target data).");
+                UpdateLaunchPanelInfo();
+
+                // EX leaderboard — panel already exists/active on the song page here, so a direct find +
+                // ViewTop() is enough (no need for the post-scene-rebuild polling coroutine used elsewhere).
+                var leaderboard = UnityEngine.Object.FindObjectOfType<LeaderboardDisplay>();
+                if (leaderboard != null)
+                {
+                    MelonLogger.Log("[ExScoring] GunButtonOnHit: refreshing leaderboard via ViewTop().");
+                    leaderboard.ViewTop();
+                }
+                else
+                {
+                    MelonLogger.Log("[ExScoring] GunButtonOnHit: no LeaderboardDisplay found, skipping leaderboard refresh.");
+                }
+
+                // Song-list row high scores — VirtualSongList skips UpdateHighScoreInfo() when a pooled row
+                // is rebound to the same song, so nothing else re-triggers this on a pure difficulty change.
+                MelonLogger.Log("[ExScoring] GunButtonOnHit: refreshing visible song-list row scores.");
+                RefreshAllVisibleSongRowScores();
+
+                // History panel, if currently open. ApplyHistoryToPanel (inside the coroutine) already calls
+                // ResetHistorySelection(), which tears down any stale selected-run stats panel/graphs too.
+                if (Config.ExType)
+                {
+                    var songInfoPanel = UnityEngine.Object.FindObjectOfType<SongInfoPanel>();
+                    if (songInfoPanel != null && songInfoPanel.gameObject.activeInHierarchy)
+                    {
+                        MelonLogger.Log($"[ExScoring] GunButtonOnHit: history panel open, repopulating for {selectedSong}|{diffButton.difficulty}.");
+                        MelonCoroutines.Start(PopulateHistoryCoroutine(songInfoPanel, selectedSong, diffButton.difficulty.ToString()));
+                    }
+                }
+
                 KataUtil.PlayFMODEvent("event:/shell/button_shatter");
                 return false;
             }
