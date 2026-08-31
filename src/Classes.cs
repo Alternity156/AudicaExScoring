@@ -81,6 +81,7 @@ namespace ExScoringMod
             public long unixTimestamp;
             public bool failed;
             public int pauseCount;
+            public string platform;
             public ExCueSaveData[] exCues;
         }
 

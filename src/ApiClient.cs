@@ -51,6 +51,7 @@ namespace ExScoringMod
                     unixTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                     failed = failed,
                     pauseCount = pauseCount,
+                    platform = GetPlatformString(),
                     exCues = slimCues
                 };
 
