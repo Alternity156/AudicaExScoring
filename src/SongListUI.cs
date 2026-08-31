@@ -1,4 +1,5 @@
-﻿using MelonLoader;
+﻿using System.Collections.Generic;
+using MelonLoader;
 using TMPro;
 using UnityEngine;
 
@@ -10,52 +11,73 @@ namespace ExScoringMod
         private static Vector3 songSelectionIndicatorScale = new Vector3(3.625f, 1.5f, 1f);
         private static Vector3 songSelectionIndicatorPosition = new Vector3(0f, 0f, -0.05f);
 
-        private static GameObject currentSongSelectionIndicator = null;
+        // Every indicator GameObject currently lit for the selected song. Usually just one, but
+        // the same songID can legitimately appear as more than one row in the view (e.g. a song
+        // shown under Song Requests / Search Results as well as its home folder) — every bound
+        // row displaying the selected song should be highlighted, not just the last one processed.
+        private static readonly HashSet<GameObject> activeSongSelectionIndicators = new HashSet<GameObject>();
+
+        // Which songID the currently-tracked indicators belong to. Used to know whether a new
+        // UpdateSongSelectionIndicator call represents a genuine selection change (clear first)
+        // or just another row displaying the song that's already selected (add, don't clear).
+        private static string indicatorSongID = null;
 
         /// <summary>
-        /// Shows a selection indicator on the currently selected song list item.
-        /// Creates the indicator lazily on first selection of each item.
+        /// Shows a selection indicator on the given song list item for the given songID.
+        /// Creates the indicator lazily on first selection of each item. If songID differs from
+        /// whatever the currently-lit indicators represent, those are cleared first — so a genuine
+        /// selection change always ends with only the new song highlighted, while every row still
+        /// showing the same selected song (callers apply this per matching row) stays lit.
         /// </summary>
-        public static void UpdateSongSelectionIndicator(SongSelectItem selectedItem)
+        public static void UpdateSongSelectionIndicator(SongSelectItem selectedItem, string songID)
         {
-            if (difficultyIndicatorSource == null) return;
+            if (difficultyIndicatorSource == null || selectedItem == null) return;
 
-            // Hide the previous indicator
-            if (currentSongSelectionIndicator != null)
-                currentSongSelectionIndicator.SetActive(false);
-
-            if (selectedItem == null) return;
+            if (indicatorSongID != songID)
+            {
+                ClearSongSelectionIndicators();
+                indicatorSongID = songID;
+            }
 
             // Reuse existing indicator if already created for this item
             Transform existing = selectedItem.transform.Find("SelectedIndicator");
+            GameObject indicator;
             if (existing != null)
             {
-                currentSongSelectionIndicator = existing.gameObject;
+                indicator = existing.gameObject;
 
                 // Keep the indicator below the row's Canvas (canvas = 0, indicator = -1)
                 MeshRenderer existingRenderer = existing.GetComponent<MeshRenderer>();
                 if (existingRenderer != null)
                     existingRenderer.sortingOrder = -1;
-
-                currentSongSelectionIndicator.SetActive(true);
-                return;
             }
-
-            // First time selecting this item — create the indicator
-            GameObject indicator = GameObject.Instantiate(difficultyIndicatorSource, selectedItem.transform);
-            indicator.name = "SelectedIndicator";
-            indicator.transform.localPosition = songSelectionIndicatorPosition;
-            indicator.transform.localRotation = Quaternion.identity;
-            indicator.transform.localScale = songSelectionIndicatorScale;
-
-            MeshRenderer renderer = indicator.GetComponent<MeshRenderer>();
-            if (renderer != null)
+            else
             {
-                renderer.sortingOrder = -1; // draw beneath the row Canvas (sortingOrder 0)
+                // First time selecting this item — create the indicator
+                indicator = GameObject.Instantiate(difficultyIndicatorSource, selectedItem.transform);
+                indicator.name = "SelectedIndicator";
+                indicator.transform.localPosition = songSelectionIndicatorPosition;
+                indicator.transform.localRotation = Quaternion.identity;
+                indicator.transform.localScale = songSelectionIndicatorScale;
+
+                MeshRenderer renderer = indicator.GetComponent<MeshRenderer>();
+                if (renderer != null)
+                    renderer.sortingOrder = -1; // draw beneath the row Canvas (sortingOrder 0)
             }
 
-            currentSongSelectionIndicator = indicator;
-            currentSongSelectionIndicator.SetActive(true);
+            indicator.SetActive(true);
+            activeSongSelectionIndicators.Add(indicator);
+        }
+
+        /// <summary>
+        /// Turns off every currently-lit song selection indicator — i.e. every row (however many)
+        /// showing the previously selected song — so a new selection starts from a clean slate.
+        /// </summary>
+        public static void ClearSongSelectionIndicators()
+        {
+            foreach (GameObject go in activeSongSelectionIndicators)
+                if (go != null) go.SetActive(false);
+            activeSongSelectionIndicators.Clear();
         }
 
         public static void SongListUISetup()

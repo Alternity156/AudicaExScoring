@@ -711,7 +711,7 @@ namespace ExScoringMod
             if (pi.ssi == null) return;
             if (SelectedActionId == null && row.songID == ExScoring.selectedSong)
             {
-                ExScoring.UpdateSongSelectionIndicator(pi.ssi);
+                ExScoring.UpdateSongSelectionIndicator(pi.ssi, row.songID);
             }
             else
             {

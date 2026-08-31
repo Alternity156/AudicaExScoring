@@ -346,7 +346,10 @@ namespace ExScoringMod
                     launchPanel.OnEnable();
 
                 UpdateLaunchPanelInfo();
-                UpdateSongSelectionIndicator(__instance);
+                UpdateSongSelectionIndicator(__instance, selectedSong);
+                // Light up any OTHER currently-bound row that also shows this songID (e.g. the
+                // song appears under both Song Requests/Search Results and its home folder).
+                VirtualSongList.RefreshSelectionIndicators();
                 RefreshIntensityGraph();
                 AddPlaylistButton.UpdateForSelection();
 
