@@ -148,6 +148,24 @@ namespace ExScoringMod
                 string songIdDiag = __instance.mSongData.songID;
                 MelonLogger.Log($"[ExScoring][Diag] Prefix ENTER (EX) song={songIdDiag}");
 
+                if (!loggedDuplicateCheckFor.Contains(songIdDiag))
+                {
+                    loggedDuplicateCheckFor.Add(songIdDiag);
+                    string originalId = __instance.mSongData.originalSongID;
+                    int exactMatches = 0;
+                    int sameOriginalMatches = 0;
+                    for (int i = 0; i < SongList.I.songs.Count; i++)
+                    {
+                        if (SongList.I.songs[i].songID == songIdDiag)
+                            exactMatches++;
+                        if (!string.IsNullOrEmpty(originalId) && SongList.I.songs[i].originalSongID == originalId)
+                            sameOriginalMatches++;
+                    }
+                    MelonLogger.Log($"[DupCheck] boundSongID={songIdDiag} boundOriginalSongID={originalId} " +
+                                     $"exactSongIDMatchesInList={exactMatches} sameOriginalSongIDMatchesInList={sameOriginalMatches} " +
+                                     $"totalSongsInList={SongList.I.songs.Count}");
+                }
+
                 ApplyExRowLayout(__instance);
 
                 string songId = __instance.mSongData.songID;
@@ -181,6 +199,8 @@ namespace ExScoringMod
         // native state afterward. Throttled to only log on an actual change per row, so it won't
         // spam every frame for rows that are stable.
         private static readonly Dictionary<int, string> lastLoggedRowSnapshot = new Dictionary<int, string>();
+
+        private static readonly HashSet<string> loggedDuplicateCheckFor = new HashSet<string>();
 
         [HarmonyPatch(typeof(SongSelectItem), "Update")]
         public static class SongSelectItemUpdateDiagnosticPatch

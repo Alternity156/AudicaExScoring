@@ -21,6 +21,19 @@ namespace ExScoringMod
         /// <summary>Maps songID -> folder name.</summary>
         public static Dictionary<string, string> songFolderMap = new Dictionary<string, string>();
 
+        /// <summary>
+        /// Maps songID -> additional folder names beyond its "home" folder in
+        /// songFolderMap. Populated when the same filename is found in more than one
+        /// pack subfolder (e.g. a track duplicated across two curated bundles, or once
+        /// loose and once inside a bundle folder) — the song still loads once (one
+        /// SongData, see SongListAssembler's dedup), but its file is genuinely present
+        /// in multiple folders on disk, so the folder browser lists it in all of them.
+        /// Same additive pattern as Favorites/Song Requests: a song's single "home"
+        /// folder (used for navigation — RevealAndSelect, sort-based views) never
+        /// changes, this only adds extra places it's ALSO listed.
+        /// </summary>
+        public static Dictionary<string, List<string>> extraSongFolders = new Dictionary<string, List<string>>();
+
         /// <summary>Ordered list of folder names that have at least one loaded song.</summary>
         public static List<string> availableFolders = new List<string>();
 
@@ -40,7 +53,7 @@ namespace ExScoringMod
 
         // ── Hardcoded base OST song IDs ──────────────────────────────────────
 
-        private static readonly HashSet<string> audicaSongIDs = new HashSet<string>
+        internal static readonly HashSet<string> audicaSongIDs = new HashSet<string>
         {
             "addictedtoamemory", "adrenaline", "boomboom", "breakforme", "channel42",
             "collider", "decodeme", "destiny", "everyday", "eyeforaneye",
@@ -53,7 +66,7 @@ namespace ExScoringMod
 
         // ── Hardcoded DLC song IDs (extras, PSVR exclusives, paid DLC) ───────
 
-        private static readonly HashSet<string> audicaDLCSongIDs = new HashSet<string>
+        internal static readonly HashSet<string> audicaDLCSongIDs = new HashSet<string>
         {
             // Extras (album versions)
             "addictedtoamemory_full", "destiny_full", "highwaytooblivion_full", "popstars_full",
@@ -76,9 +89,10 @@ namespace ExScoringMod
         public static void Rebuild(string mainSongDirectory)
         {
             songFolderMap.Clear();
+            extraSongFolders.Clear();
             availableFolders.Clear();
 
-            Dictionary<string, string> subfolderByFilename = BuildSubfolderMap(mainSongDirectory);
+            Dictionary<string, List<string>> subfolderByFilename = BuildSubfolderMap(mainSongDirectory);
 
             bool hasAudica = false;
             bool hasAudicaDLC = false;
@@ -91,25 +105,35 @@ namespace ExScoringMod
                 string id = song.songID;
                 string filename = Path.GetFileName(song.zipPath);
                 string folder;
+                bool isOfficial = false;
 
                 // Skip hidden songs (e.g. the tutorial)
                 if (song.hidden)
                     continue;
 
+                List<string> allSubfolders;
+                subfolderByFilename.TryGetValue(filename, out allSubfolders);
+
                 if (audicaSongIDs.Contains(id))
                 {
                     folder = FolderAudica;
                     hasAudica = true;
+                    isOfficial = true;
                 }
                 else if (audicaDLCSongIDs.Contains(id))
                 {
                     folder = FolderAudicaDLC;
                     hasAudicaDLC = true;
+                    isOfficial = true;
                 }
-                else if (subfolderByFilename.TryGetValue(filename, out string subfolderName))
+                else if (allSubfolders != null && allSubfolders.Count > 0 && allSubfolders[0] != FolderCustom)
                 {
-                    folder = subfolderName;
-                    customFolders[subfolderName] = true;
+                    // A real pack subfolder always sorts before a loose/"Unsorted"
+                    // entry within a filename's list (BuildSubfolderMap scans
+                    // subfolders first), so this only takes the "Unsorted" home below
+                    // when there's no real pack subfolder copy at all.
+                    folder = allSubfolders[0];
+                    customFolders[folder] = true;
                 }
                 else
                 {
@@ -119,6 +143,39 @@ namespace ExScoringMod
 
                 if (!songFolderMap.ContainsKey(id))
                     songFolderMap.Add(id, folder);
+
+                // "folder" above is just this song's single home (used for navigation —
+                // RevealAndSelect, sort-based views). If its filename is ALSO present
+                // elsewhere (another pack subfolder, or loose in the base directory),
+                // record those as additional listings — same additive pattern already
+                // used for Favorites/Song Requests. Skipped for official/DLC songs:
+                // those are always Audica/Audica DLC only, even if a file with the same
+                // name also happens to sit loose in the songs directory.
+                if (!isOfficial && allSubfolders != null)
+                {
+                    for (int j = 0; j < allSubfolders.Count; j++)
+                    {
+                        string extra = allSubfolders[j];
+                        if (extra == folder)
+                            continue;
+
+                        // Keep "Unsorted" in its original fixed list position rather
+                        // than letting it sort in alphabetically among pack names.
+                        if (extra == FolderCustom)
+                            hasCustom = true;
+                        else
+                            customFolders[extra] = true;
+
+                        List<string> extras;
+                        if (!extraSongFolders.TryGetValue(id, out extras))
+                        {
+                            extras = new List<string>();
+                            extraSongFolders[id] = extras;
+                        }
+                        if (!extras.Contains(extra))
+                            extras.Add(extra);
+                    }
+                }
             }
 
             // Favorites (virtual) → Audica → Audica DLC → Unsorted → custom subfolders
@@ -147,6 +204,21 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// True if songID belongs to folder — either as its home folder (songFolderMap)
+        /// or as one of the additional pack folders its underlying file also physically
+        /// exists in (extraSongFolders). Use this instead of GetFolder(id) == folder
+        /// anywhere a song might need to be listed under more than one folder.
+        /// </summary>
+        public static bool IsInFolder(string songID, string folder)
+        {
+            if (GetFolder(songID) == folder)
+                return true;
+
+            List<string> extras;
+            return extraSongFolders.TryGetValue(songID, out extras) && extras.Contains(folder);
+        }
+
+        /// <summary>
         /// Sets (or clears, with null) the active search folder, keeping it pinned
         /// at the top of availableFolders.
         /// </summary>
@@ -163,9 +235,9 @@ namespace ExScoringMod
 
         // ── Helpers ──────────────────────────────────────────────────────────
 
-        private static Dictionary<string, string> BuildSubfolderMap(string mainSongDirectory)
+        private static Dictionary<string, List<string>> BuildSubfolderMap(string mainSongDirectory)
         {
-            var map = new Dictionary<string, string>();
+            var map = new Dictionary<string, List<string>>();
 
             if (!Directory.Exists(mainSongDirectory))
                 return map;
@@ -194,14 +266,39 @@ namespace ExScoringMod
                 }
 
                 foreach (string file in files)
-                {
-                    string filename = Path.GetFileName(file);
-                    if (!map.ContainsKey(filename))
-                        map.Add(filename, folderName);
-                }
+                    AddFilenameFolder(map, Path.GetFileName(file), folderName);
+            }
+
+            // Loose files sitting directly in mainSongDirectory (no subfolder) were
+            // previously invisible to this map entirely — a filename that exists BOTH
+            // loose here AND inside a pack subfolder needs both locations recorded so
+            // Rebuild() can list it in both, instead of only ever seeing the subfolder
+            // copy. Registered under FolderCustom ("Unsorted"), the same bucket a solo
+            // loose file already falls back to today.
+            try
+            {
+                string[] looseFiles = Directory.GetFiles(mainSongDirectory, "*.audica", SearchOption.TopDirectoryOnly);
+                foreach (string file in looseFiles)
+                    AddFilenameFolder(map, Path.GetFileName(file), FolderCustom);
+            }
+            catch
+            {
+                // Leave map as whatever the subfolder scan already produced.
             }
 
             return map;
+        }
+
+        private static void AddFilenameFolder(Dictionary<string, List<string>> map, string filename, string folderName)
+        {
+            List<string> folders;
+            if (!map.TryGetValue(filename, out folders))
+            {
+                folders = new List<string>();
+                map[filename] = folders;
+            }
+            if (!folders.Contains(folderName))
+                folders.Add(folderName);
         }
     }
 }

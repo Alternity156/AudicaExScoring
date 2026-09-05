@@ -416,6 +416,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetMaxRunsPerSong();
                 OptionsMenuFunctions.GetMaxRunDataSizeMB();
                 OptionsMenuFunctions.GetSaveFailedRunData();
+                OptionsMenuFunctions.GetSongCacheEnabled();
 
                 var dataHeader = OptionsMenuClone.CreateHeader(0, "Run Data");
                 OptionsMenuClone.AddRow(dataHeader);
@@ -442,6 +443,18 @@ namespace ExScoringMod
                     v => v.ToString("N0") + " MB",
                     "Oldest saved runs across all songs are deleted once this total is exceeded");
                 OptionsMenuClone.AddRow(maxRunsSlider, maxSizeSlider);
+
+                var songCacheHeader = OptionsMenuClone.CreateHeader(0, "Song Cache");
+                OptionsMenuClone.AddRow(songCacheHeader);
+
+                var songCacheToggle = OptionsMenuClone.CreateToggle(0, "Enable Song Cache",
+                    () => OptionsMenuFunctions.songCacheEnabled,
+                    v => { OptionsMenuFunctions.songCacheEnabled = v; OptionsMenuFunctions.SetSongCacheEnabled(v); },
+                    "Caches song scan results on disk to speed up future boots. Takes effect on the next song list load — disabling neither reads nor writes the cache");
+                var deleteCacheButton = OptionsMenuClone.CreateButton(1, "Delete Cache",
+                    () => SongCache.ClearAndRebuild(),
+                    "Wipes the on-disk song cache. Every song will be freshly scanned on the next song list load");
+                OptionsMenuClone.AddRow(songCacheToggle, deleteCacheButton);
             }),
 
             new OptionsCategory("opt_leaderboard", "Leaderboard", () =>

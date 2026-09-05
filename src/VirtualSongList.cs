@@ -325,6 +325,20 @@ namespace ExScoringMod
         public static float GetScroll() => (active && scroller != null) ? scroller.GetScrollIndex() : 0f;
 
         /// <summary>
+        /// Directly set the scroll position, clamped to the current view's range. Used by
+        /// FolderRowManager.ToggleFolder to restore a folder header's exact on-screen offset
+        /// after a rebuild, when a raw scroll index wouldn't still point at the same place
+        /// (e.g. a different, much larger folder collapsed/expanded in the same toggle,
+        /// shifting every later header's row index).
+        /// </summary>
+        public static void SetScroll(float index)
+        {
+            if (!active || scroller == null) return;
+            float maxScroll = Mathf.Max(0f, view.Count - scroller.displayCount);
+            scroller.SnapTo(Mathf.Clamp(index, 0f, maxScroll), true);
+        }
+
+        /// <summary>
         /// Clears every pooled row's remembered binding (SongPoolItem.boundSong), so the next time
         /// each slot binds — even to the exact same song as before — BindRow sees a mismatch and
         /// does a genuine Init() rebind instead of skipping it.
@@ -456,9 +470,9 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// After opening a folder, keep the current scroll position; only scroll if the folder's
-        /// first song is below the visible window (i.e. the header sat at/near the bottom).
-        /// Never forces the header to the top. Reused by the Phase 2 FolderRowManager hand-off.
+        /// After opening a folder, keep the current scroll position if the folder's songs are
+        /// already visible; otherwise scroll just enough to reveal them, in whichever direction
+        /// they actually are. Reused by the Phase 2 FolderRowManager hand-off.
         /// </summary>
         public static void RevealFolderIfNeeded(string folderName)
         {
@@ -472,13 +486,20 @@ namespace ExScoringMod
                 return; // folder empty or not actually open
 
             float cur = scroller.GetScrollIndex();
-
-            // Already visible (incl. "already at the top") → leave the scroll alone.
-            if (firstSong < cur + scroller.displayCount) return;
-
-            // First song is below the window → scroll down just enough to bring it into view.
             float maxScroll = Mathf.Max(0f, view.Count - scroller.displayCount);
-            float target = Mathf.Clamp(firstSong - scroller.displayCount + 1, 0f, maxScroll);
+
+            // Genuinely already visible (both bounds) → leave the scroll alone.
+            if (firstSong >= cur && firstSong < cur + scroller.displayCount) return;
+
+            // Otherwise scroll just enough to reveal it, in whichever direction it
+            // actually is. Previously this only checked the bottom bound, so a stale
+            // scroll position left over from a much taller folder (e.g. collapsing a
+            // large expanded folder shrinks the view a lot) could sit ABOVE where the
+            // newly-opened folder now lives and be wrongly treated as "already visible",
+            // stranding the view far from the folder instead of revealing it.
+            float target = (firstSong < cur)
+                ? Mathf.Clamp(firstSong, 0f, maxScroll)                              // above window → scroll up just enough
+                : Mathf.Clamp(firstSong - scroller.displayCount + 1, 0f, maxScroll); // below window → scroll down just enough
             scroller.SnapTo(target, true);
         }
 
@@ -1217,7 +1238,7 @@ namespace ExScoringMod
             }
         }
 
-        private static int HeaderIndex(string folderName)
+        public static int HeaderIndex(string folderName)
         {
             for (int i = 0; i < view.Count; i++)
                 if (view[i].kind == ViewRowKind.FolderHeader && view[i].folderName == folderName)

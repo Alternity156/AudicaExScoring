@@ -97,12 +97,31 @@ namespace ExScoringMod
             if (level != NavLevel.Root) return; // folder headers only exist at Level 0
             MarathonSetup.CancelIfActive();
             srClearArmed = false; // any folder toggle cancels a pending Clear List confirm
+
+            // Preserve the clicked header's on-screen offset across the rebuild. SetView
+            // otherwise preserves the raw numeric scroll index, which is only correct if
+            // nothing else in the list changed size — but toggling this folder can also
+            // collapse/expand a completely different, much larger folder (e.g. a huge
+            // Unsorted), shifting every header after it by however many rows that other
+            // folder's songs took up. Anchoring on this header's offset from the current
+            // scroll (rather than the scroll index itself) keeps it exactly where it
+            // already was on screen, regardless of what else changed size.
+            int oldHeaderIndex = VirtualSongList.HeaderIndex(folderName);
+            float headerOffset = oldHeaderIndex - VirtualSongList.GetScroll();
+
             bool opening = SongFolderManager.openFolder != folderName;
             SongFolderManager.openFolder = opening ? folderName : null;
 
             MelonLogger.Log($"[FolderRowManager] Toggle '{folderName}' -> open={SongFolderManager.openFolder ?? "none"}");
 
             Apply();
+
+            if (oldHeaderIndex >= 0)
+            {
+                int newHeaderIndex = VirtualSongList.HeaderIndex(folderName);
+                if (newHeaderIndex >= 0)
+                    VirtualSongList.SetScroll(newHeaderIndex - headerOffset);
+            }
 
             if (opening)
             {
@@ -382,8 +401,19 @@ namespace ExScoringMod
             {
                 var sd = SongList.I.songs[i];
                 if (sd == null || sd.hidden) continue;
-                string f = SongFolderManager.GetFolder(sd.songID);
-                if (f != null) counts[f] = counts.TryGetValue(f, out int c) ? c + 1 : 1;
+
+                string home = SongFolderManager.GetFolder(sd.songID);
+                if (home != null) counts[home] = counts.TryGetValue(home, out int c) ? c + 1 : 1;
+
+                if (SongFolderManager.extraSongFolders.TryGetValue(sd.songID, out List<string> extras))
+                {
+                    for (int j = 0; j < extras.Count; j++)
+                    {
+                        string extra = extras[j];
+                        counts[extra] = counts.TryGetValue(extra, out int ec) ? ec + 1 : 1;
+                    }
+                }
+
                 if (FavoritesStore.IsFavorite(sd.songID)) favCount++;
             }
             int searchCount = SongSearch.searchResult != null ? SongSearch.searchResult.Count : 0;
@@ -449,8 +479,19 @@ namespace ExScoringMod
             {
                 var sd = SongList.I.songs[i];
                 if (sd == null || sd.hidden) continue;
-                string f = SongFolderManager.GetFolder(sd.songID);
-                if (f != null) counts[f] = counts.TryGetValue(f, out int c) ? c + 1 : 1;
+
+                string home = SongFolderManager.GetFolder(sd.songID);
+                if (home != null) counts[home] = counts.TryGetValue(home, out int c) ? c + 1 : 1;
+
+                if (SongFolderManager.extraSongFolders.TryGetValue(sd.songID, out List<string> extras))
+                {
+                    for (int j = 0; j < extras.Count; j++)
+                    {
+                        string extra = extras[j];
+                        counts[extra] = counts.TryGetValue(extra, out int ec) ? ec + 1 : 1;
+                    }
+                }
+
                 if (FavoritesStore.IsFavorite(sd.songID)) favCount++;
             }
 
@@ -496,7 +537,7 @@ namespace ExScoringMod
                 {
                     if (FavoritesStore.IsFavorite(id)) result.Add(id);
                 }
-                else if (SongFolderManager.GetFolder(id) == folder)
+                else if (SongFolderManager.IsInFolder(id, folder))
                 {
                     result.Add(id);
                 }

@@ -60,6 +60,7 @@ namespace ExScoringMod
         public static float maxRunsPerSong;
         public static float maxRunDataSizeMB;
         public static bool enableRunDataSaving;
+        public static bool songCacheEnabled;
         public static bool showStatsOnFail;
         public static bool saveFailedRunData;
         public static float exScorePopupSize;
@@ -215,6 +216,17 @@ namespace ExScoringMod
         {
             enableRunDataSaving = value;
             Config.UpdateEnableRunDataSaving(value);
+        }
+
+        public static void GetSongCacheEnabled()
+        {
+            songCacheEnabled = Config.SongCacheEnabled;
+        }
+
+        public static void SetSongCacheEnabled(bool value)
+        {
+            songCacheEnabled = value;
+            Config.UpdateSongCacheEnabled(value);
         }
 
         public static void GetSaveFailedRunData()

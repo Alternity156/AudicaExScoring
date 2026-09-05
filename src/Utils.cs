@@ -1,4 +1,5 @@
 ﻿using MelonLoader;
+using System.Collections;
 using System.Collections.Generic;
 using UnhollowerBaseLib;
 using UnityEngine;
@@ -165,6 +166,34 @@ namespace ExScoringMod
                 return $"{minBpm}";
 
             return $"{minBpm} - {maxBpm}";
+        }
+
+        /// <summary>
+        /// Waits until SongList.I.mPendingDLCEntitlementChecks is empty (or a frame cap is hit),
+        /// so callers reading song.songID afterward see it in its final, correct state.
+        ///
+        /// ProcessSingleSong dynamically renames any official/DLC song whose checksum isn't in
+        /// songIDHashes (e.g. "badguy" -> "badguy_f85339c4..."), since real DLC ownership is verified
+        /// via platform entitlement, not a static checksum list. SongList.Update() (native), running
+        /// every frame, watches mPendingDLCEntitlementChecks and — the moment
+        /// PlatformChooser.CheckDLCEntitlement confirms real ownership — writes the song's songID
+        /// back to its original clean value (confirmed via Ghidra decompile). This is genuine vanilla
+        /// behavior, not a bug: it just needs at least one SongList.Update() call to have run after
+        /// the scan queues these checks, before anything reads songID depending on it being final.
+        /// </summary>
+        public static IEnumerator WaitForDLCEntitlementResolution(int maxFrames = 30)
+        {
+            for (int i = 0; i < maxFrames; i++)
+            {
+                if (SongList.I == null || SongList.I.mPendingDLCEntitlementChecks == null ||
+                    SongList.I.mPendingDLCEntitlementChecks.Count == 0)
+                    yield break;
+
+                yield return null;
+            }
+
+            MelonLogger.Log($"[ExScoring] WaitForDLCEntitlementResolution: gave up after {maxFrames} frames, " +
+                             $"{SongList.I.mPendingDLCEntitlementChecks.Count} still pending.");
         }
 
         public static void FixMappers()

@@ -248,9 +248,11 @@
     <Compile Include="src\RunDataRecalculator.cs" />
     <Compile Include="src\RunDataSaveHandler.cs" />
     <Compile Include="src\SearchKeyboard.cs" />
+    <Compile Include="src\SongCache.cs" />
     <Compile Include="src\SongDownloader.cs" />
     <Compile Include="src\SongDownloaderTracker.cs" />
     <Compile Include="src\SongFolderManager.cs" />
+    <Compile Include="src\SongListAssembler.cs" />
     <Compile Include="src\SongListHighScoreUI.cs" />
     <Compile Include="src\SongListNotification.cs" />
     <Compile Include="src\SongListUI.cs" />

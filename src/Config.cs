@@ -57,6 +57,7 @@ namespace ExScoringMod
         public static int MaxRunsPerSong;
         public static float MaxRunDataSizeMB;
         public static bool SaveFailedRunData;
+        public static bool SongCacheEnabled;
 
         public static string scoringHeader = "[Header]Scoring";
         public static float ExScorePopupSize;
@@ -127,6 +128,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterInt(Category, nameof(MaxRunsPerSong), 50, "Sets how many run data files are kept per song, per difficulty [1,50,1,50] {G}");
             MelonPrefs.RegisterFloat(Category, nameof(MaxRunDataSizeMB), 100f, "Sets the max total disk space (MB) run data files can use [10,2000,10,100] {G}");
             MelonPrefs.RegisterBool(Category, nameof(SaveFailedRunData), false, "Also saves run data for failed songs (requires Save Run Data)");
+            MelonPrefs.RegisterBool(Category, nameof(SongCacheEnabled), true, "Caches song scan results on disk to speed up future boots. Disable to always scan songs live and skip reading/writing the cache");
 
             MelonPrefs.RegisterString(Category, nameof(scoringHeader), "", "[Header]Scoring");
             MelonPrefs.RegisterFloat(Category, nameof(ExScorePopupSize), 100f, "Sets the EX score popup size [10,100,5,100] {P}");
@@ -183,6 +185,7 @@ namespace ExScoringMod
             EnableRunDataSaving = MelonPrefs.GetBool(Category, nameof(EnableRunDataSaving));
             ShowStatsOnFail = MelonPrefs.GetBool(Category, nameof(ShowStatsOnFail));
             SaveFailedRunData = MelonPrefs.GetBool(Category, nameof(SaveFailedRunData));
+            SongCacheEnabled = MelonPrefs.GetBool(Category, nameof(SongCacheEnabled));
             ExScorePopupSize = MelonPrefs.GetFloat(Category, nameof(ExScorePopupSize));
             ExScorePopupOpacity = MelonPrefs.GetFloat(Category, nameof(ExScorePopupOpacity));
             SearchKeyboardPosX = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardPosX));
@@ -303,6 +306,13 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(EnableRunDataSaving), value);
             EnableRunDataSaving = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateSongCacheEnabled(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(SongCacheEnabled), value);
+            SongCacheEnabled = value;
             MelonPrefs.SaveConfig();
         }
 

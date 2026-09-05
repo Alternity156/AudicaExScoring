@@ -291,6 +291,35 @@ namespace ExScoringMod
             return omb.gameObject;
         }
 
+        /// <summary>
+        /// A plain, momentary action button — click and it just runs onClick, no persisted
+        /// on/off state (isOn is always false, so it never shows a checked/toggled visual).
+        /// Same underlying Menu.AddButton as CreateToggle, minus the flip-to-opposite logic.
+        /// </summary>
+        public static GameObject CreateButton(int col, string label, Action onClick, string hover = null)
+        {
+            var omb = Menu.AddButton(col, label,
+                new Action(onClick),
+                new Func<bool>(() => false),
+                hover ?? label);
+
+            var gb = omb.button;
+            if (gb != null)
+            {
+                if (SongShellPage != null) gb.mShellPage = SongShellPage;
+                gb.SetInteractable(true);
+            }
+
+            var help = omb.help;
+            if (help != null)
+            {
+                if (help.text != null) help.text.text = hover ?? label;
+                help.forceDisable = false;
+            }
+
+            return omb.gameObject;
+        }
+
         public static GameObject CreateSlider(int col, string label, Func<float> get, Action<float> set,
                                               float min, float max, float step, float def,
                                               string format = "N0", string hover = null)
@@ -430,6 +459,9 @@ namespace ExScoringMod
 
         public static void AddToggle(int col, string label, Func<bool> get, Action<bool> set, string hover = null)
             => AddRow(CreateToggle(col, label, get, set, hover));
+
+        public static void AddButton(int col, string label, Action onClick, string hover = null)
+            => AddRow(CreateButton(col, label, onClick, hover));
 
         public static void AddSlider(int col, string label, Func<float> get, Action<float> set,
                                      float min, float max, float step, float def, string format = "N0", string hover = null)

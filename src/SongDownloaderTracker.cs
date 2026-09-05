@@ -66,6 +66,8 @@ namespace ExScoringMod
             UpdateSongData();
             yield return null;
 
+            yield return ExScoring.WaitForDLCEntitlementResolution();
+
             SongFolderManager.Rebuild(ExScoring.mainSongDirectory);
             yield return null;
 

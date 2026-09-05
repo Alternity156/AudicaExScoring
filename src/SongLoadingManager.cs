@@ -112,6 +112,8 @@ namespace ExScoringMod
 
         private static IEnumerator PostProcess()
         {
+            yield return ExScoring.WaitForDLCEntitlementResolution();
+
             ExScoring.FixMappers();
             yield return null;
 
