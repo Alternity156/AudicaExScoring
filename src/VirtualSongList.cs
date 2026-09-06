@@ -299,7 +299,7 @@ namespace ExScoringMod
         /// Replace the current view with a new ordered row list. Rebuilds placeholders to match,
         /// reusing the pools. This is the push entry point FolderRowManager will call in Phase 2.
         /// </summary>
-        public static void SetView(List<ViewRow> rows) => SetView(rows, null);
+        public static void SetView(List<ViewRow> rows) => SetView(rows, null, true);
 
         /// <summary>
         /// Replace the view, scrolling to <paramref name="targetScroll"/> if given. targetScroll
@@ -309,7 +309,15 @@ namespace ExScoringMod
         /// (0 to drill in at the top, a previously-saved canonical index to back out to), since the
         /// live scroll position is meaningless across two different lists.
         /// </summary>
-        public static void SetView(List<ViewRow> rows, float? targetScroll)
+        public static void SetView(List<ViewRow> rows, float? targetScroll) => SetView(rows, targetScroll, true);
+
+        /// <summary>
+        /// Same as the two-argument overload, with <paramref name="allowWrap"/> controlling whether
+        /// Wrap Song List may apply to this particular view — it's meant for the root song/folder
+        /// list specifically, not admin views like Playlists, Playlist contents, Global Options, or
+        /// the add-to-playlist picker, so FolderRowManager passes false for those.
+        /// </summary>
+        public static void SetView(List<ViewRow> rows, float? targetScroll, bool allowWrap)
         {
             if (!EnsureRefs()) return;
             var swSetView = Stopwatch.StartNew();
@@ -337,9 +345,14 @@ namespace ExScoringMod
             for (int i = 0; i < rows.Count; i++)
                 view.Add(rows[i]);
 
-            // Wraparound buffer: only worth it when wrapping is on and the list is longer than
-            // one screen — otherwise everything already fits and there's nothing to loop around.
-            wrapBuffer = (Config.WrapSongList && view.Count > Mathf.CeilToInt(scroller.displayCount))
+            // Wraparound buffer: as long as wrapping is on, allowed for this view, and there's at
+            // least one row, pad both ends with a repeating copy of the content. This works the
+            // same whether the list is longer than one screen (the common case — scrolling past
+            // either end reveals the other) or shorter than one (e.g. no custom folders yet — the
+            // short list repeats to fill the screen and keeps scrolling through copies of itself
+            // rather than sitting static): the content mapping is just "physical slot mod row
+            // count" either way.
+            wrapBuffer = (allowWrap && Config.WrapSongList && view.Count > 0)
                 ? Mathf.CeilToInt(scroller.displayCount)
                 : 0;
 
@@ -1399,6 +1412,36 @@ namespace ExScoringMod
                 if (view[i].kind == ViewRowKind.FolderHeader && view[i].folderName == folderName)
                     return i; // canonical index
             return -1;
+        }
+
+        /// <summary>Re-applies the last position we deliberately set, directly to the native fields.
+        /// Used to undo a native reset (see ShellScrollableStartRestorePatch below) without going
+        /// through SnapTo's own clamping, which could behave oddly if called at an odd moment
+        /// mid-initialization.</summary>
+        internal static void ReapplyLastIntendedScroll()
+        {
+            if (scroller == null) return;
+            scroller.mIndex = lastIntendedPhysicalScroll;
+            scroller.mDestinationIndex = lastIntendedPhysicalScroll;
+        }
+    }
+
+    /// <summary>
+    /// ShellScrollable.Start() resets mIndex/mDestinationIndex to 0 as part of its own native
+    /// initialization — observed only on a session's very first song-page entry (Start() only
+    /// fires once per component lifetime), shortly after our own SetView had already positioned it
+    /// correctly, with no call of ours in between to explain it otherwise. Re-apply our last
+    /// intended position immediately after Start() runs, so nothing downstream (including
+    /// Teardown's capture) ever sees the spurious reset.
+    /// </summary>
+    [HarmonyPatch(typeof(ShellScrollable), "Start", new Type[0])]
+    internal static class ShellScrollableStartRestorePatch
+    {
+        private static void Postfix(ShellScrollable __instance)
+        {
+            if (VirtualSongList.Scroller == null || __instance.Pointer != VirtualSongList.Scroller.Pointer)
+                return;
+            VirtualSongList.ReapplyLastIntendedScroll();
         }
     }
 

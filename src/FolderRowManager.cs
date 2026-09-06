@@ -172,7 +172,7 @@ namespace ExScoringMod
             scrollStack.Push(VirtualSongList.GetScroll());
             scrollWrapStack.Push(Config.WrapSongList);
             level = NavLevel.PlaylistList;
-            VirtualSongList.SetView(BuildView(), 0f);
+            VirtualSongList.SetView(BuildView(), 0f, level == NavLevel.Root);
         }
 
         public static void EnterGlobalOptions()
@@ -183,7 +183,7 @@ namespace ExScoringMod
             scrollWrapStack.Push(Config.WrapSongList);
             level = NavLevel.GlobalOptions;
             VirtualSongList.SelectedActionId = null;
-            VirtualSongList.SetView(BuildView(), 0f);
+            VirtualSongList.SetView(BuildView(), 0f, level == NavLevel.Root);
         }
 
         public static void EnterPlaylistContents(string playlistName)
@@ -194,7 +194,7 @@ namespace ExScoringMod
             scrollWrapStack.Push(Config.WrapSongList);
             currentPlaylist = playlistName;
             level = NavLevel.PlaylistContents;
-            VirtualSongList.SetView(BuildView(), 0f);
+            VirtualSongList.SetView(BuildView(), 0f, level == NavLevel.Root);
 
             // Select the first resolved song so the launch panel reflects the playlist.
             var ids = VirtualSongList.CurrentViewSongIDs;
@@ -224,7 +224,7 @@ namespace ExScoringMod
             {
                 restore = 0f;
             }
-            VirtualSongList.SetView(BuildView(), restore);
+            VirtualSongList.SetView(BuildView(), restore, level == NavLevel.Root);
         }
 
         /// <summary>Force back to Level 0 (e.g. wire to a leave-song-page hook if desired).</summary>
@@ -264,7 +264,7 @@ namespace ExScoringMod
             pendingAddStem = songStem;
 
             level = NavLevel.AddPicker;
-            VirtualSongList.SetView(BuildView(), 0f);
+            VirtualSongList.SetView(BuildView(), 0f, level == NavLevel.Root);
         }
 
         /// <summary>Picked a playlist in the add picker: add the song, then restore the snapshot.</summary>
@@ -292,7 +292,7 @@ namespace ExScoringMod
             level = addReturnLevel;
             SongFolderManager.openFolder = addReturnFolder;
             float restoreScroll = (addReturnWrapEnabled == Config.WrapSongList) ? addReturnScroll : 0f;
-            VirtualSongList.SetView(BuildView(), restoreScroll);
+            VirtualSongList.SetView(BuildView(), restoreScroll, level == NavLevel.Root);
             if (!string.IsNullOrEmpty(addReturnSong))
                 VirtualSongList.ScrollToAndSelect(addReturnSong, true); // keep position if still visible
         }
@@ -325,7 +325,7 @@ namespace ExScoringMod
         /// <summary>Push the current view to VirtualSongList and refresh the Random Song button.</summary>
         private static void Apply()
         {
-            VirtualSongList.SetView(BuildView());
+            VirtualSongList.SetView(BuildView(), null, level == NavLevel.Root);
             RandomSong.UpdateButtonState();
         }
 
