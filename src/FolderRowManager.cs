@@ -26,6 +26,15 @@ namespace ExScoringMod
         private static NavLevel level = NavLevel.Root;
         private static string currentPlaylist = null;
         private static readonly Stack<float> scrollStack = new Stack<float>();
+        // Parallel to scrollStack: whether Wrap Song List (the toggle itself, not any particular
+        // view's buffer size — sub-views like Options are short and always have buffer 0 regardless
+        // of the toggle, so checking VirtualSongList.WrapBufferSize at pop time would compare the
+        // wrong thing) was on when each position was pushed. A saved canonical scroll is only
+        // meaningful relative to the wrap state it was captured under (wrap adds extra overscroll
+        // room that doesn't exist without it) — if the toggle changed while drilled into a sub-view
+        // (e.g. from within Options), replaying the raw number would clamp to a misleading position
+        // (typically the very last screen) instead of where the user actually was.
+        private static readonly Stack<bool> scrollWrapStack = new Stack<bool>();
 
         // ── Sort mode (drives which folder set BuildRootView produces) ─────────
         internal enum SortMode { Default, AToZ, ZToA, MostStars, LeastStars, MostPlayed, LeastPlayed, MostRecent }
@@ -161,6 +170,7 @@ namespace ExScoringMod
             MarathonSetup.CancelIfActive();
             PlaylistNav.ClearTransient();
             scrollStack.Push(VirtualSongList.GetScroll());
+            scrollWrapStack.Push(Config.WrapSongList);
             level = NavLevel.PlaylistList;
             VirtualSongList.SetView(BuildView(), 0f);
         }
@@ -170,6 +180,7 @@ namespace ExScoringMod
             MarathonSetup.CancelIfActive();
             PlaylistNav.ClearTransient();
             scrollStack.Push(VirtualSongList.GetScroll());
+            scrollWrapStack.Push(Config.WrapSongList);
             level = NavLevel.GlobalOptions;
             VirtualSongList.SelectedActionId = null;
             VirtualSongList.SetView(BuildView(), 0f);
@@ -180,6 +191,7 @@ namespace ExScoringMod
             MarathonSetup.CancelIfActive();
             PlaylistNav.ClearTransient();
             scrollStack.Push(VirtualSongList.GetScroll());
+            scrollWrapStack.Push(Config.WrapSongList);
             currentPlaylist = playlistName;
             level = NavLevel.PlaylistContents;
             VirtualSongList.SetView(BuildView(), 0f);
@@ -198,7 +210,20 @@ namespace ExScoringMod
             else if (level == NavLevel.GlobalOptions) { GlobalOptions.HidePanel(); level = NavLevel.Root; }
             else return;
 
-            float restore = scrollStack.Count > 0 ? scrollStack.Pop() : 0f;
+            float restore;
+            if (scrollStack.Count > 0)
+            {
+                float poppedScroll = scrollStack.Pop();
+                bool poppedWrapEnabled = scrollWrapStack.Count > 0 ? scrollWrapStack.Pop() : Config.WrapSongList;
+                // Wrap's state changed since this position was saved (e.g. toggled from within
+                // Options) — the saved number no longer means what it used to, so start fresh at
+                // the top instead of clamping into a misleading spot.
+                restore = (poppedWrapEnabled == Config.WrapSongList) ? poppedScroll : 0f;
+            }
+            else
+            {
+                restore = 0f;
+            }
             VirtualSongList.SetView(BuildView(), restore);
         }
 
@@ -209,6 +234,7 @@ namespace ExScoringMod
             currentPlaylist = null;
             pendingAddStem = null;
             scrollStack.Clear();
+            scrollWrapStack.Clear();
         }
 
         public static bool InPlaylistNav => level != NavLevel.Root;
@@ -219,6 +245,7 @@ namespace ExScoringMod
         private static NavLevel addReturnLevel = NavLevel.Root;
         private static string addReturnFolder = null;
         private static float addReturnScroll = 0f;
+        private static bool addReturnWrapEnabled = false; // Config.WrapSongList at the moment addReturnScroll was captured
         private static string addReturnSong = null;
 
         /// <summary>Snapshot the current view and drill into the playlist picker for songStem.</summary>
@@ -232,6 +259,7 @@ namespace ExScoringMod
             addReturnLevel = level;
             addReturnFolder = SongFolderManager.openFolder;
             addReturnScroll = VirtualSongList.GetScroll();
+            addReturnWrapEnabled = Config.WrapSongList;
             addReturnSong = ExScoring.selectedSong;
             pendingAddStem = songStem;
 
@@ -263,7 +291,8 @@ namespace ExScoringMod
             pendingAddStem = null;
             level = addReturnLevel;
             SongFolderManager.openFolder = addReturnFolder;
-            VirtualSongList.SetView(BuildView(), addReturnScroll);
+            float restoreScroll = (addReturnWrapEnabled == Config.WrapSongList) ? addReturnScroll : 0f;
+            VirtualSongList.SetView(BuildView(), restoreScroll);
             if (!string.IsNullOrEmpty(addReturnSong))
                 VirtualSongList.ScrollToAndSelect(addReturnSong, true); // keep position if still visible
         }

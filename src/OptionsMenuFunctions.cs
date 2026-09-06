@@ -54,6 +54,7 @@ namespace ExScoringMod
         public static float arrowScrollRows;
         public static bool hideScoreData;
         public static bool firstPlayBlind;
+        public static bool wrapSongList;
         public static bool practiceModeMinimizeButtonEnabled;
         public static readonly string[] RandomSongScopeOptions = { "Folder Songs", "All Songs" };
         public static int randomSongScope;
@@ -172,6 +173,18 @@ namespace ExScoringMod
             firstPlayBlind = value;
             Config.UpdateFirstPlayBlind(value);
             ExScoring.RefreshScoreDataVisibility();
+        }
+
+        public static void GetWrapSongList()
+        {
+            wrapSongList = Config.WrapSongList;
+        }
+
+        public static void SetWrapSongList(bool value)
+        {
+            wrapSongList = value;
+            Config.UpdateWrapSongList(value);
+            FolderRowManager.RefreshList();
         }
 
         public static void GetPracticeModeMinimizeButtonEnabled()
@@ -891,6 +904,8 @@ namespace ExScoringMod
                 if (VirtualSongList.Scroller == null || __instance.Pointer != VirtualSongList.Scroller.Pointer)
                     return true;
 
+                VirtualSongList.MarkScrollDirtiedByInput();
+
                 float effectiveAmount;
                 if (Mathf.Approximately(Mathf.Abs(amount), 3f))
                 {
@@ -901,11 +916,44 @@ namespace ExScoringMod
                     effectiveAmount = amount * Config.ScrollSpeedMultiplier;
                 }
 
-                float maxScroll = Mathf.Max(0f, VirtualSongList.CurrentView.Count - __instance.displayCount);
-                float newIndex = Mathf.Clamp(__instance.mIndex + effectiveAmount, 0f, maxScroll);
+                float newIndex = VirtualSongList.ResolveScrollIndex(__instance.mIndex + effectiveAmount);
 
                 __instance.SnapTo(newIndex, true);
                 __instance.UpdateScroll(-1);
+
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// GrabScroll.Update() drives grab-drag directly via ShellScrollable.SnapTo(index, force: false)
+        /// every frame, bypassing Scroll() entirely. Native SnapTo clamps to [0, GetMaxScroll()] when
+        /// force is false (force=true, used everywhere else in the mod, skips clamping — untouched here).
+        /// This patch takes over that one native, non-forced call so wrapping also applies to
+        /// grabbing/dragging the list, not just joystick/arrow scrolling; it also marks real input
+        /// even when passing through to vanilla behavior (wrap off), so Teardown knows a genuine
+        /// live scroll happened rather than trusting our own last recorded intent.
+        /// </summary>
+        [HarmonyPatch(typeof(ShellScrollable), "SnapTo", new Type[] { typeof(float), typeof(bool) })]
+        private static class ShellScrollableSnapToWrapPatch
+        {
+            private static bool Prefix(ShellScrollable __instance, float index, bool force)
+            {
+                if (force) return true;
+                if (VirtualSongList.Scroller == null || __instance.Pointer != VirtualSongList.Scroller.Pointer)
+                    return true;
+
+                // mGrabbed is set natively only while a real grab is in progress (see GrabScroll) —
+                // a more reliable "this is genuine input" signal than "any non-forced SnapTo call",
+                // since at least one native call also reaches this method outside of real input.
+                if (__instance.mGrabbed) VirtualSongList.MarkScrollDirtiedByInput();
+
+                if (VirtualSongList.WrapBufferSize <= 0) return true;
+
+                float resolved = VirtualSongList.ResolveScrollIndex(index);
+
+                __instance.mIndex = resolved;
+                __instance.mDestinationIndex = resolved;
 
                 return false;
             }

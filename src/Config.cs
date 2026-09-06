@@ -48,6 +48,7 @@ namespace ExScoringMod
         public static float ArrowScrollRows;
         public static bool HideScoreData;
         public static bool FirstPlayBlind;
+        public static bool WrapSongList;
         public static bool PracticeModeMinimizeButtonEnabled;
         public static int RandomSongScope; // 0 = Folder Songs, 1 = All Songs
         public static bool ShowStatsOnFail;
@@ -119,6 +120,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterFloat(Category, nameof(ArrowScrollRows), 3.0f, "Sets how many rows the song list scrolls per arrow shot [1,20,1,3]");
             MelonPrefs.RegisterBool(Category, nameof(HideScoreData), false, "Permanently hides target data, heatmap, and intensity graph on the launch panel");
             MelonPrefs.RegisterBool(Category, nameof(FirstPlayBlind), false, "Hides target data, heatmap, and intensity graph only for songs you've never played");
+            MelonPrefs.RegisterBool(Category, nameof(WrapSongList), false, "Loops the song list like a wheel — scrolling or dragging past either end wraps around to the other");
             MelonPrefs.RegisterBool(Category, nameof(PracticeModeMinimizeButtonEnabled), true, "Adds a button in practice mode to minimize its panel");
             MelonPrefs.RegisterInt(Category, nameof(RandomSongScope), 0, "Random Song source: 0 = Folder Songs, 1 = All Songs");
             MelonPrefs.RegisterBool(Category, nameof(ShowStatsOnFail), false, "Shows the stats screen after failing a song instead of the fail screen");
@@ -178,6 +180,7 @@ namespace ExScoringMod
             ArrowScrollRows = MelonPrefs.GetFloat(Category, nameof(ArrowScrollRows));
             HideScoreData = MelonPrefs.GetBool(Category, nameof(HideScoreData));
             FirstPlayBlind = MelonPrefs.GetBool(Category, nameof(FirstPlayBlind));
+            WrapSongList = MelonPrefs.GetBool(Category, nameof(WrapSongList));
             PracticeModeMinimizeButtonEnabled = MelonPrefs.GetBool(Category, nameof(PracticeModeMinimizeButtonEnabled));
             RandomSongScope = MelonPrefs.GetInt(Category, nameof(RandomSongScope));
             MaxRunsPerSong = MelonPrefs.GetInt(Category, nameof(MaxRunsPerSong));
@@ -246,6 +249,13 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(FirstPlayBlind), value);
             FirstPlayBlind = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateWrapSongList(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(WrapSongList), value);
+            WrapSongList = value;
             MelonPrefs.SaveConfig();
         }
 

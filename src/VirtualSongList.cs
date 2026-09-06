@@ -115,16 +115,17 @@ namespace ExScoringMod
             foreach (var kv in rowBindings)
             {
                 if (!kv.Value.isHeader) continue;
-                int idx = kv.Key;
-                if (idx < 0 || idx >= view.Count) continue;
-                var row = view[idx];
+                int contentIdx = ContentIndexFor(kv.Key);
+                if (contentIdx < 0) continue;
+                var row = view[contentIdx];
                 if ((row.kind != ViewRowKind.Action && row.kind != ViewRowKind.DownloadableSong)
                     || row.actionId != actionId) continue;
 
                 var hi = headerPool[kv.Value.slot];
                 if (hi.title != null) hi.title.text = label ?? "";
                 if (hi.artist != null) hi.artist.text = subLabel ?? "";
-                return;
+                // No early return: a canonical row and its wraparound ghost mirror could in
+                // principle both be bound at once, so keep every match in sync.
             }
         }
 
@@ -151,8 +152,25 @@ namespace ExScoringMod
 
         private static Transform scrollParent;
         private static GameObject hiddenHolder;
-        private static float savedScroll = 0f; // scroll position remembered across leave/return
+        private static bool hasSavedScroll = false;
+        private static float savedScrollOffset = 0f; // canonical offset from that visit's own wrapBuffer
         private static int generation = 0; // bumped on every SetView/Teardown; select coroutines bail on mismatch
+
+        // The last physical scroll index WE deliberately set (via SetView/SetScroll), and whether
+        // real user input (grab/joystick, via ResolveScrollIndex) has touched the scroller since.
+        // Something in the native song-page-appear pipeline can silently reset the scroller's index
+        // shortly after we set it — observed only on a session's very first song-page entry, so
+        // most likely a one-time native Start()/initialization side effect on the scroller
+        // component — with no call of ours running in between to explain it. Teardown uses these to
+        // tell a genuine live user position (trust the scroller) apart from that kind of unexplained
+        // native reset (trust our own last-known-good record instead).
+        private static float lastIntendedPhysicalScroll = 0f;
+        private static bool scrollDirtiedByInput = false;
+
+        /// <summary>Marks that real scroll/drag input has moved the list since the last SetView/
+        /// SetScroll, so the live scroller value is authoritative again. Called from the
+        /// ShellScrollable Scroll/SnapTo patches whenever they actually process input.</summary>
+        public static void MarkScrollDirtiedByInput() => scrollDirtiedByInput = true;
 
         // ── The view (shared source of truth) ────────────────────────────────
         private static readonly List<ViewRow> view = new List<ViewRow>();
@@ -161,6 +179,61 @@ namespace ExScoringMod
 
         public static IReadOnlyList<ViewRow> CurrentView => view;
         public static IReadOnlyList<string> CurrentViewSongIDs => viewSongIDs;
+
+        // ── Wraparound ring buffer ────────────────────────────────────────────
+        // When Wrap Song List is on and the list is longer than one screen, the physical row
+        // space is padded with a "ghost" copy of the tail before row 0 and a ghost copy of the
+        // head after the last row (each `wrapBuffer` rows deep — one screen's worth). Physical
+        // slot p displays view[(p - wrapBuffer) mod view.Count], so scrolling past either real
+        // end smoothly reveals the other end instead of hard-stopping or snap-jumping. wrapBuffer
+        // is 0 (identity mapping, byte-identical to the old behavior) whenever wrapping is off or
+        // the list already fits on one screen.
+        private static int wrapBuffer = 0;
+
+        /// <summary>Depth of the wraparound ghost zone on each end (0 when not wrapping).</summary>
+        public static int WrapBufferSize => wrapBuffer;
+
+        /// <summary>Total rows currently backing the native scroller: the real rows plus the
+        /// ghost buffer on each end (equals CurrentView.Count when not wrapping).</summary>
+        public static int PhysicalRowCount => view.Count + 2 * wrapBuffer;
+
+        /// <summary>Maps a physical scroller slot to the logical view-row index it should
+        /// display. Identity when wrapBuffer is 0; wraps via modulo into the real
+        /// [0, view.Count) range for slots that fall in a ghost zone. Returns -1 for an empty view.</summary>
+        private static int ContentIndexFor(int physicalIndex)
+        {
+            int n = view.Count;
+            if (n <= 0) return -1;
+            if (wrapBuffer <= 0) return physicalIndex;
+            int c = (physicalIndex - wrapBuffer) % n;
+            if (c < 0) c += n;
+            return c;
+        }
+
+        /// <summary>
+        /// Resolves a raw (possibly out-of-range) scroll index a scroll/drag wants to move to,
+        /// into the index that should actually be fed to the native scroller.
+        ///
+        /// With wrapping off (or no buffer room), this is a plain clamp to [0, maxScroll] — the
+        /// original behavior. With wrapping on, running past either buffer zone re-anchors the
+        /// index by exactly one full view.Count: since content repeats every view.Count physical
+        /// rows, that shift changes nothing on screen but frees up another full buffer's worth of
+        /// room to keep scrolling in that direction, so the loop never runs out of ghost rows to
+        /// scroll through no matter how far the user keeps scrolling one way.
+        /// </summary>
+        public static float ResolveScrollIndex(float rawIndex)
+        {
+            float displayCount = scroller != null ? scroller.displayCount : 0f;
+            float maxScroll = Mathf.Max(0f, PhysicalRowCount - displayCount);
+
+            if (wrapBuffer <= 0 || view.Count <= 0)
+                return Mathf.Clamp(rawIndex, 0f, maxScroll);
+
+            int n = view.Count;
+            if (rawIndex < 0f) rawIndex += n;
+            else if (rawIndex > maxScroll) rawIndex -= n;
+            return Mathf.Clamp(rawIndex, 0f, maxScroll); // safety net; a single tick should never need this
+        }
 
         // ── Placeholders: one cheap empty GO per view row ────────────────────
         private static readonly List<GameObject> placeholders = new List<GameObject>();
@@ -211,7 +284,7 @@ namespace ExScoringMod
         private static readonly List<SongPoolItem> songPool = new List<SongPoolItem>();
         private static readonly List<HeaderPoolItem> headerPool = new List<HeaderPoolItem>();
 
-        // viewIndex -> (isHeader, slot)
+        // physical row index (scroller slot) -> (isHeader, slot)
         private struct Binding { public bool isHeader; public int slot; }
         private static readonly Dictionary<int, Binding> rowBindings = new Dictionary<int, Binding>();
         private static readonly List<int> tmpRelease = new List<int>();
@@ -229,9 +302,12 @@ namespace ExScoringMod
         public static void SetView(List<ViewRow> rows) => SetView(rows, null);
 
         /// <summary>
-        /// Replace the view, scrolling to <paramref name="targetScroll"/> if given. Navigation
-        /// level changes pass an explicit target (0 to drill in, the saved index to back out),
-        /// since the live scroll position is meaningless across two different lists.
+        /// Replace the view, scrolling to <paramref name="targetScroll"/> if given. targetScroll
+        /// (like every other public scroll-position value on this class — see GetScroll/SetScroll)
+        /// is in CANONICAL, buffer-independent coordinates: 0 is always the real first row, whatever
+        /// the current wrap buffer happens to be. Navigation level changes pass an explicit target
+        /// (0 to drill in at the top, a previously-saved canonical index to back out to), since the
+        /// live scroll position is meaningless across two different lists.
         /// </summary>
         public static void SetView(List<ViewRow> rows, float? targetScroll)
         {
@@ -243,21 +319,49 @@ namespace ExScoringMod
             if (!scrollParent.gameObject.activeSelf)
                 scrollParent.gameObject.SetActive(true);
 
-            // Preserve scroll position. While already active (e.g. a folder toggle) the live
-            // scroller position is meaningful. On a fresh (re)entry the live scroller was zeroed
-            // in Teardown, so restore the position we saved when leaving.
-            float prevScroll = targetScroll ?? (active ? scroller.GetScrollIndex() : savedScroll);
+            // Preserve scroll position, in canonical terms, with priority matching the original
+            // (pre-wrap) behavior — an explicit target always wins:
+            //  - A specific target was requested: used as-is (canonical, so 0 always means the
+            //    real top regardless of wrap buffer).
+            //  - No target, but already active (e.g. a folder toggle rebuilding the same view in
+            //    place): keep the exact canonical position the live scroll currently represents,
+            //    measured against the OLD wrapBuffer before this rebuild recomputes it.
+            //  - No target, fresh (re)entry: whatever was saved on the way out (already
+            //    canonical), or the top if nothing was saved yet.
+            bool wasActive = active;
+            float liveScrollCanonical = wasActive ? (scroller.GetScrollIndex() - wrapBuffer) : 0f;
 
             view.Clear();
             viewSongIDs.Clear();
             songToViewIndex.Clear();
             for (int i = 0; i < rows.Count; i++)
-            {
                 view.Add(rows[i]);
-                if (rows[i].kind == ViewRowKind.Song)
+
+            // Wraparound buffer: only worth it when wrapping is on and the list is longer than
+            // one screen — otherwise everything already fits and there's nothing to loop around.
+            wrapBuffer = (Config.WrapSongList && view.Count > Mathf.CeilToInt(scroller.displayCount))
+                ? Mathf.CeilToInt(scroller.displayCount)
+                : 0;
+
+            float prevScrollCanonical;
+            if (targetScroll.HasValue)
+                prevScrollCanonical = targetScroll.Value;
+            else if (wasActive)
+                prevScrollCanonical = liveScrollCanonical;
+            else
+                prevScrollCanonical = hasSavedScroll ? savedScrollOffset : 0f;
+
+            MelonLogger.Log($"[VList-DIAG] SetView prevScroll calc: targetScroll={targetScroll?.ToString("0.00") ?? "null"}, " +
+                            $"wasActive={wasActive}, liveScrollCanonical={liveScrollCanonical:0.00}, " +
+                            $"hasSavedScroll={hasSavedScroll}, savedScrollOffset={savedScrollOffset:0.00}, " +
+                            $"=> prevScrollCanonical={prevScrollCanonical:0.00}, newWrapBuffer={wrapBuffer}");
+
+            for (int i = 0; i < view.Count; i++)
+            {
+                if (view[i].kind == ViewRowKind.Song)
                 {
-                    songToViewIndex[rows[i].songID] = i;
-                    viewSongIDs.Add(rows[i].songID);
+                    songToViewIndex[view[i].songID] = i; // canonical index
+                    viewSongIDs.Add(view[i].songID);
                 }
             }
 
@@ -271,11 +375,16 @@ namespace ExScoringMod
             active = true;
             generation++; // a new view invalidates select coroutines targeting the old one
 
-            float maxScroll = Mathf.Max(0f, view.Count - scroller.displayCount);
-            scroller.SnapTo(Mathf.Clamp(prevScroll, 0f, maxScroll), true);
+            float prevScrollPhysical = prevScrollCanonical + wrapBuffer;
+            float maxScroll = Mathf.Max(0f, PhysicalRowCount - scroller.displayCount);
+            float clampedPhysical = Mathf.Clamp(prevScrollPhysical, 0f, maxScroll);
+            scroller.SnapTo(clampedPhysical, true);
             scroller.UpdateScroll(-1);
+            lastIntendedPhysicalScroll = clampedPhysical;
+            scrollDirtiedByInput = false;
 
-            MelonLogger.Log($"[VList] SetView: {view.Count} rows, scroll={Mathf.Clamp(prevScroll, 0f, maxScroll):0.0}/{maxScroll:0.0}, displayCount={scroller.displayCount:0.0}");
+            MelonLogger.Log($"[VList] SetView: {view.Count} rows (physical={PhysicalRowCount}, wrapBuffer={wrapBuffer}), " +
+                            $"scroll={clampedPhysical:0.0}/{maxScroll:0.0}, displayCount={scroller.displayCount:0.0}");
 
             Sync();
 
@@ -321,21 +430,28 @@ namespace ExScoringMod
         public static int IndexOf(string songID)
             => songToViewIndex.TryGetValue(songID, out int i) ? i : -1;
 
-        /// <summary>Current scroll index (0 when inactive). Used to snapshot per-level scroll.</summary>
-        public static float GetScroll() => (active && scroller != null) ? scroller.GetScrollIndex() : 0f;
+        /// <summary>Current scroll index in CANONICAL (buffer-independent) terms — 0 is always the
+        /// real top row, whatever the current wrap buffer is (0 when inactive). Used to snapshot
+        /// per-level scroll; safe to save now and restore later even if wrapping is toggled
+        /// in between.</summary>
+        public static float GetScroll() => (active && scroller != null) ? scroller.GetScrollIndex() - wrapBuffer : 0f;
 
         /// <summary>
-        /// Directly set the scroll position, clamped to the current view's range. Used by
-        /// FolderRowManager.ToggleFolder to restore a folder header's exact on-screen offset
-        /// after a rebuild, when a raw scroll index wouldn't still point at the same place
-        /// (e.g. a different, much larger folder collapsed/expanded in the same toggle,
+        /// Directly set the scroll position (canonical, like GetScroll), clamped to the current
+        /// view's range. Used by FolderRowManager.ToggleFolder to restore a folder header's exact
+        /// on-screen offset after a rebuild, when a raw scroll index wouldn't still point at the
+        /// same place (e.g. a different, much larger folder collapsed/expanded in the same toggle,
         /// shifting every later header's row index).
         /// </summary>
-        public static void SetScroll(float index)
+        public static void SetScroll(float canonicalIndex)
         {
             if (!active || scroller == null) return;
-            float maxScroll = Mathf.Max(0f, view.Count - scroller.displayCount);
-            scroller.SnapTo(Mathf.Clamp(index, 0f, maxScroll), true);
+            float physical = canonicalIndex + wrapBuffer;
+            float maxScroll = Mathf.Max(0f, PhysicalRowCount - scroller.displayCount);
+            float clamped = Mathf.Clamp(physical, 0f, maxScroll);
+            scroller.SnapTo(clamped, true);
+            lastIntendedPhysicalScroll = clamped;
+            scrollDirtiedByInput = false;
         }
 
         /// <summary>
@@ -362,7 +478,7 @@ namespace ExScoringMod
         {
             int idx = IndexOf(songID);
             if (idx < 0) return null;
-            if (!rowBindings.TryGetValue(idx, out Binding b) || b.isHeader) return null;
+            if (!rowBindings.TryGetValue(idx + wrapBuffer, out Binding b) || b.isHeader) return null;
             return songPool[b.slot].ssi;
         }
 
@@ -385,28 +501,30 @@ namespace ExScoringMod
             if (!active) return;
             if (idx0 < 0) { MelonLogger.Log($"[VList] ScrollToAndSelect: '{songID}' not in current view."); return; }
             int mySeq = ++selectSeq;
-            MelonCoroutines.Start(ScrollToAndSelectCo(songID, idx0, preserveIfVisible, generation, mySeq));
+            MelonCoroutines.Start(ScrollToAndSelectCo(songID, idx0 + wrapBuffer, preserveIfVisible, generation, mySeq));
         }
 
-        private static bool IsRowInWindow(int viewIndex)
+        private static bool IsRowInWindow(int physicalIndex)
         {
             float top = scroller.GetScrollIndex();
             float bottom = top + scroller.displayCount - 1;
-            return viewIndex >= top && viewIndex <= bottom;
+            return physicalIndex >= top && physicalIndex <= bottom;
         }
 
-        private static IEnumerator ScrollToAndSelectCo(string songID, int viewIndex, bool preserveIfVisible, int gen, int seq)
+        private static IEnumerator ScrollToAndSelectCo(string songID, int physicalIndex, bool preserveIfVisible, int gen, int seq)
         {
             // Decide whether to scroll. If restoring and the row is already visible at the current
             // (restored) position, don't move — keeps the user's exact prior scroll. Otherwise
             // center the row.
-            bool doScroll = !(preserveIfVisible && IsRowInWindow(viewIndex));
+            bool doScroll = !(preserveIfVisible && IsRowInWindow(physicalIndex));
             if (doScroll)
             {
-                float maxScroll = Mathf.Max(0f, view.Count - scroller.displayCount);
-                float target = Mathf.Clamp(viewIndex - scroller.displayCount / 2f, 0f, maxScroll);
+                float maxScroll = Mathf.Max(0f, PhysicalRowCount - scroller.displayCount);
+                float target = Mathf.Clamp(physicalIndex - scroller.displayCount / 2f, 0f, maxScroll);
                 scroller.SnapTo(target, true);
                 scroller.UpdateScroll(-1);
+                lastIntendedPhysicalScroll = target;
+                scrollDirtiedByInput = false;
             }
 
             // Wait for the row to bind (placeholders/scroller settle over a few frames on re-entry).
@@ -478,18 +596,18 @@ namespace ExScoringMod
         {
             if (!active || scroller == null) return;
 
-            int hdr = HeaderIndex(folderName);
+            int hdr = HeaderIndex(folderName); // canonical
             if (hdr < 0) return;
 
-            int firstSong = hdr + 1;
+            int firstSong = hdr + 1; // canonical
             if (firstSong >= view.Count || view[firstSong].kind != ViewRowKind.Song)
                 return; // folder empty or not actually open
 
-            float cur = scroller.GetScrollIndex();
-            float maxScroll = Mathf.Max(0f, view.Count - scroller.displayCount);
+            float curCanonical = scroller.GetScrollIndex() - wrapBuffer;
+            float maxScroll = Mathf.Max(0f, PhysicalRowCount - scroller.displayCount);
 
             // Genuinely already visible (both bounds) → leave the scroll alone.
-            if (firstSong >= cur && firstSong < cur + scroller.displayCount) return;
+            if (firstSong >= curCanonical && firstSong < curCanonical + scroller.displayCount) return;
 
             // Otherwise scroll just enough to reveal it, in whichever direction it
             // actually is. Previously this only checked the bottom bound, so a stale
@@ -497,10 +615,13 @@ namespace ExScoringMod
             // large expanded folder shrinks the view a lot) could sit ABOVE where the
             // newly-opened folder now lives and be wrongly treated as "already visible",
             // stranding the view far from the folder instead of revealing it.
-            float target = (firstSong < cur)
-                ? Mathf.Clamp(firstSong, 0f, maxScroll)                              // above window → scroll up just enough
-                : Mathf.Clamp(firstSong - scroller.displayCount + 1, 0f, maxScroll); // below window → scroll down just enough
-            scroller.SnapTo(target, true);
+            float targetCanonical = (firstSong < curCanonical)
+                ? firstSong                                    // above window → scroll up just enough
+                : firstSong - scroller.displayCount + 1;       // below window → scroll down just enough
+            float targetPhysical = Mathf.Clamp(targetCanonical + wrapBuffer, 0f, maxScroll);
+            scroller.SnapTo(targetPhysical, true);
+            lastIntendedPhysicalScroll = targetPhysical;
+            scrollDirtiedByInput = false;
         }
 
         /// <summary>DIAGNOSTIC: log the game-side list state the original ShowSongList will see.</summary>
@@ -525,12 +646,51 @@ namespace ExScoringMod
             try { if (ss.scroller != null && ss.scroller.mRows != null) rows = ss.scroller.mRows.Count; }
             catch { }
 
+            float scrollIdx = -999f, mIdx = -999f, mDestIdx = -999f;
+            try
+            {
+                if (ss.scroller != null)
+                {
+                    scrollIdx = ss.scroller.GetScrollIndex();
+                    mIdx = ss.scroller.mIndex;
+                    mDestIdx = ss.scroller.mDestinationIndex;
+                }
+            }
+            catch { }
+
             MelonLogger.Log($"[VList-DIAG] before rebuild: mSongButtons={btnCount} (nulls={btnNulls}), " +
-                            $"mRows={rows}, active={active}, songPool={songPool.Count}, headerPool={headerPool.Count}");
+                            $"mRows={rows}, active={active}, songPool={songPool.Count}, headerPool={headerPool.Count}, " +
+                            $"scrollIdx={scrollIdx:0.00}, mIndex={mIdx:0.00}, mDestIdx={mDestIdx:0.00}, wrapBuffer={wrapBuffer}");
         }
 
         public static void Teardown()
         {
+            // Capture the scroll position FIRST, before anything below touches the native
+            // scroller (ClearPlaceholders() calls scroller.ClearRows(), which resets the
+            // scroller's index to 0 as a side effect of clearing all rows).
+            //
+            // Prefer the scroller's live value ONLY if real user input has actually touched it
+            // since our last deliberate SetView/SetScroll/etc — otherwise trust our own recorded
+            // intent instead. Something in the native song-page pipeline can silently reset the
+            // scroller's index shortly after we set it (observed only on a session's very first
+            // song-page entry, with no call of ours in between to explain it — most likely a
+            // one-time native Start()/init side effect on the scroller component), and re-reading
+            // the live value at that moment would capture that spurious reset instead of the
+            // position we actually meant to be at.
+            if (scroller != null)
+            {
+                try
+                {
+                    float physical = scrollDirtiedByInput ? scroller.GetScrollIndex() : lastIntendedPhysicalScroll;
+                    savedScrollOffset = physical - wrapBuffer;
+                    hasSavedScroll = true;
+                    MelonLogger.Log($"[VList-DIAG] Teardown captured: scrollIdx={scroller.GetScrollIndex():0.00}, " +
+                                    $"dirtiedByInput={scrollDirtiedByInput}, lastIntended={lastIntendedPhysicalScroll:0.00}, " +
+                                    $"using={physical:0.00}, wrapBuffer={wrapBuffer}, savedScrollOffset={savedScrollOffset:0.00}");
+                }
+                catch { hasSavedScroll = false; }
+            }
+
             active = false;
             generation++; // invalidate any in-flight select coroutines from this session
 
@@ -552,16 +712,8 @@ namespace ExScoringMod
                 catch (Exception e) { MelonLogger.Log("[VList] Teardown mSongButtons purge failed: " + e.Message); }
             }
 
-            // Remember where we were so re-entry can restore it (SetView reads savedScroll).
-            // We still zero the LIVE scroller below: the game's empty ShowSongList rebuild runs
-            // right after and a stale live index against zero rows was a source of NREs.
-            if (scroller != null)
-            {
-                try { savedScroll = scroller.GetScrollIndex(); }
-                catch { savedScroll = 0f; }
-            }
-
-            // Reset the live scroll position for the game's imminent empty rebuild.
+            // Reset the live scroll position for the game's imminent empty rebuild (scroll was
+            // already captured above, before this).
             if (scroller != null)
             {
                 scroller.mIndex = 0f;
@@ -580,17 +732,19 @@ namespace ExScoringMod
 
         // ── Binding ──────────────────────────────────────────────────────────
 
-        private static void BindRow(int viewIndex)
+        private static void BindRow(int physicalIndex)
         {
-            var row = view[viewIndex];
-            var ph = placeholders[viewIndex];
+            int contentIdx = ContentIndexFor(physicalIndex);
+            if (contentIdx < 0) return; // empty view; nothing to bind
+            var row = view[contentIdx];
+            var ph = placeholders[physicalIndex];
 
             if (row.kind == ViewRowKind.Song)
             {
                 int slot = AcquireSongSlot();
                 if (slot < 0)
                 {
-                    if (!poolWarming) MelonLogger.Log($"[VList] Song pool exhausted at row {viewIndex}.");
+                    if (!poolWarming) MelonLogger.Log($"[VList] Song pool exhausted at row {physicalIndex}.");
                     return; // ALWAYS bail when there's no slot — never fall through to songPool[slot]
                 }
                 var pi = songPool[slot];
@@ -640,14 +794,14 @@ namespace ExScoringMod
                     ApplySongIndicator(pi, row);
 
                 pi.inUse = true;
-                rowBindings[viewIndex] = new Binding { isHeader = false, slot = slot };
+                rowBindings[physicalIndex] = new Binding { isHeader = false, slot = slot };
             }
             else // FolderHeader or Action — both use the header pool's styled button
             {
                 int slot = AcquireHeaderSlot();
                 if (slot < 0)
                 {
-                    if (!poolWarming) MelonLogger.Log($"[VList] Header pool exhausted at row {viewIndex}.");
+                    if (!poolWarming) MelonLogger.Log($"[VList] Header pool exhausted at row {physicalIndex}.");
                     return; // ALWAYS bail when there's no slot — never fall through to headerPool[slot]
                 }
                 var hi = headerPool[slot];
@@ -706,7 +860,7 @@ namespace ExScoringMod
                 }
 
                 hi.inUse = true;
-                rowBindings[viewIndex] = new Binding { isHeader = true, slot = slot };
+                rowBindings[physicalIndex] = new Binding { isHeader = true, slot = slot };
                 ApplyHeaderIndicator(hi, row);
             }
         }
@@ -718,11 +872,11 @@ namespace ExScoringMod
         {
             foreach (var kv in rowBindings)
             {
-                int idx = kv.Key;
-                if (idx < 0 || idx >= view.Count) continue;
+                int contentIdx = ContentIndexFor(kv.Key);
+                if (contentIdx < 0) continue;
                 var b = kv.Value;
-                if (b.isHeader) ApplyHeaderIndicator(headerPool[b.slot], view[idx]);
-                else ApplySongIndicator(songPool[b.slot], view[idx]);
+                if (b.isHeader) ApplyHeaderIndicator(headerPool[b.slot], view[contentIdx]);
+                else ApplySongIndicator(songPool[b.slot], view[contentIdx]);
             }
         }
 
@@ -821,8 +975,9 @@ namespace ExScoringMod
         {
             var sw = Stopwatch.StartNew();
             int reused = 0, created = 0;
+            int total = PhysicalRowCount;
 
-            for (int i = 0; i < view.Count; i++)
+            for (int i = 0; i < total; i++)
             {
                 GameObject go = RentPlaceholder(ref reused, ref created);
                 go.transform.SetParent(scrollParent, false);
@@ -835,7 +990,7 @@ namespace ExScoringMod
             }
 
             sw.Stop();
-            MelonLogger.Log($"[VList-PERF] BuildPlaceholders: {view.Count} rows " +
+            MelonLogger.Log($"[VList-PERF] BuildPlaceholders: {total} rows " +
                             $"(reused={reused}, created={created}, poolFree={placeholderPool.Count}) " +
                             $"in {sw.Elapsed.TotalMilliseconds:0.0} ms");
         }
@@ -1242,7 +1397,7 @@ namespace ExScoringMod
         {
             for (int i = 0; i < view.Count; i++)
                 if (view[i].kind == ViewRowKind.FolderHeader && view[i].folderName == folderName)
-                    return i;
+                    return i; // canonical index
             return -1;
         }
     }

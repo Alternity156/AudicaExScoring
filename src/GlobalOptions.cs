@@ -313,6 +313,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetPurpleMenuEnabled();
                 OptionsMenuFunctions.GetScrollSpeedMultiplier();
                 OptionsMenuFunctions.GetArrowScrollRows();
+                OptionsMenuFunctions.GetWrapSongList();
                 OptionsMenuFunctions.GetHideScoreData();
                 OptionsMenuFunctions.GetFirstPlayBlind();
                 OptionsMenuFunctions.GetPracticeModeMinimizeButtonEnabled();
@@ -352,6 +353,12 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.arrowScrollRows = v; OptionsMenuFunctions.SetArrowScrollRows(v); },
                     1f, 20f, 1f, 3f, "N0");
                 OptionsMenuClone.AddRow(scrollSpeedSlider, arrowScrollRowsSlider);
+
+                var wrapSongListToggle = OptionsMenuClone.CreateToggle(0, "Wrap Song List",
+                    () => OptionsMenuFunctions.wrapSongList,
+                    v => { OptionsMenuFunctions.wrapSongList = v; OptionsMenuFunctions.SetWrapSongList(v); },
+                    "Loops the list like a wheel: scrolling or dragging past either end wraps around to the other. Disabled by default.");
+                OptionsMenuClone.AddRow(wrapSongListToggle);
 
                 var hideScoreDataToggle = OptionsMenuClone.CreateToggle(0, "Hide Score Data",
                     () => OptionsMenuFunctions.hideScoreData,
