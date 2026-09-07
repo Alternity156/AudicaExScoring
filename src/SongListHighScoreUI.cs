@@ -194,6 +194,42 @@ namespace ExScoringMod
             }
         }
 
+        /// <summary>
+        /// Native SongSelectItem.Init() calls UpdateHighScoreInfo() once, then unconditionally calls
+        /// UpdateLeaderboardInfo() (when not in party/campaign) — which does its own global/friends
+        /// leaderboard rank lookups (GetGlobalPositionForSong / GetFriendsPosition), sets the rank
+        /// labels/icons, and THEN calls UpdateHighScoreInfo() a second time. Confirmed via decompile +
+        /// [VList-PERF] logging: those two rank lookups cost ~20-40 ms PER SONG, synchronously, on
+        /// every row that gets freshly Init()'d (i.e. every row landing on a song its pool slot wasn't
+        /// already showing) — with ~9-24 rows binding in a single SetView call when a folder opens,
+        /// that alone produced the ~300ms main-thread stall behind the VR reprojection "catch-up" itch.
+        ///
+        /// The EX layout never reads globalPositionLabel / friendsPositionLabel / globalIcon /
+        /// friendsIcon (grep confirms zero references anywhere in this mod), so none of that
+        /// computation's output is ever shown. Skip it outright for EX rows — explicitly hiding the
+        /// four elements first so a pooled row reused from a previous song can't show a stale rank —
+        /// rather than just spreading the cost across frames, since the work itself is unnecessary here.
+        /// Audica-native scoring (ExType false) is untouched: native runs exactly as before.
+        /// </summary>
+        [HarmonyPatch(typeof(SongSelectItem), "UpdateLeaderboardInfo")]
+        public static class SongSelectItemUpdateLeaderboardInfoPatch
+        {
+            public static bool Prefix(SongSelectItem __instance)
+            {
+                if (!Config.ExType) return true; // native runs fully — unrelated to Audica-scoring mode
+
+                if (__instance != null)
+                {
+                    if (__instance.globalPositionLabel != null) __instance.globalPositionLabel.gameObject.SetActive(false);
+                    if (__instance.friendsPositionLabel != null) __instance.friendsPositionLabel.gameObject.SetActive(false);
+                    if (__instance.globalIcon != null) __instance.globalIcon.SetActive(false);
+                    if (__instance.friendsIcon != null) __instance.friendsIcon.SetActive(false);
+                }
+
+                return false; // skip native: rank lookups + label/icon updates + its own UpdateHighScoreInfo call
+            }
+        }
+
         // TEMPORARY: watches for anything touching these fields AFTER our patch already ran this
         // frame, since two rounds of guessing have both pointed to something ELSE re-asserting
         // native state afterward. Throttled to only log on an actual change per row, so it won't

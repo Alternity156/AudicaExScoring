@@ -342,6 +342,27 @@ namespace ExScoringMod
             // lives in the requests folder AND in Unsorted, and GetFolder would send us to the Unsorted copy.
             if (VirtualSongList.IndexOf(songID) < 0)
             {
+                // The launched song isn't in the current view anymore — most likely it was a Song
+                // Request that got dequeued the moment it was played (e.g. an already-owned request
+                // the SongRequest mod auto-removes on play). Jumping to the song's actual home folder
+                // is disorienting for a request, so if we were in the Song Requests folder, stay there
+                // instead: select whatever's now first in the queue, or if it's empty, just scroll to
+                // the (now empty) Song Requests header rather than bouncing to a different folder.
+                if (SongFolderManager.openFolder == SongFolderManager.FolderSongRequests)
+                {
+                    var remaining = GetSongRequestSongIDs();
+                    if (remaining.Count > 0)
+                    {
+                        VirtualSongList.SelectInView(remaining[0]);
+                    }
+                    else
+                    {
+                        int hdr = VirtualSongList.HeaderIndex(SongFolderManager.FolderSongRequests);
+                        if (hdr >= 0) VirtualSongList.SetScroll(hdr);
+                    }
+                    return;
+                }
+
                 string folder = CurrentFolderFor(songID);
                 if (folder != null && SongFolderManager.openFolder != folder)
                 {
