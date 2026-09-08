@@ -10,6 +10,8 @@ namespace ExScoringMod
     /// text now that the logo is gone. The text's content is set by ReleaseNotesOnEnablePatch in
     /// Hooks.cs (patches ReleaseNotes.OnEnable directly), not here - that's the only way to catch
     /// it reliably on initial game boot as well as on later menu visits.
+    /// Also creates (once) the ApiKeyHelpButtons - their visibility is driven separately by
+    /// AudicaExStatus, since that's the only place that knows whether the key is missing/invalid.
     /// </summary>
     public static class ReleaseNotesPanel
     {
@@ -89,6 +91,8 @@ namespace ExScoringMod
                 text.localPosition = TextLocalPosition;
             else
                 MelonLogger.Log("ReleaseNotesPanel: text not found");
+
+            ApiKeyHelpButtons.Setup(leftT);
 
             releaseNotes.gameObject.SetActive(true);
         }
