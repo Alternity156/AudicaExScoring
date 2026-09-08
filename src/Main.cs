@@ -494,6 +494,7 @@ namespace ExScoringMod
         public override void OnLateUpdate()
         {
             VirtualSongList.Sync();
+            ScrollIndicator.Tick();
             EnforceLaunchPanelBlank();
             SyncDisplayingDifficulty();
             MarathonSetup.Enforce();

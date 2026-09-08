@@ -408,8 +408,32 @@ namespace ExScoringMod
         /// <summary>
         /// Reactive driver — call every LateUpdate. Binds whatever placeholders the scroller
         /// has made active to pooled visuals, releases the rest.
+        ///
+        /// Song binds are throttled to 1 per call: native
+        /// SongSelectItem.Init() measured at ~25-40 ms per song (confirmed via [VList-PERF]
+        /// logging + decompile — TMP_Text.set_text on title/artist/mapper, not something this
+        /// mod can skip the way the leaderboard-rank lookups were). During ordinary scrolling
+        /// only ~1 new song enters view per frame anyway, so this throttle is invisible there.
+        /// It only bites when a bunch of rows go active at once — a fresh SetView (root list
+        /// load, folder open) or a fast scroll fling — which is exactly when un-throttled binding
+        /// used to stack many of those ~30 ms costs into a single frame (e.g. 287 ms for a
+        /// 43-row folder open) and produce a visible VR reprojection "catch-up" hitch. Left
+        /// unbound rows simply stay "active but unbound" and get picked up on a later Sync()
+        /// call — this method is already ticked every LateUpdate (see Main.cs), so no coroutine
+        /// or extra plumbing is needed to spread the remainder across frames. Total time to
+        /// finish populating a view is about the same; it's just never all paid in one frame.
+        /// Header rows are NOT throttled — no Init()/leaderboard cost, cheap to bind immediately.
         /// </summary>
-        public static void Sync()
+        public static void Sync() => Sync(null);
+
+        /// <summary>
+        /// Same as the no-arg overload, but if <paramref name="priorityPhysicalIndex"/> names an
+        /// active, not-yet-bound placeholder, that row is bound first and unconditionally —
+        /// bypassing the per-call song-bind throttle. Used by ScrollToAndSelectCo/SelectInViewCo
+        /// so the row they're specifically waiting on to select never gets stuck behind other
+        /// rows' throttled binds (which could otherwise delay it past their own wait-frame limit).
+        /// </summary>
+        public static void Sync(int? priorityPhysicalIndex)
         {
             if (!active || scroller == null) return;
 
@@ -430,12 +454,37 @@ namespace ExScoringMod
             }
             for (int i = 0; i < tmpRelease.Count; i++) ReleaseBinding(tmpRelease[i]);
 
-            // Bind active placeholders not yet bound.
+            // Priority row (if any) binds first, unconditionally — see doc comment above.
+            if (priorityPhysicalIndex.HasValue)
+            {
+                int pIdx = priorityPhysicalIndex.Value;
+                if (pIdx >= 0 && pIdx < placeholders.Count)
+                {
+                    var pPh = placeholders[pIdx];
+                    if (pPh != null && pPh.activeSelf && !rowBindings.ContainsKey(pIdx))
+                        BindRow(pIdx);
+                }
+            }
+
+            // Bind active placeholders not yet bound. Song binds are capped per call (see doc
+            // comment above); headers are never throttled. Already-bound rows (including the
+            // priority row just handled) are skipped via the rowBindings check below.
+            const int MaxSongBindsPerSync = 1;
+            int songBindsThisCall = 0;
             for (int i = 0; i < placeholders.Count; i++)
             {
                 var ph = placeholders[i];
                 if (ph == null || !ph.activeSelf) continue;
                 if (rowBindings.ContainsKey(i)) continue;
+
+                int contentIdx = ContentIndexFor(i);
+                bool isSongRow = contentIdx >= 0 && view[contentIdx].kind == ViewRowKind.Song;
+                if (isSongRow)
+                {
+                    if (songBindsThisCall >= MaxSongBindsPerSync) continue; // pick up next Sync() call
+                    songBindsThisCall++;
+                }
+
                 BindRow(i);
             }
         }
@@ -550,7 +599,7 @@ namespace ExScoringMod
                 // against a pre-leave/return coroutine resuming mid-rebuild), or a newer select
                 // superseded this one (rapid Random Song presses — newest wins).
                 if (!active || gen != generation || seq != selectSeq) yield break;
-                Sync();
+                Sync(physicalIndex); // priority: our target row binds now, others still throttled
                 item = GetBoundItem(songID);
                 if (item != null) break;
             }
@@ -568,15 +617,16 @@ namespace ExScoringMod
         /// </summary>
         public static void SelectInView(string songID)
         {
-            if (!active || IndexOf(songID) < 0) return;
-            MelonCoroutines.Start(SelectInViewCo(songID, generation));
+            int idx0 = IndexOf(songID);
+            if (!active || idx0 < 0) return;
+            MelonCoroutines.Start(SelectInViewCo(songID, idx0 + wrapBuffer, generation));
         }
 
-        private static IEnumerator SelectInViewCo(string songID, int gen)
+        private static IEnumerator SelectInViewCo(string songID, int physicalIndex, int gen)
         {
             yield return null;
             if (!active || gen != generation) yield break;
-            Sync();
+            Sync(physicalIndex); // priority: our target row binds now, others still throttled
             yield return null;
             if (!active || gen != generation) yield break;
 

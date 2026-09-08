@@ -248,6 +248,7 @@
     <Compile Include="src\RefreshButton.cs" />
     <Compile Include="src\RunDataRecalculator.cs" />
     <Compile Include="src\RunDataSaveHandler.cs" />
+    <Compile Include="src\ScrollIndicator.cs" />
     <Compile Include="src\SearchKeyboard.cs" />
     <Compile Include="src\SongCache.cs" />
     <Compile Include="src\SongDownloader.cs" />

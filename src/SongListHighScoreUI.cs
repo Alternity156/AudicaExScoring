@@ -145,27 +145,6 @@ namespace ExScoringMod
 
                 if (__instance == null || __instance.mSongData == null) return false;
 
-                string songIdDiag = __instance.mSongData.songID;
-                MelonLogger.Log($"[ExScoring][Diag] Prefix ENTER (EX) song={songIdDiag}");
-
-                if (!loggedDuplicateCheckFor.Contains(songIdDiag))
-                {
-                    loggedDuplicateCheckFor.Add(songIdDiag);
-                    string originalId = __instance.mSongData.originalSongID;
-                    int exactMatches = 0;
-                    int sameOriginalMatches = 0;
-                    for (int i = 0; i < SongList.I.songs.Count; i++)
-                    {
-                        if (SongList.I.songs[i].songID == songIdDiag)
-                            exactMatches++;
-                        if (!string.IsNullOrEmpty(originalId) && SongList.I.songs[i].originalSongID == originalId)
-                            sameOriginalMatches++;
-                    }
-                    MelonLogger.Log($"[DupCheck] boundSongID={songIdDiag} boundOriginalSongID={originalId} " +
-                                     $"exactSongIDMatchesInList={exactMatches} sameOriginalSongIDMatchesInList={sameOriginalMatches} " +
-                                     $"totalSongsInList={SongList.I.songs.Count}");
-                }
-
                 ApplyExRowLayout(__instance);
 
                 string songId = __instance.mSongData.songID;
@@ -175,12 +154,10 @@ namespace ExScoringMod
                 if (exRowScoreCache.TryGetValue(key, out CachedExRowScore cached))
                 {
                     ApplySongRowScore(__instance, cached);
-                    MelonLogger.Log($"[ExScoring][Diag] Prefix APPLIED song={songIdDiag}");
                     return false;
                 }
 
                 HideSongRowScore(__instance);
-                MelonLogger.Log($"[ExScoring][Diag] Prefix HIDDEN song={songIdDiag}");
 
                 if (exRowScoreEmpty.Contains(key)) return false; // confirmed no saved runs — stay hidden
 
@@ -228,52 +205,6 @@ namespace ExScoringMod
 
                 return false; // skip native: rank lookups + label/icon updates + its own UpdateHighScoreInfo call
             }
-        }
-
-        // TEMPORARY: watches for anything touching these fields AFTER our patch already ran this
-        // frame, since two rounds of guessing have both pointed to something ELSE re-asserting
-        // native state afterward. Throttled to only log on an actual change per row, so it won't
-        // spam every frame for rows that are stable.
-        private static readonly Dictionary<int, string> lastLoggedRowSnapshot = new Dictionary<int, string>();
-
-        private static readonly HashSet<string> loggedDuplicateCheckFor = new HashSet<string>();
-
-        [HarmonyPatch(typeof(SongSelectItem), "Update")]
-        public static class SongSelectItemUpdateDiagnosticPatch
-        {
-            public static void Postfix(SongSelectItem __instance)
-            {
-                if (__instance == null || __instance.mSongData == null) return;
-
-                string songId = __instance.mSongData.songID;
-                string hs = __instance.highScoreLabel != null
-                    ? $"active={__instance.highScoreLabel.gameObject.activeSelf} text='{__instance.highScoreLabel.text}'"
-                    : "<null>";
-                string pc = __instance.percentLabel != null
-                    ? $"active={__instance.percentLabel.gameObject.activeSelf} text='{__instance.percentLabel.text}'"
-                    : "<null>";
-                string sd = __instance.starDisplay != null
-                    ? $"enabled={__instance.starDisplay.enabled} easyActive={CountActiveArray(__instance.starDisplay.starsEasy)} normalActive={CountActiveArray(__instance.starDisplay.starsNormal)} hardActive={CountActiveArray(__instance.starDisplay.starsHard)} expertActive={CountActiveArray(__instance.starDisplay.starsExpert)} goldActive={CountActiveArray(__instance.starDisplay.starsExpertGold)}"
-                    : "<null>";
-
-                string snapshot = $"{songId} | hs: {hs} | pc: {pc} | stars: {sd}";
-
-                int key = __instance.gameObject.GetInstanceID();
-                if (!lastLoggedRowSnapshot.TryGetValue(key, out string prev) || prev != snapshot)
-                {
-                    MelonLogger.Log($"[ExScoring][UpdateDiag] {snapshot}");
-                    lastLoggedRowSnapshot[key] = snapshot;
-                }
-            }
-        }
-
-        private static int CountActiveArray(Il2CppReferenceArray<GameObject> arr)
-        {
-            if (arr == null) return -1;
-            int count = 0;
-            for (int i = 0; i < arr.Length; i++)
-                if (arr[i] != null && arr[i].activeSelf) count++;
-            return count;
         }
 
         private static IEnumerator LoadRowScoreCoroutine(string songId, KataConfig.Difficulty difficulty, string key)
@@ -371,20 +302,17 @@ namespace ExScoringMod
                 return;
             }
 
-            int easy = HideStarArray(stars.starsEasy, "Easy");
-            int normal = HideStarArray(stars.starsNormal, "Normal");
-            int hard = HideStarArray(stars.starsHard, "Hard");
-            int expert = HideStarArray(stars.starsExpert, "Expert");
-            int gold = HideStarArray(stars.starsExpertGold, "ExpertGold");
+            HideStarArray(stars.starsEasy);
+            HideStarArray(stars.starsNormal);
+            HideStarArray(stars.starsHard);
+            HideStarArray(stars.starsExpert);
+            HideStarArray(stars.starsExpertGold);
 
             var meters = stars.starMeters;
-            int meterCount = 0;
             if (meters != null)
             {
                 for (int i = 0; i < meters.Length; i++)
-                {
-                    if (meters[i] != null) { meters[i].enabled = false; meterCount++; }
-                }
+                    if (meters[i] != null) meters[i].enabled = false;
             }
 
             // Background "empty star" pip outlines — a sibling GameObject the StarDisplay script
@@ -394,10 +322,7 @@ namespace ExScoringMod
             // script manages it, native never re-hides OR re-shows it on its own — unlike the five
             // tier arrays above, this one needs an explicit reactivate in the Audica-mode branch too.
             Transform pips = FindStarPips(stars.transform);
-            bool pipsFound = pips != null;
-            if (pipsFound) pips.gameObject.SetActive(false);
-
-            MelonLogger.Log($"[ExScoring][Diag] HideNativeStarArrays: hidden easy={easy} normal={normal} hard={hard} expert={expert} gold={gold} meters={meterCount} (meters array null={meters == null}) pipsFound={pipsFound}");
+            if (pips != null) pips.gameObject.SetActive(false);
         }
 
         private static void ShowNativeStarPips(SongSelectItem item)
@@ -420,24 +345,12 @@ namespace ExScoringMod
             return null;
         }
 
-        private static int HideStarArray(Il2CppReferenceArray<GameObject> stars, string label)
+        private static void HideStarArray(Il2CppReferenceArray<GameObject> stars)
         {
-            if (stars == null)
-            {
-                MelonLogger.Log($"[ExScoring][Diag] HideStarArray({label}): array is NULL");
-                return -1;
-            }
+            if (stars == null) return;
 
-            int hidden = 0;
             for (int i = 0; i < stars.Length; i++)
-            {
-                if (stars[i] != null)
-                {
-                    stars[i].SetActive(false);
-                    hidden++;
-                }
-            }
-            return hidden;
+                if (stars[i] != null) stars[i].SetActive(false);
         }
     }
 }
