@@ -37,6 +37,7 @@ namespace ExScoringMod
         public static bool disableTemporalAimAssist;
         public static bool forceHitSounds;
         public static bool disableGunBeamRedirection;
+        public static bool unifyTargetSpeed;
         public static readonly string[] ArrowColorOptions = { "White", "Hand Color" };
         public static readonly string[] ChainLineColorOptions = { "Default (Black)", "Hand Color" };
         public static int arrowColorMode;
@@ -498,6 +499,17 @@ namespace ExScoringMod
             Config.UpdateTemporalAimAssist(value);
         }
 
+        public static void GetUnifyTargetSpeed()
+        {
+            unifyTargetSpeed = Config.UnifyTargetSpeed;
+        }
+
+        public static void SetUnifyTargetSpeed(bool value)
+        {
+            unifyTargetSpeed = value;
+            Config.UpdateUnifyTargetSpeed(value);
+        }
+
         public static void GetTimingWindow()
         {
             timingWindow = Config.TimingWindow;
@@ -868,6 +880,53 @@ namespace ExScoringMod
                         }
                     }
                 }
+            }
+        }
+
+        // Non-melee targets: KataConfig.GetSecondsLookahead picks one of
+        // secondsLookaheadEasy/Normal/Hard/Expert based on the current difficulty, then divides by
+        // a speed factor that is identical across difficulties. That speed factor cancels out, so
+        // rescaling the already-computed result by (secondsLookaheadExpert / secondsLookaheadForCurrentDifficulty)
+        // reproduces "as if this were Expert" without needing to reimplement the song-speed lookup.
+        //
+        // Melee targets always use secondsLookaheadMelee regardless of difficulty, but the base game
+        // applies an extra x1.2 speed bonus on Hard/Expert only — dividing by that same 1.2 on
+        // Easy/Normal brings melee targets in line with Hard/Expert speed too.
+        //
+        // Tutorial mode is intentionally left untouched.
+        [HarmonyPatch(typeof(KataConfig), "GetSecondsLookahead", new Type[] { typeof(Target.TargetBehavior) })]
+        private static class UnifyTargetSpeedPatch
+        {
+            private static void Postfix(KataConfig __instance, Target.TargetBehavior behavior, ref float __result)
+            {
+                if (!Config.UnifyTargetSpeed) return;
+                if (__instance == null) return;
+                if (__instance.GetSpecialGameMode() == KataConfig.SpecialGameMode.Tutorial) return;
+
+                var difficulty = __instance.GetDifficulty();
+                if (difficulty == KataConfig.Difficulty.Expert) return;
+
+                if (behavior == Target.TargetBehavior.Melee)
+                {
+                    if (difficulty == KataConfig.Difficulty.Easy || difficulty == KataConfig.Difficulty.Normal)
+                    {
+                        __result /= 1.2f;
+                    }
+                    return;
+                }
+
+                float currentSeconds;
+                switch (difficulty)
+                {
+                    case KataConfig.Difficulty.Easy: currentSeconds = __instance.secondsLookaheadEasy; break;
+                    case KataConfig.Difficulty.Normal: currentSeconds = __instance.secondsLookaheadNormal; break;
+                    case KataConfig.Difficulty.Hard: currentSeconds = __instance.secondsLookaheadHard; break;
+                    default: return;
+                }
+
+                if (currentSeconds <= 0f) return;
+
+                __result *= __instance.secondsLookaheadExpert / currentSeconds;
             }
         }
 

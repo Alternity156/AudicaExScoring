@@ -24,6 +24,7 @@ namespace ExScoringMod
         public static bool DisableTemporalAimAssist;
         public static bool ForceHitSounds;
         public static bool DisableGunBeamRedirection;
+        public static bool UnifyTargetSpeed;
 
         public static string chainArrowHeader = "[Header]Chain Arrow";
         public static int ArrowColorMode;      // 0 = White, 1 = Hand Color
@@ -97,6 +98,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(DisableTemporalAimAssist), false, "Disables temporal aim assist");
             MelonPrefs.RegisterBool(Category, nameof(ForceHitSounds), false, "Forces hit sounds on targets that have none");
             MelonPrefs.RegisterBool(Category, nameof(DisableGunBeamRedirection), true, "Disables the gun beam redirection visual, has no effect on scoring");
+            MelonPrefs.RegisterBool(Category, nameof(UnifyTargetSpeed), false, "Makes targets travel at Expert speed on every difficulty instead of slowing down on lower difficulties");
 
             MelonPrefs.RegisterString(Category, nameof(chainArrowHeader), "", "[Header]Chain Arrow");
             MelonPrefs.RegisterBool(Category, nameof(EnableChainArrow), true, "Shows a directional arrow on chain lines");
@@ -164,6 +166,7 @@ namespace ExScoringMod
             DisableTemporalAimAssist = MelonPrefs.GetBool(Category, nameof(DisableTemporalAimAssist));
             ForceHitSounds = MelonPrefs.GetBool(Category, nameof(ForceHitSounds));
             DisableGunBeamRedirection = MelonPrefs.GetBool(Category, nameof(DisableGunBeamRedirection));
+            UnifyTargetSpeed = MelonPrefs.GetBool(Category, nameof(UnifyTargetSpeed));
             ArrowColorMode = MelonPrefs.GetInt(Category, nameof(ArrowColorMode));
             ChainLineColorMode = MelonPrefs.GetInt(Category, nameof(ChainLineColorMode));
             ArrowWidth = MelonPrefs.GetFloat(Category, nameof(ArrowWidth));
@@ -476,6 +479,13 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(DisableTemporalAimAssist), value);
             DisableTemporalAimAssist = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateUnifyTargetSpeed(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(UnifyTargetSpeed), value);
+            UnifyTargetSpeed = value;
             MelonPrefs.SaveConfig();
         }
 

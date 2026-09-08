@@ -150,6 +150,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetGunBeamRedirection();
                 OptionsMenuFunctions.GetTargetSpeedMultiplier();
                 OptionsMenuFunctions.GetMeleeSpeedMultiplier();
+                OptionsMenuFunctions.GetUnifyTargetSpeed();
                 OptionsMenuFunctions.GetDartPreGlowAmount();
                 OptionsMenuFunctions.GetDartSpeedMultiplier();
                 OptionsMenuFunctions.GetControllerPositionSmoothing();
@@ -195,6 +196,11 @@ namespace ExScoringMod
                     100f, 500f, 10f, 100f,
                     v => v.ToString("N0") + "%");
                 OptionsMenuClone.AddRow(targetSpeedSlider, meleeSpeedSlider);
+
+                var unifyTargetSpeedToggle = OptionsMenuClone.CreateToggle(0, "Unify Target Speed",
+                    () => OptionsMenuFunctions.unifyTargetSpeed,
+                    v => { OptionsMenuFunctions.unifyTargetSpeed = v; OptionsMenuFunctions.SetUnifyTargetSpeed(v); });
+                OptionsMenuClone.AddRow(unifyTargetSpeedToggle);
 
                 var dartHeader = OptionsMenuClone.CreateHeader(0, "Dart");
                 OptionsMenuClone.AddRow(dartHeader);
