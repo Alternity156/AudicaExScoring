@@ -91,9 +91,12 @@ namespace ExScoringMod
 
         /// <summary>
         /// Invoked when a folder header is shot. FolderRowManager sets this to its ToggleFolder,
-        /// keeping VirtualSongList independent of the folder logic.
+        /// keeping VirtualSongList independent of the folder logic. The int is the exact extended
+        /// (un-wrapped) canonical index of the specific physical copy that was shot — physicalIndex
+        /// minus wrapBuffer, with no modulo — so when Wrap Song List has the same header visible
+        /// twice at once, the handler knows exactly which copy fired rather than having to guess.
         /// </summary>
-        public static Action<string> FolderToggleHandler;
+        public static Action<string, int> FolderToggleHandler;
 
         /// <summary>
         /// Id of the action row that should show the selection highlight (e.g. "marathon"). When
@@ -230,9 +233,61 @@ namespace ExScoringMod
                 return Mathf.Clamp(rawIndex, 0f, maxScroll);
 
             int n = view.Count;
-            if (rawIndex < 0f) rawIndex += n;
-            else if (rawIndex > maxScroll) rawIndex -= n;
+            if (rawIndex < 0f) { rawIndex += n; RemapBindingsForWrapShift(n); }
+            else if (rawIndex > maxScroll) { rawIndex -= n; RemapBindingsForWrapShift(-n); }
             return Mathf.Clamp(rawIndex, 0f, maxScroll); // safety net; a single tick should never need this
+        }
+
+        /// <summary>
+        /// Called right when ResolveScrollIndex re-anchors the scroll index by a full
+        /// <paramref name="shift"/> (±view.Count). That re-anchor is content-invisible — physical
+        /// slot p and p+shift always show the identical canonical row — but the native scroller
+        /// doesn't know that: it just sees its index jump, deactivates the whole old physical
+        /// window, and activates a different one. Left alone, Sync() would read that as every
+        /// visible row's placeholder going inactive then a different one going active, releasing
+        /// and re-binding (and re-Init()'ing) every song currently on screen — a visible reload
+        /// of an already-open folder's songs on every full scroll loop.
+        ///
+        /// Instead, proactively move each currently-bound row's existing pooled GameObject over to
+        /// its new physical slot (reparent + update the rowBindings key) so Sync() finds it already
+        /// bound there next pass and never touches it.
+        /// </summary>
+        private static readonly List<KeyValuePair<int, Binding>> tmpBindingSnapshot = new List<KeyValuePair<int, Binding>>();
+
+        private static void RemapBindingsForWrapShift(int shift)
+        {
+            if (rowBindings.Count == 0) return;
+
+            // Snapshot first — we mutate rowBindings (remove/re-add) as we go, which a live
+            // dictionary enumerator won't tolerate.
+            tmpBindingSnapshot.Clear();
+            foreach (var kv in rowBindings) tmpBindingSnapshot.Add(kv);
+
+            foreach (var kv in tmpBindingSnapshot)
+            {
+                int oldIdx = kv.Key;
+                int newIdx = oldIdx + shift;
+
+                if (newIdx < 0 || newIdx >= placeholders.Count)
+                {
+                    // Shifted clean out of the physical array — nothing to carry it to. The
+                    // binding is still present at oldIdx here, so this looks it up fine.
+                    ReleaseBinding(oldIdx);
+                    continue;
+                }
+
+                var go = kv.Value.isHeader ? headerPool[kv.Value.slot].go : songPool[kv.Value.slot].go;
+                if (Alive(go))
+                {
+                    var ph = placeholders[newIdx];
+                    go.transform.SetParent(ph.transform, false);
+                    go.transform.localPosition = Vector3.zero;
+                    go.transform.localRotation = Quaternion.identity;
+                }
+
+                rowBindings.Remove(oldIdx);
+                rowBindings[newIdx] = kv.Value;
+            }
         }
 
         // ── Placeholders: one cheap empty GO per view row ────────────────────
@@ -659,14 +714,20 @@ namespace ExScoringMod
         {
             if (!active || scroller == null) return;
 
-            int hdr = HeaderIndex(folderName); // canonical
-            if (hdr < 0) return;
+            float curCanonical = scroller.GetScrollIndex() - wrapBuffer;
 
-            int firstSong = hdr + 1; // canonical
-            if (firstSong >= view.Count || view[firstSong].kind != ViewRowKind.Song)
+            // Wrap-cycle-adjusted: if the header that's actually on screen near the current
+            // scroll is a mirrored ghost copy, this lands on that copy's true canonical index
+            // (which can be outside [0, view.Count)) rather than always the raw modulo one.
+            int hdr = HeaderIndexNear(folderName, curCanonical);
+            if (hdr < 0 || view.Count <= 0) return;
+
+            int n = view.Count;
+            int hdrMod = ((hdr % n) + n) % n; // back into [0, n) just to check the row kind
+            if (hdrMod + 1 >= n || view[hdrMod + 1].kind != ViewRowKind.Song)
                 return; // folder empty or not actually open
 
-            float curCanonical = scroller.GetScrollIndex() - wrapBuffer;
+            int firstSong = hdr + 1; // wrap-cycle-adjusted, comparable against curCanonical
             float maxScroll = Mathf.Max(0f, PhysicalRowCount - scroller.displayCount);
 
             // Genuinely already visible (both bounds) → leave the scroll alone.
@@ -905,8 +966,9 @@ namespace ExScoringMod
                     if (hi.button != null)
                     {
                         string captured = row.folderName;
+                        int capturedIndex = physicalIndex - wrapBuffer; // exact, no modulo — identifies this specific copy
                         hi.button.onHitEvent = new UnityEvent();
-                        hi.button.onHitEvent.AddListener(new Action(() => FolderToggleHandler?.Invoke(captured)));
+                        hi.button.onHitEvent.AddListener(new Action(() => FolderToggleHandler?.Invoke(captured, capturedIndex)));
                     }
                 }
                 else // Action
@@ -1462,6 +1524,25 @@ namespace ExScoringMod
                 if (view[i].kind == ViewRowKind.FolderHeader && view[i].folderName == folderName)
                     return i; // canonical index
             return -1;
+        }
+
+        /// <summary>
+        /// Like <see cref="HeaderIndex"/>, but when Wrap Song List has the content repeating
+        /// (mirrored ghost copies before/after the real list), resolves to whichever wrap-cycle
+        /// copy is actually nearest <paramref name="nearScroll"/> instead of always the raw
+        /// [0, view.Count) index. Without this, a header shot in a mirrored copy gets treated as
+        /// if it were the primary copy, producing a huge bogus offset from the real canonical
+        /// scroll and snapping the view to the wrong place after a rebuild.
+        /// Falls back to the plain <see cref="HeaderIndex"/> result when not wrapping.
+        /// </summary>
+        public static int HeaderIndexNear(string folderName, float nearScroll)
+        {
+            int baseIndex = HeaderIndex(folderName);
+            if (baseIndex < 0 || wrapBuffer <= 0 || view.Count <= 0) return baseIndex;
+
+            int n = view.Count;
+            int k = Mathf.RoundToInt((nearScroll - baseIndex) / n);
+            return baseIndex + k * n;
         }
 
         /// <summary>Re-applies the last position we deliberately set, directly to the native fields.

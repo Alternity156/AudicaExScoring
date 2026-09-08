@@ -148,12 +148,13 @@ namespace ExScoringMod
         private static bool EnsureBuilt()
         {
             if (container != null) return true;
+            if (ssSongSelect == null) return false;
 
-            GameObject menuRoot = GameObject.Find("menu");
-            if (menuRoot == null) return false;
-
+            // Parented to SongSelect itself (not a persistent root) so the indicator inherits the
+            // real song list's activeInHierarchy state — hidden/destroyed/rebuilt right alongside
+            // it, instead of only tracking our own VirtualSongList.IsActive flag.
             container = new GameObject("ExScoring_ScrollIndicator");
-            container.transform.SetParent(menuRoot.transform, false);
+            container.transform.SetParent(ssSongSelect, false);
 
             thumbMain = CreateThumb("ScrollIndicatorThumbMain");
             thumbWrap = CreateThumb("ScrollIndicatorThumbWrap");

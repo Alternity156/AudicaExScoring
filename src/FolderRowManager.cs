@@ -100,8 +100,14 @@ namespace ExScoringMod
             VirtualSongList.WarmPlaceholderPool(EstimateMaxViewSize());
         }
 
-        /// <summary>Shot a folder header: toggle it open/closed and rebuild the view.</summary>
-        public static void ToggleFolder(string folderName)
+        /// <summary>
+        /// Shot a folder header: toggle it open/closed and rebuild the view.
+        /// <paramref name="shotHeaderIndex"/> is the exact extended (un-wrapped) canonical index of
+        /// the specific physical copy that was shot, captured at bind time in VirtualSongList — when
+        /// Wrap Song List makes the same header visible twice on screen at once, this is what lets
+        /// us anchor on the copy actually shot instead of guessing from the scroll position.
+        /// </summary>
+        public static void ToggleFolder(string folderName, int shotHeaderIndex)
         {
             if (level != NavLevel.Root) return; // folder headers only exist at Level 0
             MarathonSetup.CancelIfActive();
@@ -115,8 +121,9 @@ namespace ExScoringMod
             // folder's songs took up. Anchoring on this header's offset from the current
             // scroll (rather than the scroll index itself) keeps it exactly where it
             // already was on screen, regardless of what else changed size.
-            int oldHeaderIndex = VirtualSongList.HeaderIndex(folderName);
-            float headerOffset = oldHeaderIndex - VirtualSongList.GetScroll();
+            float rawScroll = VirtualSongList.GetScroll();
+            int oldHeaderIndex = shotHeaderIndex; // exact — the specific copy that was actually shot
+            float headerOffset = oldHeaderIndex - rawScroll;
 
             bool opening = SongFolderManager.openFolder != folderName;
             SongFolderManager.openFolder = opening ? folderName : null;
@@ -125,12 +132,13 @@ namespace ExScoringMod
 
             Apply();
 
-            if (oldHeaderIndex >= 0)
-            {
-                int newHeaderIndex = VirtualSongList.HeaderIndex(folderName);
-                if (newHeaderIndex >= 0)
-                    VirtualSongList.SetScroll(newHeaderIndex - headerOffset);
-            }
+            // Here, unlike the old index, there's no single "exact" answer for where this
+            // header's copy lands post-rebuild (the rebuild may not preserve wrap cycles
+            // 1:1), so this half stays a nearest-cycle prediction aimed at keeping the header
+            // at roughly the same on-screen offset it had before the toggle.
+            int newHeaderIndex = VirtualSongList.HeaderIndexNear(folderName, oldHeaderIndex - headerOffset);
+            if (newHeaderIndex >= 0)
+                VirtualSongList.SetScroll(newHeaderIndex - headerOffset);
 
             if (opening)
             {
