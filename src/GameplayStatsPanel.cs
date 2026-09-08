@@ -7,26 +7,82 @@ namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
+        // Context keys for the per-context graph/grade-visual dictionaries in TimingGraph.cs/
+        // AimGraph.cs/SongTimelineGraph.cs/GradeDisplay.cs. History and Leaderboard are two
+        // completely independent panels that can be open at the same time showing different runs
+        // — see PlayHistoryButton.cs (ResetHistorySelection) and LeaderboardStatsButton.cs
+        // (ResetLeaderboardSelection). Results has its own context too, even though it can never
+        // overlap the other two in practice (different menu state entirely), just so it never
+        // shares/clobbers either one's dictionary entry if a panel's GameObject somehow survives
+        // across the transition (both stats panels use DontDestroyOnLoad clones).
+        private const string HistoryStatsContext = "history";
+        private const string LeaderboardStatsContext = "leaderboard";
+        private const string ResultsStatsContext = "results";
+
+        /// <summary>
+        /// Last run shown per context. Not currently read anywhere else, kept for parity with the
+        /// pre-refactor single currentGameplayStatsRun field and as a debugging aid (inspectable
+        /// live in UnityExplorer).
+        /// </summary>
+        private static readonly Dictionary<string, RecalculatedRun> currentGameplayStatsRunByContext = new Dictionary<string, RecalculatedRun>();
+
+        // Placeholder world-space position/rotation for each panel — tune live in UnityExplorer.
+        // Leaderboard's is a mirror of History's (History opens to the left of the song-info panel,
+        // Leaderboard stats should open to the right), starting from History's known-good values.
+        private static readonly Vector3 HistoryStatsPanelPosition = new Vector3(-28f, 6.25f, -2.5f);
+        private static readonly Vector3 HistoryStatsPanelRotation = new Vector3(0f, -90f, 0f);
+        private static readonly Vector3 LeaderboardStatsPanelPosition = new Vector3(29f, 6.5f, -4f);
+        private static readonly Vector3 LeaderboardStatsPanelRotation = new Vector3(0f, 90f, 0f);
+
         /// <summary>
         /// Opens the gameplay-stats panel for a selected history row, via its own completely
         /// independent clone (OptionsMenuClone.ShowHistoryPanel) — separate from the one
-        /// GlobalOptions.cs uses for the real Options menu. They used to share one GameObject,
-        /// which caused Play History's overridden rotation and its graphs/labels to leak onto the
-        /// Options menu (and vice versa). Content (labels, graphs) is placed manually.
+        /// GlobalOptions.cs uses for the real Options menu, and separate again from the leaderboard
+        /// stats panel's own clone (OptionsMenuClone.ShowLeaderboardStatsPanel). Sharing one clone
+        /// between contexts previously caused Play History's overridden rotation and its graphs/
+        /// labels to leak onto the Options menu (and vice versa) — same reasoning extends to keeping
+        /// Leaderboard fully independent too, so both can be open at once showing different runs.
         /// </summary>
-        private static RecalculatedRun currentGameplayStatsRun;
-
-        private static void ShowGameplayStatsPanel(RecalculatedRun run)
+        public static void ShowHistoryGameplayStatsPanel(RecalculatedRun run)
         {
-            currentGameplayStatsRun = run;
+            currentGameplayStatsRunByContext[HistoryStatsContext] = run;
 
             Transform panel = OptionsMenuClone.ShowHistoryPanel(
-                new Vector3(-28f, 6.25f, -2.5f),
-                new Vector3(0f, -90f, 0f),
+                HistoryStatsPanelPosition,
+                HistoryStatsPanelRotation,
                 $"{run.songId} ({run.difficulty})");
             if (panel == null) return;
 
-            BuildGameplayStatsContent(panel, run.exCues, run.judgementPercent, run.failed);
+            BuildGameplayStatsContent(HistoryStatsContext, panel, run.exCues, run.judgementPercent, run.failed);
+        }
+
+        /// <summary>
+        /// Leaderboard-stats equivalent of ShowHistoryGameplayStatsPanel — same shared content
+        /// builder, its own independent clone/context so it never collides with History's panel or
+        /// graphs even when both are open simultaneously.
+        /// </summary>
+        public static void ShowLeaderboardGameplayStatsPanel(RecalculatedRun run)
+        {
+            currentGameplayStatsRunByContext[LeaderboardStatsContext] = run;
+
+            Transform panel = OptionsMenuClone.ShowLeaderboardStatsPanel(
+                LeaderboardStatsPanelPosition,
+                LeaderboardStatsPanelRotation,
+                $"{run.songId} ({run.difficulty})");
+            if (panel == null) return;
+
+            BuildGameplayStatsContent(LeaderboardStatsContext, panel, run.exCues, run.judgementPercent, run.failed);
+        }
+
+        /// <summary>
+        /// Opens (or re-titles) the leaderboard stats panel shell without any run content yet —
+        /// used by LeaderboardStatsButton.cs to show a "Loading..." placeholder immediately on shot,
+        /// before the async GET /api/runs/:runId call resolves. Returns the content parent transform
+        /// so the caller can place a temporary label on it.
+        /// </summary>
+        public static Transform ShowLeaderboardStatsPanelShell(string title)
+        {
+            return OptionsMenuClone.ShowLeaderboardStatsPanel(LeaderboardStatsPanelPosition, LeaderboardStatsPanelRotation, title);
         }
 
         /// <summary>
@@ -45,7 +101,7 @@ namespace ExScoringMod
 
         private static void ShowGameplayStatsPanelOnResultsScreen(Transform resultsPanelParent, List<ExCue> cuesToShow, float judgementPercent, bool failed)
         {
-            BuildGameplayStatsContent(resultsPanelParent, cuesToShow, judgementPercent, failed, ResultsScreenScaleMultiplier, ResultsScreenYOffset);
+            BuildGameplayStatsContent(ResultsStatsContext, resultsPanelParent, cuesToShow, judgementPercent, failed, ResultsScreenScaleMultiplier, ResultsScreenYOffset);
 
             // Live-results-only. Position/scale tuned live in UnityExplorer (final runtime values
             // confirmed as localPosition (-770, 600, 0), localScale (60, 60, 60) — this is that,
@@ -87,43 +143,47 @@ namespace ExScoringMod
             }
         }
 
+        /// <summary>Applies the results-screen scale/offset compensation to one created graph/visual
+        /// GameObject, if it was actually built (Create* returns null when parent/data was missing).
+        /// Pulled out of BuildGameplayStatsContent since it's now the same four-line dance repeated
+        /// once per graph, against a local variable instead of a shared static field.</summary>
+        private static void ApplyStatsPanelScaleAndOffset(GameObject go, float scaleMultiplier, float yOffset)
+        {
+            if (go == null) return;
+
+            if (scaleMultiplier != 1f)
+            {
+                go.transform.localPosition *= scaleMultiplier;
+                go.transform.localScale *= scaleMultiplier;
+            }
+            go.transform.localPosition += new Vector3(0f, yOffset, 0f);
+        }
+
         /// <summary>
         /// The actual graphs + judgement/misc/score labels, parented onto whatever transform the
-        /// caller provides. Shared by both the saved-run history browser (its own independent
-        /// clone via OptionsMenuClone.ShowHistoryPanel, default 1x scale, no Y offset) and the live
-        /// results screen (ShellPanel_Center, needs scaleMultiplier and yOffset to compensate for
-        /// its much smaller local unit scale and different vertical anchor).
+        /// caller provides. Shared by the saved-run history browser, the leaderboard stats panel
+        /// (both default 1x scale, no Y offset, each its own `context`), and the live results screen
+        /// (ShellPanel_Center, needs scaleMultiplier and yOffset to compensate for its much smaller
+        /// local unit scale and different vertical anchor). `context` keys the underlying graph/grade
+        /// dictionaries (see TimingGraph.cs etc.) so History/Leaderboard/Results never clobber each
+        /// other's GameObjects.
         /// </summary>
-        private static void BuildGameplayStatsContent(Transform parent, List<ExCue> cuesToShow, float judgementPercent, bool failed, float scaleMultiplier = 1f, float yOffset = 0f)
+        private static void BuildGameplayStatsContent(string context, Transform parent, List<ExCue> cuesToShow, float judgementPercent, bool failed, float scaleMultiplier = 1f, float yOffset = 0f)
         {
-            CreateTimingGraph(parent, cuesToShow);
-            if (scaleMultiplier != 1f && timingGraphObject != null)
-            {
-                timingGraphObject.transform.localPosition *= scaleMultiplier;
-                timingGraphObject.transform.localScale *= scaleMultiplier;
-            }
-            timingGraphObject.transform.localPosition += new Vector3(0f, yOffset, 0f);
+            GameObject timingGraph = CreateTimingGraph(context, parent, cuesToShow);
+            ApplyStatsPanelScaleAndOffset(timingGraph, scaleMultiplier, yOffset);
 
-            CreateAimGraph(parent, cuesToShow);
-            if (scaleMultiplier != 1f && aimGraphObject != null)
-            {
-                aimGraphObject.transform.localPosition *= scaleMultiplier;
-                aimGraphObject.transform.localScale *= scaleMultiplier;
-            }
-            aimGraphObject.transform.localPosition += new Vector3(0f, yOffset, 0f);
+            GameObject aimGraph = CreateAimGraph(context, parent, cuesToShow);
+            ApplyStatsPanelScaleAndOffset(aimGraph, scaleMultiplier, yOffset);
 
-            CreateSongTimelineGraph(parent, cuesToShow);
-            if (scaleMultiplier != 1f && songTimelineGraphObject != null)
-            {
-                songTimelineGraphObject.transform.localPosition *= scaleMultiplier;
-                songTimelineGraphObject.transform.localScale *= scaleMultiplier;
-            }
-            songTimelineGraphObject.transform.localPosition += new Vector3(0f, yOffset, 0f);
+            GameObject songTimelineGraph = CreateSongTimelineGraph(context, parent, cuesToShow);
+            ApplyStatsPanelScaleAndOffset(songTimelineGraph, scaleMultiplier, yOffset);
 
-            // Named with "(Clone)" so OptionsMenuClone's Wipe() (called at the start of every
-            // Draw()) sweeps up the previous run's labels automatically instead of stacking new
-            // ones on top — same convention the three graphs already use. Doesn't apply to the
-            // results-screen path (no Wipe() there), but harmless to keep consistent.
+            // Named with "(Clone)" so OptionsMenuClone's Wipe()/panel-reopen sweep (both
+            // ShowHistoryPanel and ShowLeaderboardStatsPanel destroy any previous "(Clone)"-tagged
+            // child up front) sweeps up the previous run's labels automatically instead of stacking
+            // new ones on top — same convention the three graphs already use. Doesn't apply to the
+            // results-screen path (no such sweep there), but harmless to keep consistent.
             var timingLabel = CreateTimingLabel(parent, "ExTimingDisplay (Clone)", new Vector3(4.25f, -4f, 0f) * scaleMultiplier + new Vector3(0f, yOffset, 0f), Color.white, TextAlignmentOptions.Left);
             timingLabel.text = GetTimingJudgementString(cuesToShow);
             timingLabel.transform.localScale = new Vector3(1.25f, 1.25f, 1.25f) * scaleMultiplier;
@@ -144,13 +204,8 @@ namespace ExScoringMod
             scoreLabel.text = $"Score: {judgementPercent:0.##}%";
             scoreLabel.transform.localScale = new Vector3(4f, 4f, 4f) * scaleMultiplier;
 
-            CreateGradeVisual(parent, judgementPercent, failed);
-            if (scaleMultiplier != 1f && gradeVisualObject != null)
-            {
-                gradeVisualObject.transform.localPosition *= scaleMultiplier;
-                gradeVisualObject.transform.localScale *= scaleMultiplier;
-            }
-            gradeVisualObject.transform.localPosition += new Vector3(0f, yOffset, 0f);
+            GameObject gradeVisual = CreateGradeVisual(context, parent, judgementPercent, failed);
+            ApplyStatsPanelScaleAndOffset(gradeVisual, scaleMultiplier, yOffset);
         }
     }
 }

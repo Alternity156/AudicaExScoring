@@ -6,7 +6,9 @@ namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
-        public static GameObject aimGraphObject;
+        // Keyed by context ("history" / "leaderboard" / "results") — see timingGraphObjects in
+        // TimingGraph.cs for why this isn't a single static field.
+        private static readonly Dictionary<string, GameObject> aimGraphObjects = new Dictionary<string, GameObject>();
 
         // Display radius (local units) that the worst-achieved judgement's aim radius maps to —
         // same zoom concept as TimingGraph's GetWorstTimingJudgementRangeMs: a clean run (best miss
@@ -306,12 +308,12 @@ namespace ExScoringMod
         /// identity rotation here, which reproduces the previous raw-world-XY approximation rather
         /// than failing outright.
         /// </summary>
-        public static void CreateAimGraph(Transform parent, List<ExCue> exCues)
+        public static GameObject CreateAimGraph(string context, Transform parent, List<ExCue> exCues)
         {
-            DestroyAimGraph();
-            if (parent == null || exCues == null) return;
+            DestroyAimGraph(context);
+            if (parent == null || exCues == null) return null;
 
-            aimGraphObject = new GameObject("AimGraph (Clone)");
+            GameObject aimGraphObject = new GameObject("AimGraph (Clone)");
             aimGraphObject.transform.SetParent(parent, false);
             aimGraphObject.layer = parent.gameObject.layer;
             aimGraphObject.transform.localPosition = AimGraphLocalPosition;
@@ -389,15 +391,18 @@ namespace ExScoringMod
                 }
                 CreateAimDot(aimGraphObject.transform, dotLocalPos, dotColor, cue.behavior);
             }
+
+            aimGraphObjects[context] = aimGraphObject;
+            return aimGraphObject;
         }
 
-        public static void DestroyAimGraph()
+        public static void DestroyAimGraph(string context)
         {
-            if (aimGraphObject != null)
+            if (aimGraphObjects.TryGetValue(context, out GameObject existing) && existing != null)
             {
-                GameObject.Destroy(aimGraphObject);
-                aimGraphObject = null;
+                GameObject.Destroy(existing);
             }
+            aimGraphObjects.Remove(context);
         }
     }
 }

@@ -215,6 +215,86 @@ namespace ExScoringMod
         }
         // ── End independent Play History panel ────────────────────────────────────────────
 
+        // ── Independent Leaderboard Stats panel ───────────────────────────────────────────
+        // Third completely independent GameObject, same reasoning as the Play History clone above
+        // — this one is deliberately NOT shared with historyCloneRoot even though the two panels
+        // are visually mirrored counterparts of each other, because the mod's leaderboard-stats
+        // feature needs History and Leaderboard stats to be open at the same time showing two
+        // different runs (see LeaderboardStatsButton.cs / PlayHistoryButton.cs). Sharing either
+        // clone between them would reintroduce exactly the cross-contamination bug this file's
+        // history/Options split was already built to avoid.
+        private static GameObject leaderboardStatsCloneRoot;
+
+        private static bool EnsureLeaderboardStatsClone()
+        {
+            if (leaderboardStatsCloneRoot != null) return true;
+
+            GameObject menuRoot = GameObject.Find("menu");
+            if (menuRoot == null) { MelonLogger.Log("[Options] EnsureLeaderboardStatsClone: 'menu' root not found"); return false; }
+
+            Transform src = menuRoot.transform.Find(SettingsCenterPath);
+            if (src == null) { MelonLogger.Log("[Options] EnsureLeaderboardStatsClone: settings source not found"); return false; }
+
+            leaderboardStatsCloneRoot = GameObject.Instantiate(src.gameObject);
+            leaderboardStatsCloneRoot.name = "ExScoringLeaderboardStatsPanel";
+            leaderboardStatsCloneRoot.hideFlags |= HideFlags.DontUnloadUnusedAsset;
+            leaderboardStatsCloneRoot.transform.SetParent(null, true);
+            GameObject.DontDestroyOnLoad(leaderboardStatsCloneRoot);
+            leaderboardStatsCloneRoot.SetActive(false);
+
+            MelonLogger.Log("[Options] leaderboard stats clone created");
+            return true;
+        }
+
+        /// <summary>
+        /// Leaderboard-stats equivalent of ShowHistoryPanel — same behavior (blank Customization
+        /// page, native rows cleared, previous "(Clone)"-tagged content swept), its own independent
+        /// clone/scale/position so it never touches historyCloneRoot's state.
+        /// </summary>
+        public static Transform ShowLeaderboardStatsPanel(Vector3 position, Vector3 eulerAngles, string title)
+        {
+            if (!EnsureLeaderboardStatsClone()) return null;
+
+            GameObject menuRoot = GameObject.Find("menu");
+            Transform launchCenter = menuRoot != null ? menuRoot.transform.Find(LaunchCenterPath) : null;
+            if (launchCenter != null)
+            {
+                leaderboardStatsCloneRoot.transform.localScale = launchCenter.lossyScale;
+            }
+
+            leaderboardStatsCloneRoot.transform.position = position;
+            leaderboardStatsCloneRoot.transform.eulerAngles = eulerAngles;
+            leaderboardStatsCloneRoot.SetActive(true);
+
+            var menu = leaderboardStatsCloneRoot.GetComponentInChildren<OptionsMenu>(true);
+            if (menu != null)
+            {
+                menu.ShowPage(OptionsMenu.Page.Customization);
+                menu.mRows.Clear();
+                menu.scrollable.ClearRows();
+                menu.scrollable.mRows.Clear();
+                menu.scrollable.mIndex = 0;
+                menu.scrollable.destroyChildren = true;
+                if (menu.screenTitle != null) menu.screenTitle.text = title ?? "";
+            }
+
+            Transform contentParent = menu != null ? menu.transform : leaderboardStatsCloneRoot.transform;
+            for (int i = contentParent.childCount - 1; i >= 0; i--)
+            {
+                Transform child = contentParent.GetChild(i);
+                if (child.gameObject.name.Contains("(Clone)"))
+                    GameObject.DestroyImmediate(child.gameObject);
+            }
+
+            return contentParent;
+        }
+
+        public static void HideLeaderboardStatsPanel()
+        {
+            if (leaderboardStatsCloneRoot != null) leaderboardStatsCloneRoot.SetActive(false);
+        }
+        // ── End independent Leaderboard Stats panel ───────────────────────────────────────
+
         /// <summary>Reset to a blank custom page, set the title, then let the category emit rows.</summary>
         // in OptionsMenuClone.Draw, at the top and bottom
         public static void Draw(string title, Action build)

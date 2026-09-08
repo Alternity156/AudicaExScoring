@@ -341,6 +341,39 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// Builds a RecalculatedRun from a GET /api/runs/:runId response (see ApiContract.md
+        /// Section 6, RunDetailApiResponse in Classes.cs) — the leaderboard-stats-panel equivalent
+        /// of Recalculate() above. Unlike Recalculate(), which re-derives judgementScore/
+        /// maxJudgementScore/missCount/fullCombo purely from raw disk data, this trusts the
+        /// server's own values for those so the panel's numbers always match what's already shown
+        /// on the leaderboard row that was shot — RecalculateExCues is still used, but only to get
+        /// each cue's timing/aim/chain Judgement for the graphs. chainTailLookup is built fresh per
+        /// call (same legacy-repair fallback as BuildChainTailLookup) since a leaderboard row can be
+        /// for any song+difficulty, not just the one currently selected.
+        /// </summary>
+        public static RecalculatedRun RecalculateFromApiResponse(RunDetailApiResponse response)
+        {
+            if (response == null) return null;
+
+            Dictionary<float, bool> chainTailLookup = BuildChainTailLookup(response.songId, response.difficulty);
+            List<ExCue> exCues = RecalculateExCues(response.exCues ?? new ExCueSaveData[0], chainTailLookup);
+
+            return new RecalculatedRun
+            {
+                songId = response.songId,
+                difficulty = response.difficulty,
+                unixTimestamp = response.unixTimestamp,
+                sourceFileName = null, // sourced from the API, not a local file
+                judgementScore = response.judgementScore,
+                maxJudgementScore = response.maxJudgementScore,
+                missCount = response.missCount,
+                fullCombo = response.fullCombo,
+                failed = response.failed,
+                exCues = exCues
+            };
+        }
+
+        /// <summary>
         /// Batched coroutine: lists saved runs for a song+difficulty, then decompresses/parses/
         /// recalculates a few per frame so a stack of runs doesn't stall a frame. Invokes
         /// onComplete with the results, most recent run first.

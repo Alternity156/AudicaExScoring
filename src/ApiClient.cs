@@ -288,6 +288,65 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// Fetches full per-run detail for a single run by ID (GET /api/runs/:runId — see
+        /// ApiContract.md Section 6). Public endpoint, no auth. Backs the leaderboard stats panel:
+        /// a leaderboard row carries a runId (LeaderboardApiEntry.runId, v2.10), and shooting it
+        /// calls this to get that run's full exCues for the graphs. Always calls onComplete exactly
+        /// once: with the parsed response on success, or null on any failure (network error, HTTP
+        /// error, or an unparsable body) — every failure path is logged first.
+        /// </summary>
+        public static void FetchRun(string runId, Action<RunDetailApiResponse> onComplete)
+        {
+            if (string.IsNullOrEmpty(runId))
+            {
+                MelonLogger.Log("[ExScoring] FetchRun: runId is null/empty, aborting.");
+                onComplete?.Invoke(null);
+                return;
+            }
+
+            MelonLogger.Log($"[ExScoring] FetchRun: starting runId={runId}");
+            MelonCoroutines.Start(FetchRunCoroutine(runId, onComplete));
+        }
+
+        private static IEnumerator FetchRunCoroutine(string runId, Action<RunDetailApiResponse> onComplete)
+        {
+            string url = $"{ApiBaseUrl}/api/runs/{Uri.EscapeDataString(runId)}";
+
+            MelonLogger.Log($"[ExScoring] FetchRun: GET {url}");
+
+            UnityWebRequest request = UnityWebRequest.Get(url);
+            try
+            {
+                yield return request.SendWebRequest();
+
+                if (request.isNetworkError || request.isHttpError)
+                {
+                    string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
+                    MelonLogger.Log($"[ExScoring] FetchRun failed ({request.responseCode}): {request.error} | runId={runId} | Body: {errorBody}");
+                    onComplete?.Invoke(null);
+                    yield break;
+                }
+
+                try
+                {
+                    RunDetailApiResponse response = JsonConvert.DeserializeObject<RunDetailApiResponse>(request.downloadHandler.text);
+                    int cueCount = response?.exCues?.Length ?? 0;
+                    MelonLogger.Log($"[ExScoring] FetchRun succeeded: runId={runId} songId={response?.songId} difficulty={response?.difficulty} cues={cueCount}");
+                    onComplete?.Invoke(response);
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Log($"[ExScoring] FetchRun: failed to parse response ({request.downloadHandler.text}): {ex}");
+                    onComplete?.Invoke(null);
+                }
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
+
+        /// <summary>
         /// Builds the static chart-shape payload for POST /api/songs/:songId/map (see ApiContract.md
         /// Section 9) and kicks off the upload. Called off RunSubmitResponse.mapDataNeeded after a
         /// successful run submission — the server has already told us it has no map data yet for

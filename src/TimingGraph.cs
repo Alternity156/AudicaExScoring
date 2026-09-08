@@ -7,7 +7,10 @@ namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
-        public static GameObject timingGraphObject;
+        // Keyed by context ("history" / "leaderboard" / "results" — see GameplayStatsPanel.cs)
+        // rather than a single static field, so the History and Leaderboard stats panels can each
+        // show a different run's graph at the same time without clobbering each other.
+        private static readonly Dictionary<string, GameObject> timingGraphObjects = new Dictionary<string, GameObject>();
 
         private const float TimingGraphBinSizeMs = 1f;   // 1ms per bucket
 
@@ -210,17 +213,19 @@ namespace ExScoringMod
         /// <summary>
         /// Builds the timing graph (right hand spikes up, left hand spikes down, centered on 0ms)
         /// plus worst/average offset labels per hand, parented under `parent`. Destroys any previous
-        /// graph first. Position/scale are placeholder defaults — tune live in UnityExplorer.
+        /// graph under this same context first. Position/scale are placeholder defaults — tune live
+        /// in UnityExplorer. Returns the created GameObject (also cached under `context` for
+        /// DestroyTimingGraph), or null if nothing was built.
         /// </summary>
-        public static void CreateTimingGraph(Transform parent, List<ExCue> exCues)
+        public static GameObject CreateTimingGraph(string context, Transform parent, List<ExCue> exCues)
         {
-            DestroyTimingGraph();
-            if (parent == null || exCues == null) return;
+            DestroyTimingGraph(context);
+            if (parent == null || exCues == null) return null;
 
             float rangeMs = GetWorstTimingJudgementRangeMs(exCues);
             int binCount = Mathf.RoundToInt((rangeMs * 2f) / TimingGraphBinSizeMs) + 1;
 
-            timingGraphObject = new GameObject("TimingGraph (Clone)");
+            GameObject timingGraphObject = new GameObject("TimingGraph (Clone)");
             timingGraphObject.transform.SetParent(parent, false);
             timingGraphObject.layer = parent.gameObject.layer;
             timingGraphObject.transform.localPosition = TimingGraphLocalPosition;
@@ -272,6 +277,9 @@ namespace ExScoringMod
             CreateTimingLabel(timingGraphObject.transform, "LeftHandStats",
                 new Vector3(TimingGraphWidth / 2f + 2f, -TimingGraphHalfHeight * 0.5f, 0f), leftColor)
                 .text = $"Worst: {FormatMs(leftWorst)}\nAvg: {FormatMs(leftAvg)}";
+
+            timingGraphObjects[context] = timingGraphObject;
+            return timingGraphObject;
         }
 
         private static void CreateTimingCenterLine(Transform parent)
@@ -345,13 +353,13 @@ namespace ExScoringMod
             mr.material.renderQueue = 2900; // behind the histogram bars, center line, and labels
         }
 
-        public static void DestroyTimingGraph()
+        public static void DestroyTimingGraph(string context)
         {
-            if (timingGraphObject != null)
+            if (timingGraphObjects.TryGetValue(context, out GameObject existing) && existing != null)
             {
-                GameObject.Destroy(timingGraphObject);
-                timingGraphObject = null;
+                GameObject.Destroy(existing);
             }
+            timingGraphObjects.Remove(context);
         }
     }
 }

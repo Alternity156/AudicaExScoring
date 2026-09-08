@@ -209,6 +209,7 @@
     <Compile Include="src\GradeDisplay.cs" />
     <Compile Include="src\GradeSystem.cs" />
     <Compile Include="src\LaunchPanelVisibility.cs" />
+    <Compile Include="src\LeaderboardStatsButton.cs" />
     <Compile Include="src\MarathonSetup.cs" />
     <Compile Include="src\ModifiersPage.cs" />
     <Compile Include="src\OptionsMenuClone.cs" />

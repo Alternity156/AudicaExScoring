@@ -8,7 +8,9 @@ namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
-        public static GameObject songTimelineGraphObject;
+        // Keyed by context ("history" / "leaderboard" / "results") — see timingGraphObjects in
+        // TimingGraph.cs for why this isn't a single static field.
+        private static readonly Dictionary<string, GameObject> songTimelineGraphObjects = new Dictionary<string, GameObject>();
 
         // Graph dimensions in local units — same conventions as the other graphs.
         private static readonly Vector3 SongTimelineLocalPosition = new Vector3(-1.5f, -20.5f, -0.05f);
@@ -305,16 +307,16 @@ namespace ExScoringMod
         /// degrees from TimingGraph's vertical ones). Position/scale are placeholder defaults — tune
         /// live in UnityExplorer.
         /// </summary>
-        public static void CreateSongTimelineGraph(Transform parent, List<ExCue> exCues)
+        public static GameObject CreateSongTimelineGraph(string context, Transform parent, List<ExCue> exCues)
         {
-            DestroySongTimelineGraph();
-            if (parent == null || exCues == null || exCues.Count == 0) return;
+            DestroySongTimelineGraph(context);
+            if (parent == null || exCues == null || exCues.Count == 0) return null;
 
             float minTick = exCues.Min(c => c.tick);
             float maxTick = exCues.Max(c => c.tick);
             float rangeMs = GetWorstTimingJudgementRangeMs(exCues);
 
-            songTimelineGraphObject = new GameObject("SongTimelineGraph (Clone)");
+            GameObject songTimelineGraphObject = new GameObject("SongTimelineGraph (Clone)");
             songTimelineGraphObject.transform.SetParent(parent, false);
             songTimelineGraphObject.layer = parent.gameObject.layer;
             songTimelineGraphObject.transform.localPosition = SongTimelineLocalPosition;
@@ -368,15 +370,18 @@ namespace ExScoringMod
 
                 CreateTimingDot(songTimelineGraphObject.transform, new Vector3(x, y, 0f), color, cue.behavior);
             }
+
+            songTimelineGraphObjects[context] = songTimelineGraphObject;
+            return songTimelineGraphObject;
         }
 
-        public static void DestroySongTimelineGraph()
+        public static void DestroySongTimelineGraph(string context)
         {
-            if (songTimelineGraphObject != null)
+            if (songTimelineGraphObjects.TryGetValue(context, out GameObject existing) && existing != null)
             {
-                GameObject.Destroy(songTimelineGraphObject);
-                songTimelineGraphObject = null;
+                GameObject.Destroy(existing);
             }
+            songTimelineGraphObjects.Remove(context);
         }
     }
 }

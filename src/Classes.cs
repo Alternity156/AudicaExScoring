@@ -108,6 +108,14 @@ namespace ExScoringMod
         public class LeaderboardApiEntry
         {
             public int rank;
+
+            /// <summary>
+            /// Server-assigned UUID of this entry's best run (ApiContract.md v2.10, Section 4).
+            /// Lets a leaderboard row be traced to its full per-cue detail via GET /api/runs/:runId
+            /// (Section 6) — see LeaderboardStatsButton.cs.
+            /// </summary>
+            public string runId;
+
             public string nickname;
             public float judgementPercent;
             public RunSubmitGrade grade;
@@ -269,6 +277,36 @@ namespace ExScoringMod
         public class MapUploadResponse
         {
             public bool stored;
+        }
+
+        /// <summary>
+        /// Response shape for GET /api/runs/:runId (ApiContract.md Section 6) — full detail for one
+        /// run, including its decompressed exCues (same shape as Section 3's request body, i.e.
+        /// ExCueSaveData[]). Public endpoint, no auth. Used by the leaderboard stats panel
+        /// (LeaderboardStatsButton.cs) to pull up a specific leaderboard row's run — see
+        /// RunDataRecalculator.RecalculateFromApiResponse for how this becomes a RecalculatedRun.
+        /// </summary>
+        public class RunDetailApiResponse
+        {
+            public string runId;
+            public string userId;
+            public string nickname;
+            public string songId;
+            public string songTitle;
+            public string songArtist;
+            public string songMapper;
+            public string difficulty;
+            public long unixTimestamp;
+            public float judgementScore;
+            public float maxJudgementScore;
+            public float judgementPercent;
+            public int missCount;
+            public bool fullCombo;
+            public bool failed;
+            public int pauseCount;
+            public string platform;
+            public RunSubmitGrade grade;
+            public ExCueSaveData[] exCues;
         }
 
         /// <summary>

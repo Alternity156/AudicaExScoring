@@ -7,7 +7,11 @@ namespace ExScoringMod
 {
     public partial class ExScoring : MelonMod
     {
-        public static GameObject gradeVisualObject;
+        // Keyed by context ("history" / "leaderboard" / "results") — see timingGraphObjects in
+        // TimingGraph.cs for why this isn't a single static field. This is the single detail-panel
+        // star/text visual (not the per-row ones further below, which already have their own
+        // per-slot dictionaries).
+        private static readonly Dictionary<string, GameObject> statsPanelGradeVisuals = new Dictionary<string, GameObject>();
 
         // Placeholder position/scale — same convention as the other graphs (TimingGraph, AimGraph,
         // SongTimelineGraph): tune live in UnityExplorer once visible in-game. Positioned just below
@@ -205,29 +209,31 @@ namespace ExScoringMod
             }
         }
 
-        public static void DestroyGradeVisual()
+        public static void DestroyGradeVisual(string context)
         {
-            if (gradeVisualObject != null)
+            if (statsPanelGradeVisuals.TryGetValue(context, out GameObject existing) && existing != null)
             {
-                GameObject.Destroy(gradeVisualObject);
-                gradeVisualObject = null;
+                GameObject.Destroy(existing);
             }
+            statsPanelGradeVisuals.Remove(context);
         }
 
         /// <summary>
         /// Builds the grade visual (star layout or text label) for the given judgement percentage
         /// and failure state, parented onto `parent` at the default placeholder position/scale.
-        /// Caller (BuildGameplayStatsContent) applies scaleMultiplier/yOffset the same way it does
-        /// for the timing/aim/song-timeline graphs.
+        /// Destroys any previous visual under this same context first. Caller
+        /// (BuildGameplayStatsContent) applies scaleMultiplier/yOffset the same way it does for the
+        /// timing/aim/song-timeline graphs. Returns the created GameObject (also cached under
+        /// `context` for DestroyGradeVisual), or null if nothing was built.
         /// </summary>
-        public static void CreateGradeVisual(Transform parent, float judgementPercent, bool failed)
+        public static GameObject CreateGradeVisual(string context, Transform parent, float judgementPercent, bool failed)
         {
-            DestroyGradeVisual();
-            if (parent == null) return;
+            DestroyGradeVisual(context);
+            if (parent == null) return null;
 
             Grade grade = GetGrade(judgementPercent, failed);
 
-            gradeVisualObject = new GameObject("GradeVisual (Clone)");
+            GameObject gradeVisualObject = new GameObject("GradeVisual (Clone)");
             gradeVisualObject.transform.SetParent(parent, false);
             gradeVisualObject.layer = parent.gameObject.layer;
             gradeVisualObject.transform.localPosition = GradeVisualLocalPosition;
@@ -241,6 +247,9 @@ namespace ExScoringMod
             {
                 CreateGradeTextLabel(gradeVisualObject.transform, grade, GradeVisualTextFontSize);
             }
+
+            statsPanelGradeVisuals[context] = gradeVisualObject;
+            return gradeVisualObject;
         }
 
         /// <summary>
@@ -259,7 +268,10 @@ namespace ExScoringMod
         {
             float angle = Mathf.Sin(Time.time * gradeStarRotationSpeed) * gradeStarRotationAmplitude;
 
-            RotateStarChildren(gradeVisualObject, angle);
+            foreach (var visual in statsPanelGradeVisuals.Values)
+            {
+                RotateStarChildren(visual, angle);
+            }
 
             foreach (var visual in historyRowGradeVisuals.Values)
             {

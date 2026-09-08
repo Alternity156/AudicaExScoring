@@ -203,7 +203,7 @@ namespace ExScoringMod
             }
 
             SelectHistoryRow(slot);
-            ShowGameplayStatsPanel(run);
+            ShowHistoryGameplayStatsPanel(run);
         }
 
         // TUNE THESE IN UNITYEXPLORER, same process as the hit-box position/scale: find a
@@ -241,10 +241,11 @@ namespace ExScoringMod
             historySelectedSlot = -1;
 
             OptionsMenuClone.HideHistoryPanel();
-            currentGameplayStatsRun = null;
-            DestroyTimingGraph();
-            DestroyAimGraph();
-            DestroySongTimelineGraph();
+            currentGameplayStatsRunByContext.Remove(HistoryStatsContext);
+            DestroyTimingGraph(HistoryStatsContext);
+            DestroyAimGraph(HistoryStatsContext);
+            DestroySongTimelineGraph(HistoryStatsContext);
+            DestroyGradeVisual(HistoryStatsContext);
         }
 
         private static void SetHistoryIndicatorActive(int slot, bool active)
@@ -297,11 +298,21 @@ namespace ExScoringMod
             private static void Postfix(GunButton __instance, Gun gun)
             {
                 if (__instance == null || gun == null) return;
-                if (!__instance.gameObject.name.StartsWith("HistoryHitbox_")) return;
+                if (!IsStatsHitboxName(__instance.gameObject.name)) return;
 
                 historyHitboxHoverColor[__instance] = ChainArrow.GetHandColor(gun.hand);
                 historyHitboxLastHighlightTime[__instance] = Time.time;
             }
+        }
+
+        /// <summary>Shared name check for both PlayHistoryButton's and LeaderboardStatsButton's
+        /// cloned hit-boxes — they reuse these same two GunButton patches (HistoryHitboxHighlightPatch/
+        /// HistoryHitboxUpdatePatch) rather than each registering their own Harmony patch on the same
+        /// native methods. Safe to share since the hover-color/last-highlight-time dictionaries below
+        /// are keyed by GunButton reference, which is always unique per hit-box instance.</summary>
+        private static bool IsStatsHitboxName(string name)
+        {
+            return name.StartsWith("HistoryHitbox_") || name.StartsWith("LeaderboardStatsHitbox_");
         }
 
         [HarmonyPatch(typeof(GunButton), "Update")]
@@ -310,7 +321,7 @@ namespace ExScoringMod
             private static void Postfix(GunButton __instance)
             {
                 if (__instance == null) return;
-                if (!__instance.gameObject.name.StartsWith("HistoryHitbox_")) return;
+                if (!IsStatsHitboxName(__instance.gameObject.name)) return;
 
                 var renderer = __instance.GetComponent<MeshRenderer>();
                 if (renderer == null) return;
