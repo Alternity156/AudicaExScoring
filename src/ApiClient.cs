@@ -457,5 +457,99 @@ namespace ExScoringMod
                 request.Dispose();
             }
         }
+
+        /// <summary>
+        /// Outcome of FetchProfile. Distinguishes a genuine auth failure (401 — key is missing/revoked/
+        /// wrong) from a connectivity problem (no network, DNS failure, server unreachable, unexpected
+        /// non-2xx, or an unparsable body) so the caller can show a different message for each — see
+        /// AudicaExStatus.cs.
+        /// </summary>
+        public enum ProfileFetchStatus
+        {
+            Success,
+            InvalidKey,
+            ConnectionError
+        }
+
+        public class ProfileFetchResult
+        {
+            public ProfileFetchStatus status;
+
+            /// <summary>Only populated when status == Success.</summary>
+            public ProfileApiResponse response;
+        }
+
+        /// <summary>
+        /// Fetches the requester's own profile (GET /api/users/me — see ApiContract.md Section 7.1).
+        /// Requires Config.ApiKey to be set; if it's not, this reports ConnectionError without making a
+        /// request — callers that need to tell "no key configured" apart from "key was rejected" should
+        /// check Config.ApiKey themselves first (see AudicaExStatus.cs) rather than relying on this result.
+        /// Always calls onComplete exactly once, with every failure path logged first via
+        /// MelonLogger/UnityExplorer.
+        /// </summary>
+        public static void FetchProfile(Action<ProfileFetchResult> onComplete)
+        {
+            if (string.IsNullOrEmpty(Config.ApiKey))
+            {
+                MelonLogger.Log("[ExScoring] FetchProfile: no API key set, aborting.");
+                onComplete?.Invoke(new ProfileFetchResult { status = ProfileFetchStatus.ConnectionError });
+                return;
+            }
+
+            MelonLogger.Log("[ExScoring] FetchProfile: starting");
+            MelonCoroutines.Start(FetchProfileCoroutine(onComplete));
+        }
+
+        private static IEnumerator FetchProfileCoroutine(Action<ProfileFetchResult> onComplete)
+        {
+            string url = $"{ApiBaseUrl}/api/users/me";
+
+            MelonLogger.Log($"[ExScoring] FetchProfile: GET {url}");
+
+            UnityWebRequest request = UnityWebRequest.Get(url);
+            try
+            {
+                request.SetRequestHeader("Authorization", "ApiKey " + Config.ApiKey);
+
+                yield return request.SendWebRequest();
+
+                if (request.isNetworkError)
+                {
+                    MelonLogger.Log($"[ExScoring] FetchProfile failed (network error): {request.error}");
+                    onComplete?.Invoke(new ProfileFetchResult { status = ProfileFetchStatus.ConnectionError });
+                    yield break;
+                }
+
+                if (request.isHttpError)
+                {
+                    string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
+                    MelonLogger.Log($"[ExScoring] FetchProfile failed ({request.responseCode}): {request.error} | Body: {errorBody}");
+
+                    // 401 per ApiContract.md Section 2 ("Missing or invalid key -> 401 Unauthorized") is the
+                    // one case we know for certain means "the key itself is bad", not "something's down".
+                    ProfileFetchStatus status = request.responseCode == 401
+                        ? ProfileFetchStatus.InvalidKey
+                        : ProfileFetchStatus.ConnectionError;
+                    onComplete?.Invoke(new ProfileFetchResult { status = status });
+                    yield break;
+                }
+
+                try
+                {
+                    ProfileApiResponse response = JsonConvert.DeserializeObject<ProfileApiResponse>(request.downloadHandler.text);
+                    MelonLogger.Log($"[ExScoring] FetchProfile succeeded: nickname={response?.nickname}");
+                    onComplete?.Invoke(new ProfileFetchResult { status = ProfileFetchStatus.Success, response = response });
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Log($"[ExScoring] FetchProfile: failed to parse response ({request.downloadHandler.text}): {ex}");
+                    onComplete?.Invoke(new ProfileFetchResult { status = ProfileFetchStatus.ConnectionError });
+                }
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
     }
 }

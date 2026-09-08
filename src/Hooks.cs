@@ -1147,10 +1147,12 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Replaces the Main page's ReleaseNotes text and skips the original method entirely, so it
-        /// never shows the "loading..." placeholder or fetches/overwrites our text with the real
-        /// patch notes - regardless of when OnEnable first fires (including on initial game boot,
-        /// before ReleaseNotesPanel.Setup() gets a chance to run via MenuState.SetState).
+        /// Replaces the Main page's ReleaseNotes text with the current AudicaEX.org connection status and
+        /// skips the original method entirely, so it never shows the "loading..." placeholder or fetches/
+        /// overwrites our text with the real patch notes - regardless of when OnEnable first fires
+        /// (including on initial game boot, before ReleaseNotesPanel.Setup() gets a chance to run via
+        /// MenuState.SetState). The actual status text (checked/updated on every call, since this fires on
+        /// every main-menu visit) is owned by AudicaExStatus.cs.
         /// </summary>
         [HarmonyPatch(typeof(ReleaseNotes), "OnEnable")]
         private static class ReleaseNotesOnEnablePatch
@@ -1163,7 +1165,7 @@ namespace ExScoringMod
                     if (localizer != null)
                         GameObject.Destroy(localizer);
 
-                    __instance.text.text = "This is a successfull test.";
+                    AudicaExStatus.Refresh(__instance.text);
                 }
 
                 return false;

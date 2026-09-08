@@ -343,5 +343,19 @@ namespace ExScoringMod
             // Melee only
             public float? velocity;
         }
+
+        /// <summary>
+        /// Response shape for GET /api/users/me (ApiContract.md Section 7.1). Requires auth
+        /// (Authorization: ApiKey) — lets the mod show the player's own nickname/friendCode without them
+        /// needing to check the website. Currently only `nickname` is consumed (AudicaExStatus.cs, for the
+        /// release-notes panel's connection line); `friendCode` is fetched now for a possible future
+        /// in-game profile panel.
+        /// </summary>
+        public class ProfileApiResponse
+        {
+            public string userId;
+            public string nickname;
+            public string friendCode;
+        }
     }
 }
