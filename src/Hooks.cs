@@ -117,6 +117,33 @@ namespace ExScoringMod
                         HideLaunchPanel();
                         suppressShellPageAnimations = false;
                     }
+
+                    // Native reuses the single LeaderboardDisplay instance for both the main-menu
+                    // Total board and the per-song board, toggling totalLeaderboards + calling
+                    // UpdateLeaderboard itself when entering the song page — but it does NOT call
+                    // UpdateLeaderboard again on returning here (confirmed via logging: no new
+                    // "UpdateLeaderboard called" line fires on SongPage -> MainPage, just a stale
+                    // in-flight song fetch landing late). Without this, the panel keeps showing
+                    // whatever the song page last populated. Only relevant to EX mode — vanilla
+                    // native leaderboards aren't touched by this patch (see the Config.ExType check
+                    // in OnlineLeaderboardUpdateLeaderboardPatch). Same instance persists across
+                    // pages (confirmed via UnityExplorer), so a synchronous find is enough — no
+                    // polling coroutine needed here, unlike RefreshLeaderboardWhenReady's song-page
+                    // case where the hierarchy is actually torn down and rebuilt.
+                    if (Config.ExType)
+                    {
+                        var mainMenuLeaderboard = UnityEngine.Object.FindObjectOfType<LeaderboardDisplay>();
+                        if (mainMenuLeaderboard != null)
+                        {
+                            mainMenuLeaderboard.totalLeaderboards = true;
+                            MelonLogger.Log("[ExScoring] SetState -> MainPage: refreshing Total leaderboard via ViewTop().");
+                            mainMenuLeaderboard.ViewTop();
+                        }
+                        else
+                        {
+                            MelonLogger.Log("[ExScoring] SetState -> MainPage: no LeaderboardDisplay found, skipping Total leaderboard refresh.");
+                        }
+                    }
                 }
                 else
                 {

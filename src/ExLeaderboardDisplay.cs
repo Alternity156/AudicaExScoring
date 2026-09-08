@@ -64,6 +64,59 @@ namespace ExScoringMod
                     return false;
                 }
 
+                // Native reuses this exact same LeaderboardDisplay instance for both the main-menu
+                // Total board and the per-song board (confirmed via UnityExplorer — only one
+                // instance ever exists), toggling `totalLeaderboards` and calling UpdateLeaderboard
+                // itself when entering the song page. It does NOT call UpdateLeaderboard again when
+                // returning to the main menu though (confirmed via logging — no new "UpdateLeaderboard
+                // called" line fires on SongPage -> MainPage), so SetStatePatch's MainPage case in
+                // Hooks.cs force-syncs the flag and calls ViewTop() on that transition to land here
+                // with totalLeaderboards=true. rowsStandard/rowsStandardParent is what's actually on
+                // screen for both contexts (confirmed via UnityExplorer — rowsTotal/rowsTotalParent
+                // are unused by the currently-visible panel), so both branches below populate the
+                // same rowsStandard array; nothing needs to touch parent visibility.
+                if (display.totalLeaderboards)
+                {
+                    string totalDifficulty = KataConfig.I != null
+                        ? KataConfig.I.GetDifficulty().ToString()
+                        : "Expert"; // KataConfig.I can be null this early — this Prefix has been observed firing before MenuState even reaches MainPage on boot.
+                    int totalRowLimit = LeaderboardDisplay.kNumRows;
+
+                    // Hardcoded for now — no song-list picker UI exists yet (selectionTabs only ever
+                    // has Top/Self/Friends). Revisit once list selection is built.
+                    const string totalListId = "ost";
+
+                    int totalRequestVersion = ++leaderboardRequestVersion;
+                    MelonLogger.Log($"[ExScoring] UpdateLeaderboard: Total fetch #{totalRequestVersion} starting listId={totalListId} difficulty={totalDifficulty} rowLimit={totalRowLimit}");
+
+                    FetchTotalLeaderboard(totalListId, totalDifficulty, totalRowLimit, "top", totalResponse =>
+                    {
+                        if (totalRequestVersion != leaderboardRequestVersion)
+                        {
+                            MelonLogger.Log($"[ExScoring] UpdateLeaderboard: Total fetch #{totalRequestVersion} result discarded (stale — current is #{leaderboardRequestVersion}).");
+                            return;
+                        }
+
+                        if (!Config.ExType)
+                        {
+                            MelonLogger.Log($"[ExScoring] UpdateLeaderboard: Total fetch #{totalRequestVersion} result discarded (scoring type changed mid-fetch).");
+                            return;
+                        }
+
+                        if (totalResponse == null)
+                        {
+                            MelonLogger.Log($"[ExScoring] UpdateLeaderboard: Total fetch #{totalRequestVersion} failed (see ApiClient log above), blanking rows.");
+                            BlankAllLeaderboardRows(display);
+                            return;
+                        }
+
+                        MelonLogger.Log($"[ExScoring] UpdateLeaderboard: Total fetch #{totalRequestVersion} applying {totalResponse.entries?.Length ?? 0} row(s).");
+                        PopulateTotalLeaderboardRows(display, totalResponse);
+                    });
+
+                    return false;
+                }
+
                 if (selectedSongData == null)
                 {
                     MelonLogger.Log("[ExScoring] UpdateLeaderboard: selectedSongData is NULL, aborting EX leaderboard fetch.");
@@ -201,6 +254,84 @@ namespace ExScoringMod
             }
 
             ShowLeaderboardPanelContent(display);
+        }
+
+        /// <summary>
+        /// Populates display.rowsStandard from an AudicaEx Total leaderboard response (main-menu
+        /// board, scoped per song-list per difficulty — ApiContract.md section 4c). Same
+        /// front-to-back fill/blank-remainder shape as PopulateLeaderboardRows, but entries carry no
+        /// grade/platform/fullCombo (a total is a sum across many songs, not one run), so each row is
+        /// built via ApplyTotalLeaderboardEntryToRow instead.
+        /// </summary>
+        private static void PopulateTotalLeaderboardRows(LeaderboardDisplay display, TotalLeaderboardApiResponse response)
+        {
+            if (display == null)
+            {
+                MelonLogger.Log("[ExScoring] PopulateTotalLeaderboardRows: display is NULL, aborting.");
+                return;
+            }
+
+            Il2CppReferenceArray<LeaderboardRow> rows = display.rowsStandard;
+            if (rows == null)
+            {
+                MelonLogger.Log("[ExScoring] PopulateTotalLeaderboardRows: rowsStandard is NULL, aborting.");
+                return;
+            }
+
+            TotalLeaderboardApiEntry[] entries = response?.entries;
+            int entryCount = entries?.Length ?? 0;
+            int rowCount = rows.Length;
+
+            MelonLogger.Log($"[ExScoring] PopulateTotalLeaderboardRows: rowCount={rowCount} entryCount={entryCount}");
+
+            for (int i = 0; i < rowCount; i++)
+            {
+                LeaderboardRow row = rows[i];
+                if (row == null)
+                {
+                    MelonLogger.Log($"[ExScoring][Diag] PopulateTotalLeaderboardRows: row[{i}] is NULL, skipping.");
+                    continue;
+                }
+
+                if (i < entryCount)
+                    ApplyTotalLeaderboardEntryToRow(row, entries[i]);
+                else
+                    ClearLeaderboardRow(row);
+            }
+
+            ShowLeaderboardPanelContent(display);
+        }
+
+        /// <summary>
+        /// Fills one row from a TotalLeaderboardApiEntry. No grade (HideLeaderboardRowStars +
+        /// cleared grade visual, same as a per-song row), no platform icon (disabled — totals span
+        /// runs across different platforms, per ApiContract.md 4c), no laurel/fullCombo wrap.
+        /// percentile is left blank for now (songsPlayed/songsEligible not surfaced yet).
+        /// </summary>
+        private static void ApplyTotalLeaderboardEntryToRow(LeaderboardRow row, TotalLeaderboardApiEntry entry)
+        {
+            int slot = row.gameObject.GetInstanceID();
+
+            if (row.rank != null) row.rank.text = entry.rank.ToString();
+
+            if (row.username != null)
+            {
+                string nickname = string.IsNullOrEmpty(entry.nickname) ? "???" : entry.nickname;
+                row.username.text = nickname;
+            }
+
+            if (row.score != null) row.score.text = entry.totalScore.ToString("0.00");
+
+            if (row.percentile != null) row.percentile.gameObject.SetActive(false);
+
+            if (row.platform != null) row.platform.enabled = false;
+
+            HideLeaderboardRowStars(row.starDisplay);
+            ClearLeaderboardRowGradeVisual(slot);
+
+            if (row.compareButton != null) row.compareButton.SetActive(false);
+
+            row.gameObject.SetActive(true);
         }
 
         /// <summary>
