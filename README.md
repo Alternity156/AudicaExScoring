@@ -1,29 +1,23 @@
-## WARNING
-This mod conflicts with ScorePercentage, SongBrowser, Meeps Audica UI Enhancements.
+# WARNING
+This mod will most likely conflict with these mods.
 
-Since this mod is a massive overhaul of the song list menu, I took it upon myself to include pretty much all the Song Browser features within this mod.
-
-This mod aslo includes some other mods for convenience and menu placement. Do not have these mods as they will conflict. To enable/disable these mods simply find them in the Options menu from the song list.
-
+```
+ScorePercentage
+SongBrowser
+Meeps Audica UI Enhancements
 ParticleKiller
-
 MineSoundDisabler
-
 TimingAssist
-
 TemporalAimAssistDisabler
-
 ForcedHitSounds
-
 GunBeamRedirrectionDisabler
-
 TrippyMenu
-
 MenuGrabDisabler
-
 Grind-Mode
-
 ColoredChains
+```
+
+Functionality of these mods has been added as options.
 
 ## Optional Dependencies
 [SongDataLoader](https://github.com/MeepsKitten/Audica-SongDataLoader) (Recommended for full experience) Required to show album art.
@@ -31,7 +25,7 @@ ColoredChains
 [SongRequest](https://github.com/Silzoid/SongRequest) (Requires [TwitchConnectorMod](https://github.com/steglasaurous/twitch-connector-mod)) Full twitch song request support through the folder system.
 
 ## EX Scoring
-The idea is to make a new scoring system akin to classic rhythm games. I am still not sure where I want this to go but I am experimenting currently, if you have ideas, let me know on Discord!
+New scoring system scored separately on aim and timing. Uses timing windows and target radius windows for judgement.
 
 ## Current implementation
 Currently, judgement scoring has been implemented and is the system that is turned on when using EX scoring.
@@ -39,14 +33,12 @@ Currently, judgement scoring has been implemented and is the system that is turn
 The values are currently in testing, you can browse the current values in Judgement.cs.
 
 ## Song list overhaul
-This mod includes a massive overhaul of the song list where the launch page is now besides the song list.
-The launch panel now has a lot of data about the selected song such as target data, intensity graph, heatmap, and I do plan to add more.
+This mod includes a massive overhaul of the song list where the launch page is now besides the song list. It now has a folder system. Official songs are now in their own Audica folder as well as DLCs are now in their own Audica DLC folder. Any folder created in the songs folder will show up as a folder on the song list, just like Stepmania, Clone Hero and other rhythm games with custom content.
 
-## Mod Settings
-You can use the ModSettings mod to change the score visuals from Audica style to Ex style.
-You can also change the score calculation from Audica to Linear.
-Default settings are Audica visuals and Audica calculations.
-If you do not have ModSettings, you can grab it [here](https://github.com/octoberU/ModSettings) or manually change settings in [Audica Folder]/UserData/MelonPreferences.cfg .
+![](songlist.png)
+
+## Options
+Settings are now integrated to the song list. There is a decent amount of customization available from the options menu.
 
 ## Thanks
 This mod uses code or concepts from other mods and software such as: 
@@ -80,3 +72,6 @@ This mod uses code or concepts from other mods and software such as:
 [ColoredChains](https://github.com/octoberU/ColoredChains) (Full mod support)
 
 [Simply-Love-SM5](https://github.com/Simply-Love/Simply-Love-SM5) (Timing stats graph)
+
+## AI Disclosure
+AI was used in the making of this mod.
