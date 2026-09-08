@@ -40,6 +40,8 @@ This mod includes a massive overhaul of the song list where the launch page is n
 ## Options
 Settings are now integrated to the song list. There is a decent amount of customization available from the options menu.
 
+![](optionsmenu.png)
+
 ## Thanks
 This mod uses code or concepts from other mods and software such as: 
 
