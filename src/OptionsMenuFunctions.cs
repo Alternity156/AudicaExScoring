@@ -52,6 +52,7 @@ namespace ExScoringMod
         public static bool purpleMenuEnabled;
         public static float scrollSpeedMultiplier;
         public static float arrowScrollRows;
+        public static bool arrowJumpToEnds;
         public static bool hideScoreData;
         public static bool firstPlayBlind;
         public static bool wrapSongList;
@@ -297,6 +298,17 @@ namespace ExScoringMod
         {
             arrowScrollRows = value;
             Config.UpdateArrowScrollRows(value);
+        }
+
+        public static void GetArrowJumpToEnds()
+        {
+            arrowJumpToEnds = Config.ArrowJumpToEnds;
+        }
+
+        public static void SetArrowJumpToEnds(bool value)
+        {
+            arrowJumpToEnds = value;
+            Config.UpdateArrowJumpToEnds(value);
         }
 
         public static void GetScrollSpeedMultiplier()
@@ -903,6 +915,29 @@ namespace ExScoringMod
             {
                 if (VirtualSongList.Scroller == null || __instance.Pointer != VirtualSongList.Scroller.Pointer)
                     return true;
+
+                // Arrow-shot (fixed magnitude 3) with "jump to ends" enabled: skip the normal
+                // row-increment scroll entirely and snap straight to the real top or bottom of
+                // the list. Sign convention matches the row-increment branch below (positive =
+                // toward the bottom, negative = toward the top), so this only changes how far
+                // an arrow shot moves, not which arrow moves which way.
+                if (Config.ArrowJumpToEnds && Mathf.Approximately(Mathf.Abs(amount), 3f))
+                {
+                    if (amount > 0f)
+                    {
+                        // Canonical index of the last full screen of real rows — NOT
+                        // float.MaxValue, which clamps to the physical max and (with Wrap Song
+                        // List on) lands inside the wraparound ghost copy of the head instead
+                        // of the list's true tail.
+                        float lastScreen = Mathf.Max(0f, VirtualSongList.CurrentView.Count - VirtualSongList.Scroller.displayCount);
+                        VirtualSongList.SetScroll(lastScreen);
+                    }
+                    else
+                    {
+                        VirtualSongList.SetScroll(0f);
+                    }
+                    return false;
+                }
 
                 VirtualSongList.MarkScrollDirtiedByInput();
 

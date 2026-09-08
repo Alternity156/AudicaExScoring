@@ -313,6 +313,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetPurpleMenuEnabled();
                 OptionsMenuFunctions.GetScrollSpeedMultiplier();
                 OptionsMenuFunctions.GetArrowScrollRows();
+                OptionsMenuFunctions.GetArrowJumpToEnds();
                 OptionsMenuFunctions.GetWrapSongList();
                 OptionsMenuFunctions.GetHideScoreData();
                 OptionsMenuFunctions.GetFirstPlayBlind();
@@ -353,6 +354,12 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.arrowScrollRows = v; OptionsMenuFunctions.SetArrowScrollRows(v); },
                     1f, 20f, 1f, 3f, "N0");
                 OptionsMenuClone.AddRow(scrollSpeedSlider, arrowScrollRowsSlider);
+
+                var arrowJumpToEndsToggle = OptionsMenuClone.CreateToggle(0, "Arrow Jump To Ends",
+                    () => OptionsMenuFunctions.arrowJumpToEnds,
+                    v => { OptionsMenuFunctions.arrowJumpToEnds = v; OptionsMenuFunctions.SetArrowJumpToEnds(v); },
+                    "Makes the song list's top/bottom arrow buttons jump straight to the start/end of the list instead of scrolling a few rows at a time. Disabled by default.");
+                OptionsMenuClone.AddRow(arrowJumpToEndsToggle);
 
                 var wrapSongListToggle = OptionsMenuClone.CreateToggle(0, "Wrap Song List",
                     () => OptionsMenuFunctions.wrapSongList,

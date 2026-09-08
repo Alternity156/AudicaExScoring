@@ -46,6 +46,7 @@ namespace ExScoringMod
         public static float TrippyMenuSpeed;
         public static float ScrollSpeedMultiplier;
         public static float ArrowScrollRows;
+        public static bool ArrowJumpToEnds;
         public static bool HideScoreData;
         public static bool FirstPlayBlind;
         public static bool WrapSongList;
@@ -118,6 +119,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterFloat(Category, nameof(TrippyMenuSpeed), 1.0f, "Sets the trippy menu cycle speed [0.1,100,0.1,1]");
             MelonPrefs.RegisterFloat(Category, nameof(ScrollSpeedMultiplier), 1.0f, "Sets the song list joystick scroll speed multiplier [0.1,10,0.1,1]");
             MelonPrefs.RegisterFloat(Category, nameof(ArrowScrollRows), 3.0f, "Sets how many rows the song list scrolls per arrow shot [1,20,1,3]");
+            MelonPrefs.RegisterBool(Category, nameof(ArrowJumpToEnds), false, "Makes the song list's top/bottom arrow buttons jump straight to the start/end of the list instead of scrolling a few rows at a time");
             MelonPrefs.RegisterBool(Category, nameof(HideScoreData), false, "Permanently hides target data, heatmap, and intensity graph on the launch panel");
             MelonPrefs.RegisterBool(Category, nameof(FirstPlayBlind), false, "Hides target data, heatmap, and intensity graph only for songs you've never played");
             MelonPrefs.RegisterBool(Category, nameof(WrapSongList), false, "Loops the song list like a wheel — scrolling or dragging past either end wraps around to the other");
@@ -178,6 +180,7 @@ namespace ExScoringMod
             TrippyMenuSpeed = MelonPrefs.GetFloat(Category, nameof(TrippyMenuSpeed));
             ScrollSpeedMultiplier = MelonPrefs.GetFloat(Category, nameof(ScrollSpeedMultiplier));
             ArrowScrollRows = MelonPrefs.GetFloat(Category, nameof(ArrowScrollRows));
+            ArrowJumpToEnds = MelonPrefs.GetBool(Category, nameof(ArrowJumpToEnds));
             HideScoreData = MelonPrefs.GetBool(Category, nameof(HideScoreData));
             FirstPlayBlind = MelonPrefs.GetBool(Category, nameof(FirstPlayBlind));
             WrapSongList = MelonPrefs.GetBool(Category, nameof(WrapSongList));
@@ -286,6 +289,13 @@ namespace ExScoringMod
             if (value > 20f) value = 20f;
             MelonPrefs.SetFloat(Category, nameof(ArrowScrollRows), value);
             ArrowScrollRows = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateArrowJumpToEnds(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(ArrowJumpToEnds), value);
+            ArrowJumpToEnds = value;
             MelonPrefs.SaveConfig();
         }
 
