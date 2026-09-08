@@ -110,6 +110,7 @@ namespace ExScoringMod
             {
                 modSettingsInstalled = true;
                 MelonLogger.Log("ModSettings detected");
+                ModSettingsBlocker.Apply();
             }
 
             // Check if SongDataLoader is installed (optional — enables album art)

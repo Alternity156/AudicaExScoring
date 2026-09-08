@@ -31,6 +31,10 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="0Harmony">
+      <HintPath>lib\0Harmony.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
     <Reference Include="Assembly-CSharp">
       <HintPath>lib\Assembly-CSharp.dll</HintPath>
       <Private>False</Private>
@@ -71,12 +75,13 @@
       <HintPath>lib\Il2CppSystem.Xml.dll</HintPath>
       <Private>False</Private>
     </Reference>
-    <Reference Include="MelonLoader.ModHandler">
-      <HintPath>lib\MelonLoader.ModHandler.dll</HintPath>
+    <Reference Include="MelonLoader">
+      <HintPath>lib\MelonLoader.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="Newtonsoft.Json">
       <HintPath>lib\Newtonsoft.Json.dll</HintPath>
+      <Private>False</Private>
     </Reference>
     <Reference Include="Oculus.VR">
       <HintPath>lib\Oculus.VR.dll</HintPath>
@@ -88,6 +93,7 @@
     </Reference>
     <Reference Include="SongDataLoader">
       <HintPath>lib\SongDataLoader.dll</HintPath>
+      <Private>False</Private>
     </Reference>
     <Reference Include="SonyNP">
       <HintPath>lib\SonyNP.dll</HintPath>
@@ -139,6 +145,7 @@
     </Reference>
     <Reference Include="UnityEngine.ImageConversionModule">
       <HintPath>lib\UnityEngine.ImageConversionModule.dll</HintPath>
+      <Private>False</Private>
     </Reference>
     <Reference Include="UnityEngine.IMGUIModule">
       <HintPath>lib\UnityEngine.IMGUIModule.dll</HintPath>
@@ -214,6 +221,7 @@
     <Compile Include="src\LeaderboardStatsButton.cs" />
     <Compile Include="src\MarathonSetup.cs" />
     <Compile Include="src\ModifiersPage.cs" />
+    <Compile Include="src\ModSettingsBlocker.cs" />
     <Compile Include="src\OptionsMenuClone.cs" />
     <Compile Include="src\OptionsMenuFunctions.cs" />
     <Compile Include="src\ReleaseNotesPanel.cs" />
