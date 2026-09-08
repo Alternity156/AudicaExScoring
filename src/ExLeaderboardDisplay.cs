@@ -14,7 +14,23 @@ namespace ExScoringMod
         // ExType off mid-fetch) discard a stale, now-irrelevant response instead of overwriting
         // whatever the panel should be showing by the time it lands. Same idea as exRowScoreLoading
         // in SongListHighScoreUI.cs, but simpler since only one leaderboard panel is ever open.
+        // Shared between the per-song fetch and the Total-leaderboard fetch below — the two are
+        // mutually exclusive (only one leaderboard panel/request is ever active), so one counter is
+        // enough to invalidate whichever kind of fetch is in flight.
         private static int leaderboardRequestVersion = 0;
+
+        // Native passes this exact string as leaderboardID when the main-menu "Total Score"
+        // leaderboard requests a refresh (confirmed via logging: leaderboardID=all_time_leaders,
+        // display.totalLeaderboards=True). It's the only signal available at this call site — the
+        // request never has selectedSongData behind it — so it's what routes to the Total
+        // leaderboard fetch instead of the per-song one below.
+        private const string AllTimeLeadersID = "all_time_leaders";
+
+        // ApiContract.md section 4b: Total leaderboards are scoped per server-managed song-list, not
+        // a single implicit "the OST". Hardcoded to "ost" for now since there's no in-game
+        // list-switcher UI yet — revisit if/when one exists (GET /api/song-lists would enumerate the
+        // options).
+        private const string TotalLeaderboardListId = "ost";
 
         /// <summary>
         /// Single choke point ViewTop()/ViewSelf()/ViewFriends() and the post-song
@@ -71,6 +87,15 @@ namespace ExScoringMod
                     return false;
                 }
 
+                // Main-menu Total leaderboard — must be checked before the selectedSongData guard
+                // below, since this request never has a selected song behind it (that guard used to
+                // catch it and just blank the panel instead, which is the bug this branch fixes).
+                if (leaderboardID == AllTimeLeadersID)
+                {
+                    FetchAndPopulateTotalLeaderboard(display);
+                    return false;
+                }
+
                 if (selectedSongData == null)
                 {
                     MelonLogger.Log("[ExScoring] UpdateLeaderboard: selectedSongData is NULL, aborting EX leaderboard fetch.");
@@ -112,6 +137,51 @@ namespace ExScoringMod
 
                 return false; // skip native — we're driving the rows ourselves
             }
+        }
+
+        /// <summary>
+        /// Handles the main-menu Total leaderboard request (leaderboardID == AllTimeLeadersID).
+        /// Unlike the per-song path above, this never depends on selectedSongData — it always
+        /// requests TotalLeaderboardListId's Total leaderboard (ApiContract.md section 4c) via the
+        /// existing FetchTotalLeaderboard (ApiClient.cs), regardless of what song (if any) happens to
+        /// be selected. difficulty is still taken from KataConfig.I.GetDifficulty() even though the
+        /// main menu has no difficulty selector of its own — the API requires one per
+        /// (listId, difficulty) pair (difficulties are never combined into one Total), so this reuses
+        /// the same persistent global difficulty the per-song leaderboard already reads rather than
+        /// adding new state.
+        /// </summary>
+        private static void FetchAndPopulateTotalLeaderboard(LeaderboardDisplay display)
+        {
+            string difficulty = KataConfig.I.GetDifficulty().ToString();
+            int rowLimit = LeaderboardDisplay.kNumRows;
+
+            int requestVersion = ++leaderboardRequestVersion;
+            MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} starting listId={TotalLeaderboardListId} difficulty={difficulty} rowLimit={rowLimit}");
+
+            FetchTotalLeaderboard(TotalLeaderboardListId, difficulty, rowLimit, "top", response =>
+            {
+                if (requestVersion != leaderboardRequestVersion)
+                {
+                    MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} result discarded (stale — current is #{leaderboardRequestVersion}).");
+                    return;
+                }
+
+                if (!Config.ExType)
+                {
+                    MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} result discarded (scoring type changed mid-fetch).");
+                    return;
+                }
+
+                if (response == null)
+                {
+                    MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} failed (see ApiClient log above), blanking rows.");
+                    BlankAllLeaderboardRows(display);
+                    return;
+                }
+
+                MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} applying {response.entries?.Length ?? 0} row(s).");
+                PopulateTotalLeaderboardRows(display, response);
+            });
         }
 
         /// <summary>
@@ -285,6 +355,92 @@ namespace ExScoringMod
             // over this row the same way Play History's does over its rows.
             leaderboardHitboxRunIds[slot] = entry.runId;
             EnsureLeaderboardHitbox(slot, row);
+        }
+
+        /// <summary>
+        /// Total-leaderboard counterpart to PopulateLeaderboardRows — same front-to-back fill/blank
+        /// behavior, but reading TotalLeaderboardApiEntry (ApiContract.md section 4c) instead of a
+        /// per-song LeaderboardApiEntry, so rows go through ApplyTotalLeaderboardEntryToRow.
+        /// </summary>
+        private static void PopulateTotalLeaderboardRows(LeaderboardDisplay display, TotalLeaderboardApiResponse response)
+        {
+            if (display == null)
+            {
+                MelonLogger.Log("[ExScoring] PopulateTotalLeaderboardRows: display is NULL, aborting.");
+                return;
+            }
+
+            Il2CppReferenceArray<LeaderboardRow> rows = display.rowsStandard;
+            if (rows == null)
+            {
+                MelonLogger.Log("[ExScoring] PopulateTotalLeaderboardRows: rowsStandard is NULL, aborting.");
+                return;
+            }
+
+            TotalLeaderboardApiEntry[] entries = response?.entries;
+            int entryCount = entries?.Length ?? 0;
+            int rowCount = rows.Length;
+
+            MelonLogger.Log($"[ExScoring] PopulateTotalLeaderboardRows: rowCount={rowCount} entryCount={entryCount}");
+
+            for (int i = 0; i < rowCount; i++)
+            {
+                LeaderboardRow row = rows[i];
+                if (row == null)
+                {
+                    MelonLogger.Log($"[ExScoring][Diag] PopulateTotalLeaderboardRows: row[{i}] is NULL, skipping.");
+                    continue;
+                }
+
+                if (i < entryCount)
+                    ApplyTotalLeaderboardEntryToRow(row, entries[i]);
+                else
+                    ClearLeaderboardRow(row);
+            }
+
+            ShowLeaderboardPanelContent(display);
+        }
+
+        /// <summary>
+        /// Total-leaderboard counterpart to ApplyLeaderboardEntryToRow. TotalLeaderboardApiEntry has
+        /// no grade/fullCombo/platform/runId — an aggregate totalScore across a song-list isn't tied
+        /// to any single run — so this hides the star/grade visual and platform icon rather than
+        /// populating them from data that doesn't exist, and deliberately clears any hitbox mapping
+        /// instead of creating one (ClearLeaderboardHitboxRun, not EnsureLeaderboardHitbox): there's
+        /// no single run behind an aggregate total score to fetch via GET /api/runs/:runId, so this
+        /// row shouldn't open the leaderboard-stats panel the way a per-song row does.
+        /// </summary>
+        private static void ApplyTotalLeaderboardEntryToRow(LeaderboardRow row, TotalLeaderboardApiEntry entry)
+        {
+            int slot = row.gameObject.GetInstanceID();
+
+            if (row.rank != null) row.rank.text = entry.rank.ToString();
+
+            if (row.username != null)
+            {
+                string nickname = string.IsNullOrEmpty(entry.nickname) ? "???" : entry.nickname;
+                row.username.text = LeaderboardDisplay.LaurelWrap(nickname, false);
+            }
+
+            if (row.score != null) row.score.text = entry.totalScore.ToString("N0");
+
+            if (row.percentile != null) row.percentile.gameObject.SetActive(false);
+
+            // No platform on a Total leaderboard entry (ApiContract.md section 4c) — passing null
+            // hits ApplyPlatformIcon's default case and disables the icon, same as an unrecognized/
+            // missing platform on a per-song row.
+            ApplyPlatformIcon(row.platform, null);
+
+            HideLeaderboardRowStars(row.starDisplay);
+            ClearLeaderboardRowGradeVisual(slot);
+
+            if (row.compareButton != null) row.compareButton.SetActive(false);
+
+            row.gameObject.SetActive(true);
+
+            // Make sure this row can't still be pointing at a stale runId/hitbox from a previous
+            // per-song leaderboard view — see method summary for why no new hitbox is created here.
+            ClearLeaderboardHitboxRun(slot);
         }
 
         /// <summary>
