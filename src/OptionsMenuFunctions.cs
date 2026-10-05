@@ -624,6 +624,7 @@ namespace ExScoringMod
         public static void SetMusicLevel(float level)
         {
             PlayerPreferences.I.MusicLevel.Set(level);
+            PlayerPreferences.I.UpdateAudioLevels();
         }
 
         public static void GetSfxLevel()
@@ -634,6 +635,7 @@ namespace ExScoringMod
         public static void SetSfxLevel(float level)
         {
             PlayerPreferences.I.SfxLevel.Set(level);
+            PlayerPreferences.I.UpdateAudioLevels();
         }
 
         public static void GetParticleMode()
