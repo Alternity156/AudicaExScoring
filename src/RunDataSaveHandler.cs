@@ -83,6 +83,9 @@ namespace ExScoringMod
 
                 MelonLogger.Log($"[ExScoring] Saved run data to {filePath}");
 
+                // Keep the background loader's run file index (RunDataRecalculator.cs) in sync.
+                RunFileIndexAdd(fileName);
+
                 EnforceRunDataLimits(saveData.songId, saveData.difficulty);
 
                 // A fresh run for this song+difficulty may beat (or be) the cached "best" song-list
@@ -211,6 +214,7 @@ namespace ExScoringMod
             try
             {
                 file.Delete();
+                RunFileIndexRemove(file.Name); // keep the run file index (RunDataRecalculator.cs) in sync
                 MelonLogger.Log($"[ExScoring] Deleted old run data file: {file.Name}");
             }
             catch (Exception ex)

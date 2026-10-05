@@ -26,8 +26,8 @@ namespace ExScoringMod
         // cache so "no result" doesn't repeatedly re-trigger a disk read on every rebind.
         private static readonly HashSet<string> exRowScoreEmpty = new HashSet<string>();
 
-        // In-flight lookups, so fast scrolling doesn't kick off duplicate LoadHistoryForSong
-        // coroutines for the same song+difficulty while one is already running.
+        // In-flight lookups, so fast scrolling doesn't queue duplicate background lookups
+        // (LoadBestRunSummaryForSong) for the same song+difficulty while one is already running.
         private static readonly HashSet<string> exRowScoreLoading = new HashSet<string>();
 
         private static string ExRowCacheKey(string songId, KataConfig.Difficulty difficulty) => songId + "|" + difficulty;
@@ -209,15 +209,11 @@ namespace ExScoringMod
 
         private static IEnumerator LoadRowScoreCoroutine(string songId, KataConfig.Difficulty difficulty, string key)
         {
-            yield return LoadHistoryForSong(songId, difficulty.ToString(), results =>
+            // Totals only, computed entirely on the background loader thread (RunDataRecalculator.cs)
+            // — this coroutine's first step is just an enqueue, so however many rows bind in the
+            // same frame when a folder opens, none of them read or score anything on the main thread.
+            yield return LoadBestRunSummaryForSong(songId, difficulty.ToString(), best =>
             {
-                RecalculatedRun best = null;
-                for (int i = 0; i < results.Count; i++)
-                {
-                    if (best == null || results[i].judgementPercent > best.judgementPercent)
-                        best = results[i];
-                }
-
                 if (best != null)
                 {
                     exRowScoreCache[key] = new CachedExRowScore
