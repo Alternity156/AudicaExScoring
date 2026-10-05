@@ -262,7 +262,7 @@ namespace ExScoringMod
                 launchPanelCenterTitleLabel.gameObject.layer,
                 launchPanelCenterTitleLabel.GetComponent<TextMeshPro>(),
                 launchPanelCenterTitleLabel.GetComponent<RectTransform>(),
-                new Vector3(-1.5f, 9f, 0f),
+                new Vector3(0f, 9f, 0f),
                 new Vector3(1.2f, 1.2f, 1.2f)
                 );
 
@@ -273,7 +273,7 @@ namespace ExScoringMod
                 launchPanelCenterTitleLabel.gameObject.layer,
                 launchPanelCenterTitleLabel.GetComponent<TextMeshPro>(),
                 launchPanelCenterTitleLabel.GetComponent<RectTransform>(),
-                new Vector3(9.5f, 6.5f, 0f),
+                new Vector3(11f, 6.5f, 0f),
                 new Vector3(4.4f, 4.4f, 4.4f)
                 );
 
@@ -284,7 +284,7 @@ namespace ExScoringMod
                 launchPanelCenterTitleLabel.gameObject.layer,
                 launchPanelCenterTitleLabel.GetComponent<TextMeshPro>(),
                 launchPanelCenterTitleLabel.GetComponent<RectTransform>(),
-                new Vector3(0f, 9f, 0f),
+                new Vector3(-1.5f, 9f, 0f),
                 new Vector3(1.2f, 1.2f, 1.2f)
                 );
 
@@ -295,7 +295,7 @@ namespace ExScoringMod
                 launchPanelCenterTitleLabel.gameObject.layer,
                 launchPanelCenterTitleLabel.GetComponent<TextMeshPro>(),
                 launchPanelCenterTitleLabel.GetComponent<RectTransform>(),
-                new Vector3(11f, 6.5f, 0f),
+                new Vector3(9.5f, 6.5f, 0f),
                 new Vector3(4.4f, 4.4f, 4.4f)
                 );
 
