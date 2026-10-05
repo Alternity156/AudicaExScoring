@@ -76,6 +76,13 @@ namespace ExScoringMod
         public static string ApiKey;
         public static bool EnableScoreUpload;
 
+        // Bookkeeping only, not a real setting (empty description, same pattern as
+        // LastSongCount below) - tracks whether EnableScoreUpload has ever been explicitly
+        // set, by the user's own toggle or by the auto-enable-on-verified-key-paste logic in
+        // OptionsMenuFunctions.PasteApiKeyFromClipboard. Once true, that logic never touches
+        // EnableScoreUpload again, so a manual disable always sticks.
+        public static bool ScoreUploadUserConfigured;
+
         public static void RegisterConfig()
         {
             MelonPrefs.RegisterString(Category, nameof(typeHeader), "", "[Header]Scoring Type");
@@ -149,6 +156,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterString(Category, nameof(leaderboardHeader), "", "[Header]Leaderboard");
             MelonPrefs.RegisterString(Category, nameof(ApiKey), "", "API key for the online leaderboard (paste from the website)");
             MelonPrefs.RegisterBool(Category, nameof(EnableScoreUpload), false, "Automatically uploads runs to the online leaderboard after each song");
+            MelonPrefs.RegisterBool(Category, nameof(ScoreUploadUserConfigured), false, "");
 
             OnModSettingsApplied();
         }
@@ -204,6 +212,7 @@ namespace ExScoringMod
 
             ApiKey = MelonPrefs.GetString(Category, nameof(ApiKey));
             EnableScoreUpload = MelonPrefs.GetBool(Category, nameof(EnableScoreUpload));
+            ScoreUploadUserConfigured = MelonPrefs.GetBool(Category, nameof(ScoreUploadUserConfigured));
         }
 
         public static void UpdateExScorePopupSize(float value)
@@ -351,6 +360,12 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(EnableScoreUpload), value);
             EnableScoreUpload = value;
+
+            // Any write here - manual toggle or auto-enable-on-verified-key-paste - counts as
+            // "configured", so the auto-enable logic never overrides a later manual choice.
+            MelonPrefs.SetBool(Category, nameof(ScoreUploadUserConfigured), true);
+            ScoreUploadUserConfigured = true;
+
             MelonPrefs.SaveConfig();
         }
 

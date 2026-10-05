@@ -288,6 +288,20 @@ namespace ExScoringMod
 
             Config.UpdateApiKey(clipboard.Trim());
             MelonLogger.Log("[ExScoring] API key updated from clipboard");
+
+            // Only worth checking if Enable Score Upload has never been explicitly set before
+            // (by the user's own toggle or by this same auto-enable) - once it has, a manual
+            // disable must stick, so don't even make the verification call.
+            if (Config.ScoreUploadUserConfigured) return;
+
+            ExScoring.FetchProfile(result =>
+            {
+                if (result.status != ExScoring.ProfileFetchStatus.Success) return;
+                if (Config.ScoreUploadUserConfigured) return; // could have been set while the request was in flight
+
+                SetEnableScoreUpload(true);
+                MelonLogger.Log("[ExScoring] API key verified - automatically enabled score upload");
+            });
         }
 
         public static void GetArrowScrollRows()
