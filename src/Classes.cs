@@ -356,6 +356,34 @@ namespace ExScoringMod
             public string userId;
             public string nickname;
             public string friendCode;
+
+            /// <summary>
+            /// The gun colors the server currently has stored for this player (ApiContract.md Section 14),
+            /// or null if the mod has never sent any. Compared against the local colors by
+            /// UserSettingsSync.SyncFromProfile to decide whether a PATCH is needed.
+            /// </summary>
+            public GunColorsData gunColors;
+        }
+
+        /// <summary>
+        /// Left/right gun colors as "#RRGGBB" strings (no alpha) — ApiContract.md Section 14. The server
+        /// lowercases what it stores, so compare case-insensitively.
+        /// </summary>
+        public class GunColorsData
+        {
+            public string left;
+            public string right;
+        }
+
+        /// <summary>
+        /// Request body and response shape for PATCH /api/users/me/settings (ApiContract.md Section 14.1).
+        /// gunColors is the only setting so far; add further per-player settings here as new nullable
+        /// fields — null fields are omitted from the request (see ApiClient.UpdateUserSettings), so each
+        /// call only writes the keys it actually sets.
+        /// </summary>
+        public class UserSettingsData
+        {
+            public GunColorsData gunColors;
         }
     }
 }

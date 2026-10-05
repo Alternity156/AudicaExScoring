@@ -1520,6 +1520,32 @@ namespace ExScoringMod
         // ══════════════════════════════════════════════════════════════════
 
         /// <summary>
+        /// Catches gun color changes made from the Colors options page so they can be sent to the
+        /// server (ApiContract.md Section 14). ColorPref is also used for the color preset slots, so
+        /// only the two live gun color prefs are reacted to. The "not during a song" rule (other mods
+        /// temporarily recolor the guns mid-song) and the debounce live in UserSettingsSync.
+        /// </summary>
+        [HarmonyPatch(typeof(PlayerPreferences.ColorPref), "Set", new Type[] { typeof(Color) })]
+        private static class ColorPrefSetPatch
+        {
+            private static void Postfix(PlayerPreferences.ColorPref __instance)
+            {
+                PlayerPreferences prefs = PlayerPreferences.I;
+                if (prefs == null || __instance == null) return;
+
+                PlayerPreferences.ColorPref left = prefs.GunColorLeft;
+                PlayerPreferences.ColorPref right = prefs.GunColorRight;
+
+                bool isGunColor =
+                    (left != null && left.Pointer == __instance.Pointer) ||
+                    (right != null && right.Pointer == __instance.Pointer);
+                if (!isGunColor) return;
+
+                UserSettingsSync.OnGunColorsChanged();
+            }
+        }
+
+        /// <summary>
         /// Injects the "Download Songs" button onto the Settings page.
         /// Counts buttons added to the Main settings page; once the 9th
         /// button appears we know the page is fully built and we add ours.

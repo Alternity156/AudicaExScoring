@@ -285,6 +285,7 @@
     <Compile Include="src\TopScoreUI.cs" />
     <Compile Include="src\TrippyMenu.cs" />
     <Compile Include="src\UI.cs" />
+    <Compile Include="src\UserSettingsSync.cs" />
     <Compile Include="src\Utils.cs" />
     <!-- csogg - OGG packet/page/sync layer (for song preview) -->
     <Compile Include="csogg\Buffer.cs" />

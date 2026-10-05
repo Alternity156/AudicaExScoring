@@ -551,5 +551,84 @@ namespace ExScoringMod
                 request.Dispose();
             }
         }
+
+        /// <summary>
+        /// Writes per-player settings to the server (PATCH /api/users/me/settings — see ApiContract.md
+        /// Section 14.1). Plain JSON body, not gzip. Null fields of <paramref name="settings"/> are left
+        /// out of the body. Requires Config.ApiKey. Always calls onComplete exactly once: with the
+        /// server's echoed settings on success, or null on any failure (every failure path is logged
+        /// first). Callers decide when to call this — see UserSettingsSync.cs.
+        /// </summary>
+        public static void UpdateUserSettings(UserSettingsData settings, Action<UserSettingsData> onComplete)
+        {
+            if (string.IsNullOrEmpty(Config.ApiKey))
+            {
+                MelonLogger.Log("[ExScoring] UpdateUserSettings: no API key set, aborting.");
+                onComplete?.Invoke(null);
+                return;
+            }
+
+            if (settings == null)
+            {
+                MelonLogger.Log("[ExScoring] UpdateUserSettings: nothing to send, aborting.");
+                onComplete?.Invoke(null);
+                return;
+            }
+
+            try
+            {
+                string json = JsonConvert.SerializeObject(settings, new JsonSerializerSettings
+                {
+                    NullValueHandling = NullValueHandling.Ignore
+                });
+                MelonLogger.Log($"[ExScoring] UpdateUserSettings: starting, body={json}");
+                MelonCoroutines.Start(UpdateUserSettingsCoroutine(Encoding.UTF8.GetBytes(json), onComplete));
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Log($"[ExScoring] UpdateUserSettings: failed to build request: {ex}");
+                onComplete?.Invoke(null);
+            }
+        }
+
+        private static IEnumerator UpdateUserSettingsCoroutine(byte[] body, Action<UserSettingsData> onComplete)
+        {
+            string url = $"{ApiBaseUrl}/api/users/me/settings";
+
+            UnityWebRequest request = new UnityWebRequest(url, "PATCH");
+            try
+            {
+                request.uploadHandler = new UploadHandlerRaw(body);
+                request.downloadHandler = new DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type", "application/json");
+                request.SetRequestHeader("Authorization", "ApiKey " + Config.ApiKey);
+
+                yield return request.SendWebRequest();
+
+                if (request.isNetworkError || request.isHttpError)
+                {
+                    string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
+                    MelonLogger.Log($"[ExScoring] UpdateUserSettings failed ({request.responseCode}): {request.error} | Body: {errorBody}");
+                    onComplete?.Invoke(null);
+                    yield break;
+                }
+
+                try
+                {
+                    UserSettingsData response = JsonConvert.DeserializeObject<UserSettingsData>(request.downloadHandler.text);
+                    MelonLogger.Log($"[ExScoring] UpdateUserSettings succeeded: {request.downloadHandler.text}");
+                    onComplete?.Invoke(response);
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Log($"[ExScoring] UpdateUserSettings: failed to parse response ({request.downloadHandler.text}): {ex}");
+                    onComplete?.Invoke(null);
+                }
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
     }
 }

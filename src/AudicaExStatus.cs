@@ -65,6 +65,9 @@ namespace ExScoringMod
                     case ProfileFetchStatus.Success:
                         text.text = $"Connected to AudicaEX.org as {result.response.nickname}";
                         ApiKeyHelpButtons.SetVisible(false);
+                        // Key is confirmed valid: push any settings the server doesn't have yet
+                        // (ApiContract.md Section 14 — only sends if they actually differ).
+                        UserSettingsSync.SyncFromProfile(result.response);
                         break;
                     case ProfileFetchStatus.InvalidKey:
                         text.text = InvalidKeyText;
