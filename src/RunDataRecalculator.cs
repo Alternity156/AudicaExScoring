@@ -39,6 +39,13 @@ namespace ExScoringMod
             /// GetAimJudgementString, GetMiscString) and later to the timing/aim graphs.
             /// </summary>
             public List<ExCue> exCues;
+
+            /// <summary>
+            /// The run owner's gun colors, only set for runs fetched from the API (leaderboard stats);
+            /// null for local runs and for owners who have never sent colors. See
+            /// ChainArrow.GetStatsHandColor.
+            /// </summary>
+            public GunColorsData gunColors;
         }
 
         // ------------------------------------------------------------------------------------
@@ -701,6 +708,7 @@ namespace ExScoringMod
             {
                 songId = response.songId,
                 difficulty = response.difficulty,
+                gunColors = response.gunColors,
                 unixTimestamp = response.unixTimestamp,
                 sourceFileName = null, // sourced from the API, not a local file
                 judgementScore = response.judgementScore,

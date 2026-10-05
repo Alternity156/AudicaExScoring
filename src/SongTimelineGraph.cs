@@ -342,7 +342,7 @@ namespace ExScoringMod
                 float y = (cue.timingMs / rangeMs) * SongTimelineHalfHeight;
                 y = Mathf.Clamp(y, -SongTimelineHalfHeight, SongTimelineHalfHeight);
 
-                Color color = ChainArrow.GetHandColor(cue.handType);
+                Color color = ChainArrow.GetStatsHandColor(cue.handType);
                 CreateTimingDot(songTimelineGraphObject.transform, new Vector3(x, y, 0f), color, cue.behavior);
             }
 
@@ -358,7 +358,7 @@ namespace ExScoringMod
                 if (cue.behavior != Target.TargetBehavior.Melee) continue;
 
                 float x = TickToX(cue.tick, minTick, maxTick);
-                Color color = ChainArrow.GetHandColor(cue.handType);
+                Color color = ChainArrow.GetStatsHandColor(cue.handType);
                 if (cue.miss)
                 {
                     color = new Color(color.r * 0.45f, color.g * 0.45f, color.b * 0.45f, color.a);

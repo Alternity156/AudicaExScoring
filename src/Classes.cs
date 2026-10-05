@@ -307,6 +307,12 @@ namespace ExScoringMod
             public string platform;
             public RunSubmitGrade grade;
             public ExCueSaveData[] exCues;
+
+            /// <summary>
+            /// The run owner's current gun colors (ApiContract.md Sections 6 / 14), or null if their
+            /// game has never sent any. Used to color the leaderboard stats graphs as that player.
+            /// </summary>
+            public GunColorsData gunColors;
         }
 
         /// <summary>

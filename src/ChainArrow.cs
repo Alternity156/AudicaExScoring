@@ -108,6 +108,48 @@ namespace ExScoringMod
             }
         }
 
+        // Set only while a stats panel is being built for someone else's run (leaderboard stats),
+        // so its graphs use that player's gun colors instead of ours. See GameplayStatsPanel.cs.
+        private static Color? statsLeftColorOverride;
+        private static Color? statsRightColorOverride;
+
+        /// <summary>
+        /// Overrides the left/right colors returned by GetStatsHandColor from "#RRGGBB" strings
+        /// (ApiContract.md Section 14). Each hand is overridden independently; a null or unparsable
+        /// value leaves that hand on the local color. Always pair with ClearStatsHandColorOverride.
+        /// </summary>
+        public static void SetStatsHandColorOverride(ExScoring.GunColorsData gunColors)
+        {
+            statsLeftColorOverride = null;
+            statsRightColorOverride = null;
+            if (gunColors == null) return;
+
+            Color parsed;
+            if (!string.IsNullOrEmpty(gunColors.left) && ColorUtility.TryParseHtmlString(gunColors.left, out parsed))
+                statsLeftColorOverride = parsed;
+            if (!string.IsNullOrEmpty(gunColors.right) && ColorUtility.TryParseHtmlString(gunColors.right, out parsed))
+                statsRightColorOverride = parsed;
+        }
+
+        public static void ClearStatsHandColorOverride()
+        {
+            statsLeftColorOverride = null;
+            statsRightColorOverride = null;
+        }
+
+        /// <summary>
+        /// Hand color for the stats graphs (Timing / Aim / Song Timeline). Same as GetHandColor unless
+        /// an override is active for that hand. Either-hand and other targets are never overridden.
+        /// </summary>
+        public static Color GetStatsHandColor(Target.TargetHandType hand)
+        {
+            if (hand == Target.TargetHandType.Left && statsLeftColorOverride.HasValue)
+                return statsLeftColorOverride.Value;
+            if (hand == Target.TargetHandType.Right && statsRightColorOverride.HasValue)
+                return statsRightColorOverride.Value;
+            return GetHandColor(hand);
+        }
+
         public static Color GetChainHandColor(Target.TargetHandType hand)
         {
             Color c = GetHandColor(hand);

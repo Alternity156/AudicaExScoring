@@ -384,7 +384,7 @@ namespace ExScoringMod
                     dotLocalPos = new Vector3(localX * scale, localY * scale, 0f);
                 }
 
-                Color dotColor = ChainArrow.GetHandColor(cue.handType);
+                Color dotColor = ChainArrow.GetStatsHandColor(cue.handType);
                 if (cue.miss)
                 {
                     dotColor = new Color(dotColor.r * 0.45f, dotColor.g * 0.45f, dotColor.b * 0.45f, dotColor.a);

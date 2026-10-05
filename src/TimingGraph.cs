@@ -252,8 +252,8 @@ namespace ExScoringMod
                 if (leftCounts[i] > leftMaxCount) leftMaxCount = leftCounts[i];
             }
 
-            Color rightColor = ChainArrow.GetHandColor(Target.TargetHandType.Right);
-            Color leftColor = ChainArrow.GetHandColor(Target.TargetHandType.Left);
+            Color rightColor = ChainArrow.GetStatsHandColor(Target.TargetHandType.Right);
+            Color leftColor = ChainArrow.GetStatsHandColor(Target.TargetHandType.Left);
 
             CreateHistogramStrip(timingGraphObject.transform, "RightHandSpikes", rightCounts, rightMaxCount, rightColor, flipDown: false);
             CreateHistogramStrip(timingGraphObject.transform, "LeftHandSpikes", leftCounts, leftMaxCount, leftColor, flipDown: true);

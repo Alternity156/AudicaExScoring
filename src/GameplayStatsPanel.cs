@@ -71,7 +71,18 @@ namespace ExScoringMod
                 $"{run.songId} ({run.difficulty})");
             if (panel == null) return;
 
-            BuildGameplayStatsContent(LeaderboardStatsContext, panel, run.exCues, run.judgementPercent, run.failed);
+            // Someone else's run: draw the graphs in that player's gun colors (falls back to ours
+            // per hand if they have none). Building is synchronous, so the override is scoped to
+            // exactly this call and never leaks into History / Results / gameplay.
+            ChainArrow.SetStatsHandColorOverride(run.gunColors);
+            try
+            {
+                BuildGameplayStatsContent(LeaderboardStatsContext, panel, run.exCues, run.judgementPercent, run.failed);
+            }
+            finally
+            {
+                ChainArrow.ClearStatsHandColorOverride();
+            }
         }
 
         /// <summary>
