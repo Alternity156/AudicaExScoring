@@ -26,7 +26,8 @@ namespace ExScoringMod
                 )
             {
                 ResetExScore();
-                exTypePurple = true;
+                exTypePurple = false;
+                exTypePurpleLastFrame = false;
             }
         }
 
@@ -100,7 +101,8 @@ namespace ExScoringMod
                 {
                     currentRunId = System.Guid.NewGuid().ToString();
                     TrippyMenu.ResetOnSongStart();
-                    exTypePurple = true;
+                    exTypePurple = false;
+                    exTypePurpleLastFrame = false;
                 }
 
                 menuState = state;
@@ -549,12 +551,20 @@ namespace ExScoringMod
         })]
         public static class ScoreKeeperOnFailurePatch
         {
+            public static void Prefix()
+            {
+                // Mutes native's streak-lost sounds in ExType (see KataUtilPlayFMODEventStreakBlockPatch).
+                if (ExStreakOverridesActive()) exBlockStreakSounds = true;
+            }
+
             public static void Postfix(
                 SongCues.Cue cue,
                 bool pass,
                 bool failedDodge
                 )
             {
+                exBlockStreakSounds = false;
+
                 if (cue == null) return;
 
                 if (!processedCuesIndexes.Contains(cue.index))
@@ -614,32 +624,223 @@ namespace ExScoringMod
         }
 
         // ══════════════════════════════════════════════════════════════════
+        //  ExType streak sound / shockwave suppression
+        // ══════════════════════════════════════════════════════════════════
+
+        /// <summary>True while native ScoreKeeper.IncreaseStreak / OnFailure is running in ExType.</summary>
+        public static bool exBlockStreakSounds = false;
+
+        /// <summary>exTypePurple as seen on the previous ShaderGlobals.UpdateGameState call.</summary>
+        public static bool exTypePurpleLastFrame = false;
+
+        private static bool ExStreakOverridesActive()
+        {
+            return Config.ExType && menuState == MenuState.State.Launched && !launchedOutsideSongFlow;
+        }
+
+        /// <summary>
+        /// Native IncreaseStreak plays the streak-start sound (streak 10+) and fires the
+        /// "go" trigger on the StreakShockWave animator on every multiplier increase. In ExType both are suppressed:
+        /// the sound via exBlockStreakSounds, the trigger by showing native a multiplier of 4 for
+        /// the duration of the call (it only increments/triggers below 4). The real multiplier is
+        /// then restored and advanced exactly as native would have.
+        /// </summary>
+        [HarmonyPatch(typeof(ScoreKeeper), "IncreaseStreak")]
+        public static class ScoreKeeperIncreaseStreakPatch
+        {
+            private static bool active = false;
+            private static int savedStreak;
+            private static int savedMultiplier;
+
+            public static void Prefix(ScoreKeeper __instance)
+            {
+                active = ExStreakOverridesActive();
+                if (!active) return;
+
+                exBlockStreakSounds = true;
+                savedStreak = __instance.mStreak;
+                savedMultiplier = __instance.mMultiplier;
+                __instance.mMultiplier = 4;
+            }
+
+            public static void Postfix(ScoreKeeper __instance)
+            {
+                if (!active) return;
+                active = false;
+                exBlockStreakSounds = false;
+
+                int multiplier = savedMultiplier;
+                int streak = __instance.mStreak;
+
+                // Native: streak++, then every 10th streak bumps the multiplier (max 4).
+                if (streak == savedStreak + 1 && streak % 10 == 0 && multiplier < 4)
+                {
+                    multiplier++;
+                }
+
+                __instance.mMultiplier = multiplier;
+            }
+        }
+
+        /// <summary>
+        /// Skips FMOD events fired from inside native IncreaseStreak / OnFailure while ExType is
+        /// active (streak-start and streak-lost sounds). Events fired after the song has just been
+        /// failed (hardcore full-combo fail sound) are let through.
+        /// </summary>
+        [HarmonyPatch(typeof(KataUtil), "PlayFMODEvent", new Type[]
+        {
+            typeof(string),
+            typeof(Hmx.Audio.UAudioEmitterCom)
+        })]
+        public static class KataUtilPlayFMODEventStreakBlockPatch
+        {
+            public static bool Prefix()
+            {
+                if (!exBlockStreakSounds) return true;
+
+                ScoreKeeper scoreKeeper = ScoreKeeper.I;
+                if (scoreKeeper != null && scoreKeeper.mFailed) return true;
+
+                return false;
+            }
+        }
+
+        // ══════════════════════════════════════════════════════════════════
         //  ExType purple stage visual
         // ══════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// mGameStateCurrent drives the stage's "peak"/purple visual (2 = purple, 0 = normal).
-        /// The game recalculates it every frame from the real multiplier/overdrive state, so we
-        /// override it here, after that calculation, to decouple the purple visual from the
-        /// real multiplier while ExType is active, and to allow a separate menu-only toggle.
+        /// mGameStateCurrent drives the stage visual. Native UpdateGameState picks a target each
+        /// frame from ScoreKeeper, eases mGameStateCurrent toward it (deltaTime per frame rising,
+        /// 4x that falling) and pushes it to the shaders:
+        ///   -1 failed | 0..-1 low health (red) | 0 normal | 1 streak 2-9 | 2 streak 10+ |
+        ///   3 effective multiplier == 4 (x4).
+        ///
+        /// While ExType is active in a song we compute our own target instead:
+        ///   low health (if enabled)      -> -(health-scaled red) * ExLowHealthIntensity
+        ///   hit state (if streak enabled) -> 3 * ExStreakIntensity
+        ///   otherwise                     -> 0
+        /// and ease toward it at native's rates. Native can only target whole states, so to make
+        /// it show a fractional value the Prefix tells it the multiplier is 4 (target 3, rising)
+        /// and hands it "our value minus one rise step"; native's own single step then lands on
+        /// our value and native pushes that to the shaders. The Postfix restores the real
+        /// ScoreKeeper values and measures native's actual step to keep the estimate exact.
+        /// A failed song is left entirely to native. Outside a song, the Postfix keeps the
+        /// separate menu-only purple toggle.
         /// </summary>
         [HarmonyPatch(typeof(ShaderGlobals), "UpdateGameState")]
         public static class ShaderGlobalsUpdateGameStatePatch
         {
+            private static bool driving = false;
+            private static int savedMultiplier;
+            private static bool savedOverdriveActive;
+
+            /// <summary>The value we want on screen this frame.</summary>
+            private static float exState = 0f;
+            /// <summary>The mGameStateCurrent value handed to native this frame.</summary>
+            private static float preNative = 0f;
+            /// <summary>Native's rise step divided by Time.deltaTime (measured, normally 1).</summary>
+            private static float stepRatio = 1f;
+
+            public static void Prefix(ShaderGlobals __instance)
+            {
+                driving = false;
+
+                // Safety net: if native threw inside IncreaseStreak/OnFailure, their Postfix never
+                // cleared this, which would mute every FMOD event from then on.
+                exBlockStreakSounds = false;
+
+                // Calibration etc. — leave native's own calculation alone.
+                if (launchedOutsideSongFlow || menuState != MenuState.State.Launched || !Config.ExType)
+                {
+                    exTypePurpleLastFrame = exTypePurple;
+                    return;
+                }
+
+                ScoreKeeper scoreKeeper = ScoreKeeper.I;
+                if (scoreKeeper == null) return;
+
+                // Miss/start state -> hit state: play the multiplier shockwave ourselves (native's
+                // own trigger is suppressed in ScoreKeeperIncreaseStreakPatch).
+                if (exTypePurple && !exTypePurpleLastFrame && Config.ExShockwave)
+                {
+                    Animator shockwave = scoreKeeper.multiplierIncreaseEffect;
+                    if (shockwave != null) shockwave.SetTrigger("go");
+                }
+                exTypePurpleLastFrame = exTypePurple;
+
+                // Failed song: native targets -1 regardless of streak/multiplier; leave it alone.
+                if (scoreKeeper.mFailed) return;
+
+                // Same conditions native uses for the red visual. Red wins over the hit state.
+                bool songOver = SongEnd.I == null || SongEnd.I.mSongOver;
+                bool lowHealth = Config.ExLowHealthVisual
+                    && !songOver
+                    && KataConfig.I != null
+                    && KataConfig.I.AllowFailure()
+                    && scoreKeeper.mHealth < 0.5f;
+
+                float target;
+                if (lowHealth)
+                {
+                    float red = Mathf.Clamp01(Mathf.InverseLerp(0.5f, 0f, scoreKeeper.mHealth));
+                    target = -red * Mathf.Clamp01(Config.ExLowHealthIntensity);
+                }
+                else if (exTypePurple && Config.ExStreakVisual)
+                {
+                    target = 3f * Mathf.Clamp01(Config.ExStreakIntensity);
+                }
+                else
+                {
+                    target = 0f;
+                }
+
+                float deltaTime = Time.deltaTime;
+                float current = __instance.mGameStateCurrent;
+                float step = deltaTime * stepRatio;
+                exState = Mathf.MoveTowards(current, target, current < target ? step : step * 4f);
+
+                savedMultiplier = scoreKeeper.mMultiplier;
+                savedOverdriveActive = scoreKeeper.mOverdriveActive;
+                scoreKeeper.mMultiplier = 4;
+                scoreKeeper.mOverdriveActive = false;
+
+                preNative = exState - step;
+                __instance.mGameStateCurrent = preNative;
+                driving = true;
+            }
+
             public static void Postfix(ShaderGlobals __instance)
             {
+                if (driving)
+                {
+                    driving = false;
+
+                    ScoreKeeper scoreKeeper = ScoreKeeper.I;
+                    if (scoreKeeper != null)
+                    {
+                        scoreKeeper.mMultiplier = savedMultiplier;
+                        scoreKeeper.mOverdriveActive = savedOverdriveActive;
+                    }
+
+                    // Measure native's real rise step (skip frames where it clamped at 3).
+                    float deltaTime = Time.deltaTime;
+                    float result = __instance.mGameStateCurrent;
+                    if (deltaTime > 0.0001f && result < 2.99f)
+                    {
+                        float ratio = (result - preNative) / deltaTime;
+                        if (ratio > 0.1f && ratio < 10f) stepRatio = ratio;
+                    }
+
+                    __instance.mGameStateCurrent = exState;
+                    return;
+                }
+
                 // Calibration etc. — neither the song-purple nor menu-purple override applies;
                 // leave native's own calculation alone.
                 if (launchedOutsideSongFlow) return;
 
-                if (menuState == MenuState.State.Launched)
-                {
-                    if (Config.ExType)
-                    {
-                        __instance.mGameStateCurrent = exTypePurple ? 2f : 0f;
-                    }
-                }
-                else
+                if (menuState != MenuState.State.Launched)
                 {
                     if (Config.PurpleMenuEnabled)
                     {

@@ -40,6 +40,13 @@ namespace ExScoringMod
         public static bool ParticleKillerKillCPUParticles;
         public static int ParticleKillerParticleCount;
 
+        public static string exVisualsHeader = "[Header]EX Visuals";
+        public static bool ExShockwave;
+        public static bool ExLowHealthVisual;
+        public static bool ExStreakVisual;
+        public static float ExStreakIntensity;
+        public static float ExLowHealthIntensity;
+
         public static string menuHeader = "[Header]Menu";
         public static bool DisableMenuGrab;
         public static bool TrippyMenuEnabled;
@@ -121,6 +128,13 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(ParticleKillerKillCPUParticles), true, "Disables a small puff of particles.");
             MelonPrefs.RegisterInt(Category, nameof(ParticleKillerParticleCount), 0, "Amount of GPU particles per shot. [0,50000,1000,0] {G}");
 
+            MelonPrefs.RegisterString(Category, nameof(exVisualsHeader), "", "[Header]EX Visuals");
+            MelonPrefs.RegisterBool(Category, nameof(ExShockwave), true, "EX mode: plays the shockwave on the first hit after a miss");
+            MelonPrefs.RegisterBool(Category, nameof(ExLowHealthVisual), true, "EX mode: enables the red low health stage visual");
+            MelonPrefs.RegisterBool(Category, nameof(ExStreakVisual), true, "EX mode: enables the streak stage visual on hits");
+            MelonPrefs.RegisterFloat(Category, nameof(ExStreakIntensity), 1.0f, "EX mode: intensity of the streak stage visual [0,1,0.05,1]");
+            MelonPrefs.RegisterFloat(Category, nameof(ExLowHealthIntensity), 1.0f, "EX mode: intensity of the low health stage visual [0,1,0.05,1]");
+
             MelonPrefs.RegisterString(Category, nameof(menuHeader), "", "[Header]Menu");
             MelonPrefs.RegisterBool(Category, nameof(DisableMenuGrab), false, "Disables grabbing the song list scroller in menus");
             MelonPrefs.RegisterBool(Category, nameof(TrippyMenuEnabled), false, "Enables a psychedelic color cycle effect in menus");
@@ -185,6 +199,11 @@ namespace ExScoringMod
             ParticleKillerEnabled = MelonPrefs.GetBool(Category, nameof(ParticleKillerEnabled));
             ParticleKillerKillCPUParticles = MelonPrefs.GetBool(Category, nameof(ParticleKillerKillCPUParticles));
             ParticleKillerParticleCount = MelonPrefs.GetInt(Category, nameof(ParticleKillerParticleCount));
+            ExShockwave = MelonPrefs.GetBool(Category, nameof(ExShockwave));
+            ExLowHealthVisual = MelonPrefs.GetBool(Category, nameof(ExLowHealthVisual));
+            ExStreakVisual = MelonPrefs.GetBool(Category, nameof(ExStreakVisual));
+            ExStreakIntensity = UnityEngine.Mathf.Clamp01(MelonPrefs.GetFloat(Category, nameof(ExStreakIntensity)));
+            ExLowHealthIntensity = UnityEngine.Mathf.Clamp01(MelonPrefs.GetFloat(Category, nameof(ExLowHealthIntensity)));
             DisableMenuGrab = MelonPrefs.GetBool(Category, nameof(DisableMenuGrab));
             TrippyMenuEnabled = MelonPrefs.GetBool(Category, nameof(TrippyMenuEnabled));
             PurpleMenuEnabled = MelonPrefs.GetBool(Category, nameof(PurpleMenuEnabled));
@@ -411,6 +430,45 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(TrippyMenuEnabled), value);
             TrippyMenuEnabled = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateExShockwave(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(ExShockwave), value);
+            ExShockwave = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateExLowHealthVisual(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(ExLowHealthVisual), value);
+            ExLowHealthVisual = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateExStreakVisual(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(ExStreakVisual), value);
+            ExStreakVisual = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateExStreakIntensity(float value)
+        {
+            if (value < 0f) value = 0f;
+            if (value > 1f) value = 1f;
+            MelonPrefs.SetFloat(Category, nameof(ExStreakIntensity), value);
+            ExStreakIntensity = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateExLowHealthIntensity(float value)
+        {
+            if (value < 0f) value = 0f;
+            if (value > 1f) value = 1f;
+            MelonPrefs.SetFloat(Category, nameof(ExLowHealthIntensity), value);
+            ExLowHealthIntensity = value;
             MelonPrefs.SaveConfig();
         }
 

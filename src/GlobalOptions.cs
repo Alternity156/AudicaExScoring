@@ -158,6 +158,11 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetMirrorMode();
                 OptionsMenuFunctions.GetFlipSlotTargets();
                 OptionsMenuFunctions.GetTargetingHapticsStrength();
+                OptionsMenuFunctions.GetExShockwave();
+                OptionsMenuFunctions.GetExLowHealthVisual();
+                OptionsMenuFunctions.GetExStreakVisual();
+                OptionsMenuFunctions.GetExStreakIntensity();
+                OptionsMenuFunctions.GetExLowHealthIntensity();
 
                 var gameplayHeader = OptionsMenuClone.CreateHeader(0, "Gameplay");
                 OptionsMenuClone.AddRow(gameplayHeader);
@@ -252,6 +257,39 @@ namespace ExScoringMod
                     0f, 100f, 25f, 0f,
                     v => v.ToString("N0") + "%");
                 OptionsMenuClone.AddRow(hapticsSlider);
+
+                var exVisualsHeader = OptionsMenuClone.CreateHeader(0, "EX Visuals");
+                OptionsMenuClone.AddRow(exVisualsHeader);
+
+                var exShockwaveToggle = OptionsMenuClone.CreateToggle(0, "Shockwave",
+                    () => OptionsMenuFunctions.exShockwave,
+                    v => { OptionsMenuFunctions.exShockwave = v; OptionsMenuFunctions.SetExShockwave(v); },
+                    "EX mode only. Plays the shockwave on the first hit after a miss.");
+                OptionsMenuClone.AddRow(exShockwaveToggle);
+
+                var exStreakVisualToggle = OptionsMenuClone.CreateToggle(0, "Streak Visual",
+                    () => OptionsMenuFunctions.exStreakVisual,
+                    v => { OptionsMenuFunctions.exStreakVisual = v; OptionsMenuFunctions.SetExStreakVisual(v); },
+                    "EX mode only. Switches the stage to the streak look while you are hitting targets.");
+                var exStreakIntensitySlider = OptionsMenuClone.CreateSlider(1, "Streak Intensity",
+                    () => OptionsMenuFunctions.exStreakIntensity * 100f,
+                    v => { OptionsMenuFunctions.exStreakIntensity = v / 100f; OptionsMenuFunctions.SetExStreakIntensity(v / 100f); },
+                    0f, 100f, 5f, 100f,
+                    v => v.ToString("N0") + "%",
+                    "EX mode only. 100% is the full x4 look; lower values blend toward the normal stage.");
+                OptionsMenuClone.AddRow(exStreakVisualToggle, exStreakIntensitySlider);
+
+                var exLowHealthVisualToggle = OptionsMenuClone.CreateToggle(0, "Low Health Visual",
+                    () => OptionsMenuFunctions.exLowHealthVisual,
+                    v => { OptionsMenuFunctions.exLowHealthVisual = v; OptionsMenuFunctions.SetExLowHealthVisual(v); },
+                    "EX mode only. Turns the stage red when health drops below half.");
+                var exLowHealthIntensitySlider = OptionsMenuClone.CreateSlider(1, "Low Health Intensity",
+                    () => OptionsMenuFunctions.exLowHealthIntensity * 100f,
+                    v => { OptionsMenuFunctions.exLowHealthIntensity = v / 100f; OptionsMenuFunctions.SetExLowHealthIntensity(v / 100f); },
+                    0f, 100f, 5f, 100f,
+                    v => v.ToString("N0") + "%",
+                    "EX mode only. Scales how red the stage gets at low health.");
+                OptionsMenuClone.AddRow(exLowHealthVisualToggle, exLowHealthIntensitySlider);
             }),
 
             new OptionsCategory("opt_customize", "Customize", OptionsMenu.Page.Customization),

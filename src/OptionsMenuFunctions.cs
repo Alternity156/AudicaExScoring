@@ -51,6 +51,11 @@ namespace ExScoringMod
         public static bool trippyMenuEnabled;
         public static float trippyMenuSpeed;
         public static bool purpleMenuEnabled;
+        public static bool exShockwave;
+        public static bool exLowHealthVisual;
+        public static bool exStreakVisual;
+        public static float exStreakIntensity;
+        public static float exLowHealthIntensity;
         public static float scrollSpeedMultiplier;
         public static float arrowScrollRows;
         public static bool arrowJumpToEnds;
@@ -368,6 +373,61 @@ namespace ExScoringMod
         {
             trippyMenuEnabled = value;
             Config.UpdateTrippyMenuEnabled(value);
+        }
+
+        public static void GetExShockwave()
+        {
+            exShockwave = Config.ExShockwave;
+        }
+
+        public static void SetExShockwave(bool value)
+        {
+            exShockwave = value;
+            Config.UpdateExShockwave(value);
+        }
+
+        public static void GetExLowHealthVisual()
+        {
+            exLowHealthVisual = Config.ExLowHealthVisual;
+        }
+
+        public static void SetExLowHealthVisual(bool value)
+        {
+            exLowHealthVisual = value;
+            Config.UpdateExLowHealthVisual(value);
+        }
+
+        public static void GetExStreakVisual()
+        {
+            exStreakVisual = Config.ExStreakVisual;
+        }
+
+        public static void SetExStreakVisual(bool value)
+        {
+            exStreakVisual = value;
+            Config.UpdateExStreakVisual(value);
+        }
+
+        public static void GetExStreakIntensity()
+        {
+            exStreakIntensity = Config.ExStreakIntensity;
+        }
+
+        public static void SetExStreakIntensity(float value)
+        {
+            exStreakIntensity = value;
+            Config.UpdateExStreakIntensity(value);
+        }
+
+        public static void GetExLowHealthIntensity()
+        {
+            exLowHealthIntensity = Config.ExLowHealthIntensity;
+        }
+
+        public static void SetExLowHealthIntensity(float value)
+        {
+            exLowHealthIntensity = value;
+            Config.UpdateExLowHealthIntensity(value);
         }
 
         public static void GetPurpleMenuEnabled()
