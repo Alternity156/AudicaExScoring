@@ -490,6 +490,7 @@ namespace ExScoringMod
 
             TrippyMenu.Tick();
             TickGradeVisualAnimation();
+            FolderRowManager.TickSortLabels();
         }
 
         public override void OnLateUpdate()

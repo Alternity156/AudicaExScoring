@@ -94,6 +94,9 @@ namespace ExScoringMod
                 string rowCacheKey = saveData.songId + "|" + saveData.difficulty;
                 exRowScoreCache.Remove(rowCacheKey);
                 exRowScoreEmpty.Remove(rowCacheKey);
+
+                // Same for the High grade / Low grade sort folders (FolderRowManager.cs).
+                FolderRowManager.InvalidateGrade(saveData.songId, saveData.difficulty);
             }
             catch (Exception ex)
             {

@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using MelonLoader;
+using TMPro;
 using UnityEngine;
 
 namespace ExScoringMod
@@ -67,8 +68,11 @@ namespace ExScoringMod
                 default: mode = SortMode.Default; break;
             }
 
+            RequestSortLabelRefresh(); // the game may have just rewritten the sort button's text
+
             if (mode == currentSort) return;
             currentSort = mode;
+            pendingGradeReveal = null;
 
             ResetNav();                          // generated folders only exist at root
             SongFolderManager.openFolder = null; // collapse on mode switch
@@ -345,6 +349,14 @@ namespace ExScoringMod
         {
             if (string.IsNullOrEmpty(songID)) return;
 
+            // Grade folders (EX scoring) aren't known until the background grade load finishes —
+            // remember the song and let that load reveal it once the real view is up.
+            if (level == NavLevel.Root && IsStarSort && UseGradeView && !EnsureGradeCache())
+            {
+                pendingGradeReveal = songID;
+                return;
+            }
+
             // If the song is already in the current view (e.g. shown in the open Song Requests, Favorites,
             // or search folder), keep it there rather than jumping to its home folder. A downloaded request
             // lives in the requests folder AND in Unsorted, and GetFolder would send us to the Unsorted copy.
@@ -414,8 +426,8 @@ namespace ExScoringMod
             {
                 case SortMode.AToZ: return BuildAlphaView(reversed: false);
                 case SortMode.ZToA: return BuildAlphaView(reversed: true);
-                case SortMode.MostStars: return BuildStarsView(reversed: false);
-                case SortMode.LeastStars: return BuildStarsView(reversed: true);
+                case SortMode.MostStars: return UseGradeView ? BuildGradeView(reversed: false) : BuildStarsView(reversed: false);
+                case SortMode.LeastStars: return UseGradeView ? BuildGradeView(reversed: true) : BuildStarsView(reversed: true);
                 case SortMode.MostPlayed: return BuildPlaysView(reversed: false);
                 case SortMode.LeastPlayed: return BuildPlaysView(reversed: true);
                 case SortMode.MostRecent: return BuildRecentView();
@@ -567,7 +579,7 @@ namespace ExScoringMod
                 case SortMode.AToZ:
                 case SortMode.ZToA: return GetAlphaFolderSongs(folder);
                 case SortMode.MostStars:
-                case SortMode.LeastStars: return GetStarFolderSongs(folder);
+                case SortMode.LeastStars: return UseGradeView ? GetGradeFolderSongs(folder) : GetStarFolderSongs(folder);
                 case SortMode.MostPlayed:
                 case SortMode.LeastPlayed: return GetPlayFolderSongs(folder);
                 case SortMode.MostRecent: return GetRecentFolderSongs(folder);
@@ -688,6 +700,12 @@ namespace ExScoringMod
         {
             if (currentSort == SortMode.Default)
                 return SongFolderManager.GetFolder(songID);
+
+            if (IsStarSort && UseGradeView)
+            {
+                if (!EnsureGradeCache()) return null; // grades still loading — no folder known yet
+                return GradeBucketLabel(gradeCache.TryGetValue(GradeKey(songID, CurrentDifficultyName()), out int g) ? g : GradeUnplayed);
+            }
 
             if (currentSort == SortMode.MostStars || currentSort == SortMode.LeastStars)
             {
@@ -893,6 +911,397 @@ namespace ExScoringMod
             foreach (var kv in BuildStarGroups(false))
                 if (kv.Key == folder) return kv.Value;
             return new List<string>();
+        }
+
+        // ── Grade view (EX scoring's version of MostStars / LeastStars) ────────
+        //
+        // Under EX scoring the two "stars" sort buttons become "High grade" / "Low grade": songs are
+        // bucketed by the grade of their best saved EX run ON THE CURRENTLY SELECTED DIFFICULTY (the
+        // same run the song's own row shows), one folder per grade that actually has a song in it,
+        // then "Unplayed". High grade: 4-Star first ... F, then Unplayed. Low grade flips the list.
+        //
+        // Unlike the native star cache this needs run files read from disk, so it's filled by the
+        // background run loader (RunDataRecalculator.cs) and the view shows a single "Loading
+        // grades..." row until every song's grade is known. Entries are keyed by song+difficulty and
+        // kept for the whole session; a saved run drops just its own entry (InvalidateGrade).
+        private const int GradeUnplayed = -1;
+        private const string GradeLoadingLabel = "Loading grades...";
+        private const float GradeLoadTimeoutSeconds = 30f;
+
+        private static readonly Dictionary<string, int> gradeCache = new Dictionary<string, int>(); // songId|difficulty -> (int)Grade, or GradeUnplayed
+        private static bool gradeLoadRunning;
+        private static int gradeLoadPending;
+        private static string pendingGradeReveal; // song to reveal once the grades finish loading
+
+        private static bool IsStarSort => currentSort == SortMode.MostStars || currentSort == SortMode.LeastStars;
+
+        /// <summary>True when the stars sorts should bucket by EX grade instead of Audica stars.</summary>
+        private static bool UseGradeView => Config.ExType;
+
+        private static string GradeKey(string songId, string difficulty) => songId + "|" + difficulty;
+
+        private static string CurrentDifficultyName() => KataConfig.I.GetDifficulty().ToString();
+
+        /// <summary>Forget one song+difficulty's cached grade (a new run was just saved for it).</summary>
+        public static void InvalidateGrade(string songId, string difficulty)
+        {
+            gradeCache.Remove(GradeKey(songId, difficulty));
+        }
+
+        /// <summary>
+        /// True when every visible song has a cached grade for the selected difficulty. Otherwise
+        /// kicks off (or keeps waiting on) the background load and returns false; the load re-applies
+        /// the view by itself when it finishes.
+        /// </summary>
+        private static bool EnsureGradeCache()
+        {
+            if (gradeLoadRunning) return false;
+
+            string difficulty = CurrentDifficultyName();
+            List<string> missing = null;
+
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd == null || sd.hidden) continue;
+                if (gradeCache.ContainsKey(GradeKey(sd.songID, difficulty))) continue;
+
+                if (missing == null) missing = new List<string>();
+                missing.Add(sd.songID);
+            }
+
+            if (missing == null) return true;
+
+            gradeLoadRunning = true;
+            MelonCoroutines.Start(LoadGradesCoroutine(missing, difficulty));
+            return false;
+        }
+
+        private static IEnumerator LoadGradesCoroutine(List<string> songIds, string difficulty)
+        {
+            // The run file index is built on the loader thread; once it exists, songs with no run
+            // files for this difficulty are settled here without queueing anything.
+            yield return ExScoring.WaitForRunFileIndex();
+
+            gradeLoadPending = 0;
+            int queued = 0;
+            for (int i = 0; i < songIds.Count; i++)
+            {
+                string id = songIds[i];
+                if (!ExScoring.HasRunFiles(id, difficulty))
+                {
+                    gradeCache[GradeKey(id, difficulty)] = GradeUnplayed;
+                    continue;
+                }
+
+                gradeLoadPending++;
+                queued++;
+                MelonCoroutines.Start(LoadOneGradeCoroutine(id, difficulty));
+            }
+
+            float deadline = Time.realtimeSinceStartup + GradeLoadTimeoutSeconds;
+            while (gradeLoadPending > 0 && Time.realtimeSinceStartup < deadline)
+                yield return null;
+
+            if (gradeLoadPending > 0)
+            {
+                // Something never reported back. Settle the stragglers as Unplayed so the view can
+                // still be built instead of sitting on the loading row (or reloading forever).
+                MelonLogger.Log($"[FolderRowManager] Grade load timed out with {gradeLoadPending} song(s) pending.");
+                for (int i = 0; i < songIds.Count; i++)
+                {
+                    string key = GradeKey(songIds[i], difficulty);
+                    if (!gradeCache.ContainsKey(key)) gradeCache[key] = GradeUnplayed;
+                }
+                gradeLoadPending = 0;
+            }
+
+            gradeLoadRunning = false;
+            MelonLogger.Log($"[FolderRowManager] Grade cache loaded for {difficulty}: {songIds.Count} song(s) checked, {queued} with runs.");
+
+            string reveal = pendingGradeReveal;
+            pendingGradeReveal = null;
+
+            if (!VirtualSongList.IsActive || level != NavLevel.Root || !IsStarSort || !UseGradeView)
+                yield break; // the player moved on; the cache is warm for next time
+
+            Apply();
+            if (!string.IsNullOrEmpty(reveal))
+                RevealAndSelect(reveal);
+        }
+
+        private static IEnumerator LoadOneGradeCoroutine(string songId, string difficulty)
+        {
+            yield return ExScoring.LoadBestRunSummaryForSong(songId, difficulty, best =>
+            {
+                gradeCache[GradeKey(songId, difficulty)] = best == null
+                    ? GradeUnplayed
+                    : (int)ExScoring.GetGrade(best.judgementPercent, best.failed);
+            });
+
+            gradeLoadPending--;
+        }
+
+        /// <summary>Canonical bucket label for a cached grade. Must match between grouping and lookups.</summary>
+        private static string GradeBucketLabel(int grade) =>
+            grade == GradeUnplayed ? "Unplayed" : ExScoring.GetGradeText((ExScoring.Grade)grade);
+
+        /// <summary>
+        /// Group songs into ordered grade buckets for the selected difficulty. High grade order:
+        /// best grade first, Unplayed last. Reversed flips the whole list. Only grades that have at
+        /// least one song get a bucket. Songs within a bucket are alphabetical by title.
+        /// Assumes EnsureGradeCache() returned true (anything still unknown counts as Unplayed).
+        /// </summary>
+        private static List<KeyValuePair<string, List<string>>> BuildGradeGroups(bool reversed)
+        {
+            string difficulty = CurrentDifficultyName();
+            var byGrade = new Dictionary<int, List<KeyValuePair<string, string>>>(); // grade -> (title, id)
+
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd == null || sd.hidden) continue;
+                string id = sd.songID, title = sd.title ?? "";
+
+                int grade = gradeCache.TryGetValue(GradeKey(id, difficulty), out int g) ? g : GradeUnplayed;
+
+                if (!byGrade.TryGetValue(grade, out var list))
+                {
+                    list = new List<KeyValuePair<string, string>>();
+                    byGrade[grade] = list;
+                }
+                list.Add(new KeyValuePair<string, string>(title, id));
+            }
+
+            // The Grade enum runs best (Quad = 0) to worst (F), so ascending is best-first.
+            var grades = new List<int>(byGrade.Keys);
+            grades.Sort((a, b) =>
+            {
+                if (a == b) return 0;
+                if (a == GradeUnplayed) return 1;
+                if (b == GradeUnplayed) return -1;
+                return a.CompareTo(b);
+            });
+            if (reversed) grades.Reverse();
+
+            var result = new List<KeyValuePair<string, List<string>>>();
+            foreach (int grade in grades)
+            {
+                var entries = byGrade[grade];
+                entries.Sort((a, b) => string.Compare(a.Key, b.Key, StringComparison.OrdinalIgnoreCase));
+
+                var ids = new List<string>(entries.Count);
+                foreach (var kv in entries) ids.Add(kv.Value);
+                result.Add(new KeyValuePair<string, List<string>>(GradeBucketLabel(grade), ids));
+            }
+            return result;
+        }
+
+        /// <summary>Grade-bucket view: a text header per non-empty grade, open bucket's songs inlined.
+        /// A single inert "Loading grades..." row while the grades are still being read.</summary>
+        private static List<ViewRow> BuildGradeView(bool reversed)
+        {
+            var rows = new List<ViewRow>();
+
+            if (!EnsureGradeCache())
+            {
+                rows.Add(ViewRow.ActionRow(GradeLoadingLabel, ViewRow.FolderColor, null));
+                return rows;
+            }
+
+            var groups = BuildGradeGroups(reversed);
+            string open = SongFolderManager.openFolder;
+
+            foreach (var kv in groups)
+            {
+                rows.Add(ViewRow.Header(kv.Key, kv.Value.Count));
+                if (kv.Key == open)
+                    foreach (string id in kv.Value)
+                        rows.Add(ViewRow.SongRow(id));
+            }
+
+            MelonLogger.Log($"[FolderRowManager] BuildGradeView ({(reversed ? "Low" : "High")} grade, {CurrentDifficultyName()}): " +
+                $"{groups.Count} bucket(s), open={open ?? "none"}");
+            return rows;
+        }
+
+        /// <summary>Songs in one grade bucket, in display (alphabetical) order.</summary>
+        private static List<string> GetGradeFolderSongs(string folder)
+        {
+            if (!EnsureGradeCache()) return new List<string>();
+
+            foreach (var kv in BuildGradeGroups(false))
+                if (kv.Key == folder) return kv.Value;
+            return new List<string>();
+        }
+
+        // ── Sort menu labels ("More stars"/"Less stars" <-> "High grade"/"Low grade") ──
+        //
+        // The two stars sort buttons are relabelled while EX scoring is on and put back for Audica
+        // scoring. The labels are SortMenu/Sort_MostStars/Label and Sort_LeastStars/Label, re-applied
+        // for a few frames whenever the menu opens, the sort changes or the scoring type flips, so
+        // the game's own text refresh can't leave the native wording behind.
+        private const string SortMenuPath = "menu/ShellPage_Song/page/ShellPanel_Center/SongSelect/SortMenu";
+        private const string SortButtonPath = "menu/ShellPage_Song/page/ShellPanel_Center/SongSelect/SortButton";
+
+        private const string MostStarsLabelPath = "Sort_MostStars/Label";
+        private const string LeastStarsLabelPath = "Sort_LeastStars/Label";
+        private const string HighGradeText = "High grade";
+        private const string LowGradeText = "Low grade";
+
+        private static TMP_Text mostStarsLabel;
+        private static TMP_Text leastStarsLabel;
+        private static string mostStarsOriginal;  // the game's own (localized) wording, captured before we overwrite it
+        private static string leastStarsOriginal;
+
+        private static GameObject sortMenuObj;
+        private static GameObject sortButtonObj;
+        private static List<TMP_Text> sortLabelTexts;
+        private static bool sortMenuWasActive;
+        private static bool sortLabelLastEx;
+        private static int sortLabelPassFrames;
+        private static int sortLabelNextFindFrame;
+
+        /// <summary>Ask for the sort labels to be re-checked over the next few frames.</summary>
+        public static void RequestSortLabelRefresh()
+        {
+            sortLabelPassFrames = 5;
+        }
+
+        /// <summary>Per-frame (Main.OnUpdate). Does nothing but two bool checks unless a refresh is due.</summary>
+        public static void TickSortLabels()
+        {
+            if (sortMenuObj == null)
+            {
+                // Only go looking while the song list is up, and not every frame.
+                if (!VirtualSongList.IsActive) return;
+                if (Time.frameCount < sortLabelNextFindFrame) return;
+                sortLabelNextFindFrame = Time.frameCount + 60;
+
+                sortMenuObj = GameObject.Find(SortMenuPath);
+                sortButtonObj = GameObject.Find(SortButtonPath);
+                sortLabelTexts = null;
+                if (sortMenuObj == null) return;
+
+                sortMenuWasActive = !sortMenuObj.activeInHierarchy; // force a first pass
+            }
+
+            bool menuActive = sortMenuObj.activeInHierarchy;
+            if (menuActive != sortMenuWasActive || Config.ExType != sortLabelLastEx)
+            {
+                sortMenuWasActive = menuActive;
+                sortLabelLastEx = Config.ExType;
+                sortLabelTexts = null; // rescan: cheap, and picks up anything created since
+                sortLabelPassFrames = 5;
+            }
+
+            if (sortLabelPassFrames <= 0) return;
+            sortLabelPassFrames--;
+
+            ApplySortLabels();
+        }
+
+        private static void ApplySortLabels()
+        {
+            try
+            {
+                if (sortLabelTexts == null)
+                {
+                    mostStarsLabel = FindSortLabel(MostStarsLabelPath);
+                    leastStarsLabel = FindSortLabel(LeastStarsLabelPath);
+
+                    // The sort button itself may echo the current sort's name.
+                    sortLabelTexts = new List<TMP_Text>();
+                    if (sortButtonObj != null)
+                    {
+                        var found = sortButtonObj.GetComponentsInChildren<TMP_Text>(true);
+                        if (found != null)
+                            for (int i = 0; i < found.Length; i++)
+                                if (found[i] != null) sortLabelTexts.Add(found[i]);
+                    }
+                }
+
+                bool ex = Config.ExType;
+                ApplySortLabel(mostStarsLabel, ref mostStarsOriginal, HighGradeText, ex);
+                ApplySortLabel(leastStarsLabel, ref leastStarsOriginal, LowGradeText, ex);
+
+                for (int i = 0; i < sortLabelTexts.Count; i++)
+                {
+                    TMP_Text text = sortLabelTexts[i];
+                    if (text == null) continue;
+
+                    string current = text.text;
+                    string wanted = SwapSortWording(current, mostStarsOriginal, HighGradeText, ex);
+                    wanted = SwapSortWording(wanted, leastStarsOriginal, LowGradeText, ex);
+                    if (wanted != current) text.text = wanted;
+                }
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Log($"[FolderRowManager] Sort label update failed: {ex.Message}");
+                sortLabelTexts = null;
+            }
+        }
+
+        /// <summary>The text component of one sort button's Label child (path relative to SortMenu).</summary>
+        private static TMP_Text FindSortLabel(string relativePath)
+        {
+            Transform label = sortMenuObj.transform.Find(relativePath);
+            if (label == null)
+            {
+                MelonLogger.Log($"[FolderRowManager] Sort label not found: {relativePath}");
+                return null;
+            }
+
+            TMP_Text text = label.GetComponent<TMP_Text>();
+            if (text == null) text = label.gameObject.GetComponentInChildren<TMP_Text>(true);
+            if (text == null) MelonLogger.Log($"[FolderRowManager] No text component on sort label: {relativePath}");
+            return text;
+        }
+
+        /// <summary>Shows the grade wording under EX scoring and the game's own wording otherwise.
+        /// Whatever the game last wrote there is remembered so it can be put back.</summary>
+        private static void ApplySortLabel(TMP_Text label, ref string original, string gradeText, bool ex)
+        {
+            if (label == null) return;
+
+            string current = label.text ?? "";
+            bool showingGrade = string.Equals(current, gradeText, StringComparison.OrdinalIgnoreCase);
+
+            if (!showingGrade && current.Length > 0)
+                original = current; // native text (first time, or the game just rewrote it)
+
+            if (ex)
+            {
+                string wanted = MatchCase(gradeText, original);
+                if (current != wanted) label.text = wanted;
+            }
+            else if (showingGrade && !string.IsNullOrEmpty(original))
+            {
+                label.text = original;
+            }
+        }
+
+        /// <summary>Upper-cases the grade wording when the game's own label is all upper case.</summary>
+        private static string MatchCase(string gradeText, string original)
+        {
+            if (string.IsNullOrEmpty(original)) return gradeText;
+            return original == original.ToUpperInvariant() && original != original.ToLowerInvariant()
+                ? gradeText.ToUpperInvariant()
+                : gradeText;
+        }
+
+        /// <summary>Swaps the game's wording for the grade wording (or back) where it appears inside a longer label.</summary>
+        private static string SwapSortWording(string text, string original, string gradeText, bool toGrade)
+        {
+            if (string.IsNullOrEmpty(text) || string.IsNullOrEmpty(original)) return text;
+
+            string from = toGrade ? original : gradeText;
+            string to = toGrade ? MatchCase(gradeText, original) : original;
+
+            int at = text.IndexOf(from, StringComparison.OrdinalIgnoreCase);
+            if (at < 0) return text;
+            return text.Substring(0, at) + to + text.Substring(at + from.Length);
         }
 
         // ── Play-count view (MostPlayed / LeastPlayed) ─────────────────────────

@@ -159,6 +159,42 @@ namespace ExScoringMod
             return files;
         }
 
+        /// <summary>
+        /// Waits until the run file index exists, building it on the background loader thread if
+        /// nothing has asked for a song's runs yet (an empty lookup is enough to trigger the build).
+        /// After this, HasRunFiles answers from memory.
+        /// </summary>
+        public static IEnumerator WaitForRunFileIndex()
+        {
+            bool built;
+            lock (runFileIndexLock)
+            {
+                built = runFileIndex != null;
+            }
+            if (built) yield break;
+
+            RunLoadJob job = EnqueueRunLoad("", "", true);
+            while (!job.done) yield return null;
+
+            LogRunLoadErrors(job);
+        }
+
+        /// <summary>
+        /// Whether any saved run file is indexed for this song+difficulty. Main-thread safe: a
+        /// dictionary lookup only, never a folder listing. Returns true when the index hasn't been
+        /// built yet (unknown — let the loader find out); see WaitForRunFileIndex.
+        /// </summary>
+        public static bool HasRunFiles(string songId, string difficulty)
+        {
+            string key = RunFileIndexKey(SanitizeFileName(songId), SanitizeFileName(difficulty));
+
+            lock (runFileIndexLock)
+            {
+                if (runFileIndex == null) return true;
+                return runFileIndex.TryGetValue(key, out List<string> list) && list.Count > 0;
+            }
+        }
+
         /// <summary>Decompresses and deserializes a single saved run file. Pure managed code —
         /// safe on the background loader thread.</summary>
         private static ScoreSaveData LoadRunData(string fileName)

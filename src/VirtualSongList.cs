@@ -258,23 +258,32 @@ namespace ExScoringMod
         {
             if (rowBindings.Count == 0) return;
 
-            // Snapshot first — we mutate rowBindings (remove/re-add) as we go, which a live
-            // dictionary enumerator won't tolerate.
+            // Snapshot first — we mutate rowBindings as we go, which a live dictionary
+            // enumerator won't tolerate.
             tmpBindingSnapshot.Clear();
             foreach (var kv in rowBindings) tmpBindingSnapshot.Add(kv);
 
-            foreach (var kv in tmpBindingSnapshot)
+            // Pass 1: release whatever shifts clean out of the physical array — nothing to carry
+            // it to. Its binding is still present at its old index here, so ReleaseBinding finds it.
+            for (int i = 0; i < tmpBindingSnapshot.Count; i++)
             {
-                int oldIdx = kv.Key;
-                int newIdx = oldIdx + shift;
-
+                int newIdx = tmpBindingSnapshot[i].Key + shift;
                 if (newIdx < 0 || newIdx >= placeholders.Count)
-                {
-                    // Shifted clean out of the physical array — nothing to carry it to. The
-                    // binding is still present at oldIdx here, so this looks it up fine.
-                    ReleaseBinding(oldIdx);
-                    continue;
-                }
+                    ReleaseBinding(tmpBindingSnapshot[i].Key);
+            }
+
+            // Pass 2: move every survivor. The table is emptied first and refilled from the
+            // snapshot, because old and new indices overlap whenever the shift (view.Count) is
+            // smaller than the bound window — e.g. a short, all-header root view. Moving in place
+            // there overwrote bindings that hadn't been moved yet, leaking their pooled items
+            // (still parented, still showing their old text, never released).
+            rowBindings.Clear();
+
+            for (int i = 0; i < tmpBindingSnapshot.Count; i++)
+            {
+                var kv = tmpBindingSnapshot[i];
+                int newIdx = kv.Key + shift;
+                if (newIdx < 0 || newIdx >= placeholders.Count) continue; // released in pass 1
 
                 var go = kv.Value.isHeader ? headerPool[kv.Value.slot].go : songPool[kv.Value.slot].go;
                 if (Alive(go))
@@ -285,9 +294,10 @@ namespace ExScoringMod
                     go.transform.localRotation = Quaternion.identity;
                 }
 
-                rowBindings.Remove(oldIdx);
                 rowBindings[newIdx] = kv.Value;
             }
+
+            tmpBindingSnapshot.Clear();
         }
 
         // ── Placeholders: one cheap empty GO per view row ────────────────────
