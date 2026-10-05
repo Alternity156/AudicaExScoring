@@ -76,6 +76,9 @@ namespace ExScoringMod
             {
                 MelonLogger.Log($"SetState: {menuState} -> {state}");
 
+                if (state == MenuState.State.Launching)
+                    CheckSelectionOnLaunch();
+
                 if (menuState == MenuState.State.SongPage && state != MenuState.State.SongPage)
                     GlobalOptions.ForceTeardown();
 
@@ -136,6 +139,55 @@ namespace ExScoringMod
                 {
                     suppressShellPageAnimations = false;
                 }
+            }
+        }
+
+        // Song ID of an OnSelect whose native original has not (yet) completed. See
+        // PatchSongOnSelect.Prefix — non-null at launch means the last select threw.
+        private static string failedSelectSongID = null;
+
+        /// <summary>
+        /// Runs when the game enters Launching. Logs what the game is about to launch against
+        /// what the mod believes is selected. If the last OnSelect threw (so our Postfix never
+        /// ran), adopt the game's song so scoring/run data aren't recorded against the
+        /// previously selected song. Only re-syncs after a failed select: marathon/playlist
+        /// flows legitimately launch songs that differ from the list selection.
+        /// </summary>
+        private static void CheckSelectionOnLaunch()
+        {
+            try
+            {
+                var holder = SongDataHolder.I;
+                var gameSong = holder != null ? holder.songData : null;
+                string gameSongID = gameSong != null ? gameSong.songID : null;
+
+                MelonLogger.Log("[SelectDiag] Launching: gameSong=" + (gameSongID ?? "NULL") +
+                                ", modSelected=" + (selectedSong ?? "NULL") +
+                                ", failedSelect=" + (failedSelectSongID ?? "none"));
+
+                if (failedSelectSongID == null) return;
+
+                string failed = failedSelectSongID;
+                failedSelectSongID = null;
+
+                if (gameSong != null && gameSongID != selectedSong)
+                {
+                    MelonLogger.Log("[SelectDiag] Launching after a failed select of '" + failed +
+                                    "' — re-syncing mod selection '" + (selectedSong ?? "NULL") +
+                                    "' -> '" + gameSongID + "'.");
+                    selectedSong = gameSongID;
+                    selectedSongData = gameSong;
+                    maxPossibleExScore = GetMaxPossibleExScore(selectedSong);
+                }
+                else
+                {
+                    MelonLogger.Log("[SelectDiag] Launching after a failed select of '" + failed +
+                                    "' — game and mod selection already agree, nothing to re-sync.");
+                }
+            }
+            catch (Exception e)
+            {
+                MelonLogger.Log("[SelectDiag] CheckSelectionOnLaunch failed: " + e);
             }
         }
 
@@ -390,8 +442,46 @@ namespace ExScoringMod
         [HarmonyPatch(typeof(SongSelectItem), "OnSelect")]
         private static class PatchSongOnSelect
         {
+            // Diagnostics for the one-off NullReferenceException thrown by the native
+            // OnSelect (soft lock on launch report). Each value below is something native
+            // OnSelect / SongSelect.OnSongSelected dereferences before reaching SetState,
+            // so the last "[SelectDiag] OnSelect" line before an exception names the culprit.
+            private static void Prefix(SongSelectItem __instance)
+            {
+                try
+                {
+                    var data = __instance.mSongData;
+                    var select = __instance.mSongSelect;
+                    bool selectMissing = select == null;
+                    bool scrollerMissing = selectMissing || select.scroller == null;
+
+                    // Set here, cleared by the Postfix. The Postfix is skipped when the native
+                    // method throws, so a value still set at launch means the select failed.
+                    failedSelectSongID = data != null ? data.songID : null;
+
+                    MelonLogger.Log("[SelectDiag] OnSelect: item=" + __instance.gameObject.name +
+                                    ", song=" + (data != null ? data.songID : "NULL") +
+                                    ", moggSongEmpty=" + (data != null ? string.IsNullOrEmpty(data.moggSong).ToString() : "n/a") +
+                                    ", mSongSelect=" + (selectMissing ? "NULL" : "ok") +
+                                    ", scroller=" + (scrollerMissing ? "NULL" : "ok") +
+                                    ", SongDataHolder.I=" + (SongDataHolder.I == null ? "NULL" : "ok") +
+                                    ", CommunityMaps.I=" + (CommunityMaps.I == null ? "NULL" : "ok") +
+                                    ", inCampaign=" + MenuState.IsInCampaign() +
+                                    ", autoSelecting=" + isAutoSelecting +
+                                    ", modState=" + menuState +
+                                    ", prevSelected=" + (selectedSong ?? "none"));
+                }
+                catch (Exception e)
+                {
+                    MelonLogger.Log("[SelectDiag] OnSelect diagnostics failed: " + e);
+                }
+            }
+
             private static void Postfix(SongSelectItem __instance)
             {
+                // Native OnSelect completed without throwing.
+                failedSelectSongID = null;
+
                 // Folder rows have no song data — ignore them
                 if (__instance.mSongData == null) return;
 
