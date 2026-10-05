@@ -62,6 +62,7 @@ namespace ExScoringMod
         public static bool hideScoreData;
         public static bool firstPlayBlind;
         public static bool wrapSongList;
+        public static bool optionsBackToSongList;
         public static bool practiceModeMinimizeButtonEnabled;
         public static readonly string[] RandomSongScopeOptions = { "Folder Songs", "All Songs" };
         public static int randomSongScope;
@@ -180,6 +181,17 @@ namespace ExScoringMod
             firstPlayBlind = value;
             Config.UpdateFirstPlayBlind(value);
             ExScoring.RefreshScoreDataVisibility();
+        }
+
+        public static void GetOptionsBackToSongList()
+        {
+            optionsBackToSongList = Config.OptionsBackToSongList;
+        }
+
+        public static void SetOptionsBackToSongList(bool value)
+        {
+            optionsBackToSongList = value;
+            Config.UpdateOptionsBackToSongList(value);
         }
 
         public static void GetWrapSongList()

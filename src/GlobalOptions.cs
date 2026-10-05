@@ -411,6 +411,13 @@ namespace ExScoringMod
                     "Loops the list like a wheel: scrolling or dragging past either end wraps around to the other. Disabled by default.");
                 OptionsMenuClone.AddRow(wrapSongListToggle);
 
+                OptionsMenuFunctions.GetOptionsBackToSongList();
+                var optionsBackToSongListToggle = OptionsMenuClone.CreateToggle(0, "Options Back To Song List",
+                    () => OptionsMenuFunctions.optionsBackToSongList,
+                    v => { OptionsMenuFunctions.optionsBackToSongList = v; OptionsMenuFunctions.SetOptionsBackToSongList(v); },
+                    "While in Options, the Back button at the bottom returns to the song list instead of the main menu. Enabled by default.");
+                OptionsMenuClone.AddRow(optionsBackToSongListToggle);
+
                 var hideScoreDataToggle = OptionsMenuClone.CreateToggle(0, "Hide Score Data",
                     () => OptionsMenuFunctions.hideScoreData,
                     v => { OptionsMenuFunctions.hideScoreData = v; OptionsMenuFunctions.SetHideScoreData(v); },

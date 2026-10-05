@@ -375,6 +375,27 @@ namespace ExScoringMod
         {
             public static bool Prefix(GunButton __instance, Vector3 position, Gun gun)
             {
+                // While in the song list's Options level, the song page's bottom Back button
+                // returns to the song list (same as the list's own "Back" row) instead of
+                // going to the main menu. Matched by identity so the buttons cloned from it
+                // (Fast Refresh, Random Song, ...) are unaffected.
+                if (Config.OptionsBackToSongList && FolderRowManager.InGlobalOptions)
+                {
+                    var songBack = GameObject.Find("menu/ShellPage_Song/page/backParent/back");
+                    if (songBack != null)
+                    {
+                        Transform t = __instance.transform;
+                        Transform backT = songBack.transform;
+                        if (t == backT || t.IsChildOf(backT))
+                        {
+                            MelonLogger.Log("[Options] bottom Back shot while in Options -> returning to song list");
+                            FolderRowManager.NavBack();
+                            KataUtil.PlayFMODEvent("event:/shell/button_shatter");
+                            return false;
+                        }
+                    }
+                }
+
                 Transform parent = __instance.transform.parent;
                 if (parent == null) return true;
                 DifficultySelectButton diffButton = parent.GetComponent<DifficultySelectButton>();
