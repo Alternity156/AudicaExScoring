@@ -103,6 +103,7 @@ namespace ExScoringMod
             {
                 authorableInstalled = true;
                 MelonLogger.Log("AuthorableModifiers detected");
+                AuthorableBridge.Init();
             }
 
             // Check if ModSettings is installed

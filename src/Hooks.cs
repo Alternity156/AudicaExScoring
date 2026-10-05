@@ -21,6 +21,14 @@ namespace ExScoringMod
         [HarmonyPatch(typeof(InGameUI), "Restart")]
         public static class InGameUIRestartPatch
         {
+            // AuthorableModifiers is fully reset when a song ends (see AuthorableBridge), so a
+            // restart from the results/failed screen has to reload its modifiers. No-op when
+            // AuthorableModifiers isn't installed or nothing needs reloading.
+            public static void Prefix()
+            {
+                AuthorableBridge.OnInGameRestart();
+            }
+
             public static void Postfix(
                 InGameUI __instance
                 )
@@ -34,12 +42,19 @@ namespace ExScoringMod
         [HarmonyPatch(typeof(LaunchPanel), "Play")]
         public static class PlayPatch
         {
-            public static bool Prefix()
+            public static bool Prefix(LaunchPanel __instance)
             {
                 suppressShellPageAnimations = false;
 
                 // In marathon setup, Play starts the marathon instead of the selected song.
                 if (MarathonSetup.TryStartFromPlay())
+                    return false;
+
+                // With AuthorableModifiers installed, Play is deferred until its modifiers are
+                // loaded for the launching song and any arena switch has finished; the bridge
+                // then calls Play again (which passes straight through here). Always false when
+                // AuthorableModifiers isn't installed.
+                if (AuthorableBridge.InterceptPlay(__instance))
                     return false;
 
                 return true;
@@ -76,6 +91,11 @@ namespace ExScoringMod
                 )
             {
                 MelonLogger.Log($"SetState: {menuState} -> {state}");
+
+                // Clears anything AuthorableModifiers still holds once we're really out of
+                // gameplay / the song page (ExScoring has no launch page, so AM's own
+                // LaunchPanel.Back cleanup never fires). No-op without AuthorableModifiers.
+                AuthorableBridge.OnMenuStateChanged(menuState, state);
 
                 if (state == MenuState.State.Launching)
                     CheckSelectionOnLaunch();

@@ -1,7 +1,6 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
-using System.Reflection;
 using MelonLoader;
 using UnityEngine;
 
@@ -76,14 +75,13 @@ namespace ExScoringMod
             AudioDriver.I.Pause();
             SetNextSong();
             InGameUI.I.Restart();
-            if (ExScoring.authorableInstalled)
+
+            // Load AuthorableModifiers' modifiers for the next song. No-op (Busy stays false)
+            // when AuthorableModifiers isn't installed; the bridge never waits forever.
+            AuthorableBridge.BeginLoadForCurrentSong();
+            while (AuthorableBridge.Busy)
             {
-                modifiersLoaded = false;
-                LoadModifiers(true);
-                while (!modifiersLoaded)
-                {
-                    yield return new WaitForSecondsRealtime(.2f);
-                }
+                yield return new WaitForSecondsRealtime(.2f);
             }
             yield return new WaitForSeconds(2f);
             UpdateVolume(originalVolume);
@@ -121,10 +119,8 @@ namespace ExScoringMod
 
         private static IEnumerator ILaunch()
         {
-            if (ExScoring.authorableInstalled)
-            {
-                SetEndlessActive(true);
-            }
+            // Tells AuthorableModifiers to keep the arena between songs. No-op without it.
+            AuthorableBridge.SetEndless(true);
             MenuState.I.GoToLaunchPage();
             LaunchPanel launchPanel = null;
             while (launchPanel is null)
@@ -132,89 +128,11 @@ namespace ExScoringMod
                 launchPanel = GameObject.FindObjectOfType<LaunchPanel>();
                 yield return new WaitForSecondsRealtime(.5f);
             }
-            if (ExScoring.authorableInstalled)
-            {
-                modifiersLoaded = false;
-                LoadModifiers(false);
-                while (!modifiersLoaded)
-                {
-                    yield return new WaitForSecondsRealtime(.2f);
-                }
-            }
+            // The LaunchPanel.Play prefix hands this to AuthorableBridge, which loads the
+            // modifiers for the song in SongDataHolder and waits for the arena before the real
+            // Play runs. Without AuthorableModifiers it launches immediately.
             launchPanel.Play();
             yield return null;
-        }
-
-        private static Type authorableType = null;
-        private static Type GetAuthorableType()
-        {
-            if (authorableType == null)
-            {
-                foreach (var asm in AppDomain.CurrentDomain.GetAssemblies())
-                {
-                    authorableType = asm.GetType("AuthorableModifiers.AuthorableModifiersMod");
-                    if (authorableType != null) break;
-                }
-            }
-            return authorableType;
-        }
-
-        private static void SetEndlessActive(bool active)
-        {
-            try
-            {
-                var type = GetAuthorableType();
-                if (type == null) return;
-                var method = type.GetMethod("SetEndlessActive", BindingFlags.Public | BindingFlags.Static);
-                method?.Invoke(null, new object[] { active });
-            }
-            catch
-            {
-                MelonLogger.Log("[WARNING] AuthorableModifiers SetEndlessActive failed");
-            }
-        }
-
-        private static bool modifiersLoaded = false;
-        private static void LoadModifiers(bool fromRestart)
-        {
-            MelonCoroutines.Start(ILoadModifiers(fromRestart));
-        }
-
-        private static IEnumerator ILoadModifiers(bool fromRestart)
-        {
-            var type = GetAuthorableType();
-            if (type == null)
-            {
-                modifiersLoaded = true;
-                yield break;
-            }
-
-            try
-            {
-                var pathField = type.GetField("audicaFilePath", BindingFlags.Public | BindingFlags.Static);
-                pathField?.SetValue(null, SongDataHolder.I.songData.foundPath);
-
-                var loadMethod = type.GetMethod("LoadModifierCues", BindingFlags.Public | BindingFlags.Static);
-                loadMethod?.Invoke(null, new object[] { false });
-            }
-            catch
-            {
-                modifiersLoaded = true;
-                yield break;
-            }
-
-            var loadedField = type.GetField("modifiersLoaded", BindingFlags.Public | BindingFlags.Static);
-            if (loadedField == null)
-            {
-                modifiersLoaded = true;
-                yield break;
-            }
-
-            while (!(bool)loadedField.GetValue(null))
-            {
-                yield return new WaitForSecondsRealtime(.2f);
-            }
-            modifiersLoaded = true;
         }
 
         public static void ResetIndex()
