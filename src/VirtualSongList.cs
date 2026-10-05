@@ -998,7 +998,9 @@ namespace ExScoringMod
             foreach (var kv in rowBindings)
             {
                 int contentIdx = ContentIndexFor(kv.Key);
-                if (contentIdx < 0) continue;
+                // Bindings can be stale here (SetView bailed early, or a scene change destroyed
+                // the pooled objects before the next rebuild), so bounds-check against the view.
+                if (contentIdx < 0 || contentIdx >= view.Count) continue;
                 var b = kv.Value;
                 if (b.isHeader) ApplyHeaderIndicator(headerPool[b.slot], view[contentIdx]);
                 else ApplySongIndicator(songPool[b.slot], view[contentIdx]);
@@ -1023,6 +1025,10 @@ namespace ExScoringMod
         /// <summary>Action/header selection highlight — shown when the row's actionId is selected.</summary>
         private static void ApplyHeaderIndicator(HeaderPoolItem hi, ViewRow row)
         {
+            // Pooled GameObject destroyed (e.g. after calibration) — BindRow revives the slot and
+            // re-applies the indicator on the next bind, so just skip it here.
+            if (hi == null || !Alive(hi.go)) return;
+
             bool sel = !string.IsNullOrEmpty(row.actionId) && row.actionId == SelectedActionId;
             Transform existing = hi.go.transform.Find("SelectedIndicator");
 

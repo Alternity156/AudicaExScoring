@@ -164,6 +164,29 @@ namespace ExScoringMod
                 yield break;
             }
 
+            // The setup itself is synchronous and lives in RunSongPageSetup() so it can be
+            // wrapped in try/finally (not possible around the yields above). If any step throws
+            // (e.g. touching a pooled object destroyed by a scene change), the queued flag MUST
+            // still be cleared — otherwise SetStatePatch skips this setup on every later song
+            // page entry for the rest of the session, leaving the launch page inactive and
+            // breaking song selection entirely.
+            try
+            {
+                RunSongPageSetup();
+            }
+            catch (Exception e)
+            {
+                MelonLogger.Log("[ExScoring] SetupSongPageWhenReady: setup failed: " + e);
+            }
+            finally
+            {
+                launchedOutsideSongFlow = false;
+                songPageSetupQueued = false;
+            }
+        }
+
+        private static void RunSongPageSetup()
+        {
             SongListUISetup();
             ShowLaunchPanel();
             LaunchPanelUISetup();
@@ -171,7 +194,15 @@ namespace ExScoringMod
 
             if (GlobalOptions.HasPendingRestore)
             {
-                GlobalOptions.RestoreIfPending();
+                // Isolated so a failed options restore can't skip the rest of the setup below.
+                try
+                {
+                    GlobalOptions.RestoreIfPending();
+                }
+                catch (Exception e)
+                {
+                    MelonLogger.Log("[ExScoring] SetupSongPageWhenReady: RestoreIfPending failed: " + e);
+                }
             }
             else if (!launchedOutsideSongFlow)
             {
