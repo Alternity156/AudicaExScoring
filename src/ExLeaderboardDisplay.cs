@@ -140,6 +140,24 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// Drops native leaderboard results that arrive while EX scoring is on. A native request
+        /// started in Audica mode can still be in flight when the player switches to EX (e.g. via
+        /// the Main page's mode buttons); without this its response would land after the EX rows
+        /// are written and switch the panel back to native's own rows.
+        /// </summary>
+        [HarmonyPatch(typeof(LeaderboardDisplay), "OnDataReceived")]
+        public static class LeaderboardDisplayOnDataReceivedPatch
+        {
+            public static bool Prefix()
+            {
+                if (!Config.ExType) return true;
+
+                MelonLogger.Log("[ExScoring] OnDataReceived: native leaderboard data ignored (ExType is on).");
+                return false;
+            }
+        }
+
+        /// <summary>
         /// Handles the main-menu Total leaderboard request (leaderboardID == AllTimeLeadersID).
         /// Unlike the per-song path above, this never depends on selectedSongData — it always
         /// requests TotalLeaderboardListId's Total leaderboard (ApiContract.md section 4c) via the
@@ -182,6 +200,33 @@ namespace ExScoringMod
                 MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} applying {response.entries?.Length ?? 0} row(s).");
                 PopulateTotalLeaderboardRows(display, response);
             });
+        }
+
+        /// <summary>
+        /// Starts the AudicaEX Total leaderboard fetch for the given panel directly, without going
+        /// through native's ViewTop()/UpdateLeaderboard. Used by ModeButtons.cs when switching from
+        /// Audica to EX on the Main page: ViewTop() there re-shows the native results the panel
+        /// already holds instead of reaching OnlineLeaderboardUpdateLeaderboardPatch, so the EX
+        /// fetch never started. Does the same EX-side prep that patch does before fetching.
+        /// No-op if EX scoring isn't on or the panel is null.
+        /// </summary>
+        public static void RefreshExTotalLeaderboard(LeaderboardDisplay display)
+        {
+            if (display == null)
+            {
+                MelonLogger.Log("[ExScoring] RefreshExTotalLeaderboard: display is NULL, skipping.");
+                return;
+            }
+
+            if (!Config.ExType)
+            {
+                MelonLogger.Log("[ExScoring] RefreshExTotalLeaderboard: ExType is off, skipping.");
+                return;
+            }
+
+            ResetLeaderboardSelection();
+            HideNativeLeaderboardButtons(display);
+            FetchAndPopulateTotalLeaderboard(display);
         }
 
         /// <summary>
@@ -290,6 +335,18 @@ namespace ExScoringMod
         private static void ShowLeaderboardPanelContent(LeaderboardDisplay display)
         {
             if (display == null) return;
+
+            // EX data is always written into rowsStandard, but the panel has four row sets
+            // (standard/friends/total/totalFriends), each under its own parent, and native switches
+            // which one is shown when its own data arrives (e.g. the Main page's Total leaderboard
+            // shows rowsTotal). Without this, EX rows written after native has loaded once land in
+            // a hidden set while the stale native rows stay on screen. Native picks its own set
+            // again the next time its data arrives, so nothing needs undoing when leaving EX.
+            if (display.rowsStandardParent != null) display.rowsStandardParent.SetActive(true);
+            if (display.rowsFriendsParent != null) display.rowsFriendsParent.SetActive(false);
+            if (display.rowsTotalParent != null) display.rowsTotalParent.SetActive(false);
+            if (display.rowsTotalFriendsParent != null) display.rowsTotalFriendsParent.SetActive(false);
+            MelonLogger.Log("[ExScoring][Diag] ShowLeaderboardPanelContent: rowsStandard set shown, other row sets hidden.");
 
             if (display.spinner != null)
             {

@@ -251,6 +251,9 @@ namespace ExScoringMod
             VirtualSongList.InvalidateAllBoundSongs();
             ExScoring.RefreshAllVisibleSongRowScores();
             ExScoring.SyncLeaderboardButtonVisibility();
+
+            // Keep the Main page's Audica Mode / EX Mode buttons in step (no-op if not created yet).
+            ModeButtons.Refresh();
         }
 
         public static void UpdateHideScoreData(bool value)

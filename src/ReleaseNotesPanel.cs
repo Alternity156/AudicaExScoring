@@ -25,6 +25,10 @@ namespace ExScoringMod
         /// <summary>Called every time the Main page is entered. Idempotent: re-applying is harmless.</summary>
         public static void Setup()
         {
+            // Center-panel mode buttons don't depend on anything below, so set them up first -
+            // the early returns further down must not skip them.
+            ModeButtons.Setup();
+
             GameObject left = GameObject.Find("menu/ShellPage_Main/page/ShellPanel_Left");
             if (left == null)
             {

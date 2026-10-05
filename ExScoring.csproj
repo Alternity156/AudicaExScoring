@@ -220,6 +220,7 @@
     <Compile Include="src\LaunchPanelVisibility.cs" />
     <Compile Include="src\LeaderboardStatsButton.cs" />
     <Compile Include="src\MarathonSetup.cs" />
+    <Compile Include="src\ModeButtons.cs" />
     <Compile Include="src\ModifiersPage.cs" />
     <Compile Include="src\ModSettingsBlocker.cs" />
     <Compile Include="src\OptionsMenuClone.cs" />
