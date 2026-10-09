@@ -31,6 +31,8 @@ namespace ExScoringMod
 
             if (toggle != null) // Unity-null: recreated after a scene change
             {
+                // Stay hidden while the song list is showing the Options menu.
+                toggle.SetActive(!FolderRowManager.InGlobalOptions);
                 EnsureIndicator(); // attach the indicator if the source wasn't available the first time
                 SyncIndicator();
                 return;
@@ -69,10 +71,17 @@ namespace ExScoringMod
             toggle.transform.localPosition = togglePos;
             toggle.transform.localRotation = Quaternion.identity;
             toggle.transform.localScale = toggleScale;
-            toggle.SetActive(true);
+            toggle.SetActive(!FolderRowManager.InGlobalOptions);
 
             EnsureIndicator();
             SyncIndicator();
+        }
+
+        /// <summary>Show/hide the toggle (hidden while the song list is in the Options menu).</summary>
+        public static void SetVisible(bool visible)
+        {
+            if (toggle != null)
+                toggle.SetActive(visible);
         }
 
         private static void OnShot()

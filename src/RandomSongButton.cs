@@ -17,7 +17,8 @@ namespace ExScoringMod
         {
             if (randomSongButton != null)
             {
-                randomSongButton.SetActive(true);
+                // Stay hidden while the song list is showing the Options menu.
+                randomSongButton.SetActive(!FolderRowManager.InGlobalOptions);
 
                 if (enabled)
                     randomSongGB.SetInteractable(true);
@@ -36,11 +37,19 @@ namespace ExScoringMod
                                    randomSongButtonPos, randomSongButtonRot);
 
             randomSongGB = randomSongButton.GetComponentInChildren<GunButton>();
+            randomSongButton.SetActive(!FolderRowManager.InGlobalOptions);
 
             if (enabled)
                 randomSongGB.SetInteractable(true);
             else
                 randomSongGB.SetInteractable(false);
+        }
+
+        /// <summary>Show/hide the button (hidden while the song list is in the Options menu).</summary>
+        public static void SetVisible(bool visible)
+        {
+            if (randomSongButton != null)
+                randomSongButton.SetActive(visible);
         }
 
         private static void OnRandomSongButtonShot()

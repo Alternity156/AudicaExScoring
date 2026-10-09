@@ -92,8 +92,17 @@ namespace ExScoringMod
             GameObject songSelectScrollUpArrowObject = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect/ScrollUpArrow");
             GameObject songSelectScrollDownArrowObject = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect/ScrollDownArrow");
             GameObject songSelectButtonParentObject = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect/ButtonParent");
-            GameObject songSelectSortButtonObject = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect/SortButton");
-            GameObject songSelectSortMenuObject = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect/SortMenu");
+            // Reached through the SongSelect parent: transform.Find also returns inactive children,
+            // and the sort button is hidden while the song list is showing the Options menu.
+            Transform songSelectSortButtonTransform = songSelectObject.transform.Find("SortButton");
+            Transform songSelectSortMenuTransform = songSelectObject.transform.Find("SortMenu");
+            if (songSelectSortButtonTransform == null || songSelectSortMenuTransform == null)
+            {
+                songListUISetup = false; // retry on the next call
+                return;
+            }
+            GameObject songSelectSortButtonObject = songSelectSortButtonTransform.gameObject;
+            GameObject songSelectSortMenuObject = songSelectSortMenuTransform.gameObject;
 
             ShellScrollable songSelectScrollable = songSelectObject.GetComponent<ShellScrollable>();
 

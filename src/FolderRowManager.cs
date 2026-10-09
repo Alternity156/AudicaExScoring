@@ -194,6 +194,7 @@ namespace ExScoringMod
             scrollStack.Push(VirtualSongList.GetScroll());
             scrollWrapStack.Push(Config.WrapSongList);
             level = NavLevel.GlobalOptions;
+            SetSongListControlsVisible(false);
             VirtualSongList.SelectedActionId = null;
             VirtualSongList.SetView(BuildView(), 0f, level == NavLevel.Root);
         }
@@ -219,7 +220,7 @@ namespace ExScoringMod
             PlaylistNav.ClearTransient();
             if (level == NavLevel.PlaylistContents) { level = NavLevel.PlaylistList; currentPlaylist = null; }
             else if (level == NavLevel.PlaylistList) { level = NavLevel.Root; }
-            else if (level == NavLevel.GlobalOptions) { GlobalOptions.HidePanel(); level = NavLevel.Root; }
+            else if (level == NavLevel.GlobalOptions) { GlobalOptions.HidePanel(); level = NavLevel.Root; SetSongListControlsVisible(true); }
             else return;
 
             float restore;
@@ -243,10 +244,83 @@ namespace ExScoringMod
         public static void ResetNav()
         {
             level = NavLevel.Root;
+            SetSongListControlsVisible(true);
             currentPlaylist = null;
             pendingAddStem = null;
             scrollStack.Clear();
             scrollWrapStack.Clear();
+        }
+
+        /// <summary>
+        /// Search field, Take Requests toggle, Random Song button and the game's sort button only
+        /// belong to the song list proper, so they are hidden while the list is showing the
+        /// Options menu.
+        /// </summary>
+        private static void SetSongListControlsVisible(bool visible)
+        {
+            SongSearchField.SetVisible(visible);
+            SongRequestQueueToggle.SetVisible(visible);
+            RandomSongButton.SetVisible(visible);
+            SetSortControlsVisible(visible);
+        }
+
+        private const string SongSelectPath = "menu/ShellPage_Song/page/ShellPanel_Center/SongSelect";
+
+        // Cached so the sort button can be re-shown while it (or the song page) is inactive:
+        // GameObject.Find only sees active objects, transform.Find also reaches inactive children.
+        private static Transform songSelectTransform;
+        private static GameObject optionsSortButton;
+        private static GameObject optionsSortMenu;
+
+        /// <summary>
+        /// Hides the game's sort button (and closes the sort menu if it is open) on entering
+        /// Options; on leaving, re-shows the button only. The game does not re-activate the button
+        /// itself, and the sort menu stays closed until the button is shot again.
+        ///
+        /// The menu is closed through SongSelect.ToggleSortOptions so the game's own
+        /// showingSortOptions flag stays in step with it. Deactivating the SortMenu object alone
+        /// left the flag set, and the sort button then needed two shots to reopen the menu.
+        /// </summary>
+        private static void SetSortControlsVisible(bool visible)
+        {
+            if (optionsSortButton == null || optionsSortMenu == null) // Unity-null: refetch after a scene change
+            {
+                if (songSelectTransform == null)
+                {
+                    GameObject songSelect = GameObject.Find(SongSelectPath);
+                    if (songSelect != null) songSelectTransform = songSelect.transform;
+                }
+
+                if (songSelectTransform != null)
+                {
+                    Transform button = songSelectTransform.Find("SortButton");
+                    if (button != null) optionsSortButton = button.gameObject;
+
+                    Transform menu = songSelectTransform.Find("SortMenu");
+                    if (menu != null) optionsSortMenu = menu.gameObject;
+                }
+            }
+
+            if (optionsSortButton != null && optionsSortButton.activeSelf != visible)
+                optionsSortButton.SetActive(visible);
+
+            if (!visible)
+                CloseSortMenu();
+        }
+
+        private static void CloseSortMenu()
+        {
+            SongSelect songSelect = songSelectTransform != null ? songSelectTransform.GetComponent<SongSelect>() : null;
+
+            if (songSelect != null && songSelect.showingSortOptions)
+                songSelect.ToggleSortOptions();
+
+            // Fallback: if the menu is somehow still up, force it closed and keep the flag in step.
+            if (optionsSortMenu != null && optionsSortMenu.activeSelf)
+            {
+                optionsSortMenu.SetActive(false);
+                if (songSelect != null) songSelect.showingSortOptions = false;
+            }
         }
 
         public static bool InPlaylistNav => level != NavLevel.Root;

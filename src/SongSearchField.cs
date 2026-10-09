@@ -17,7 +17,12 @@ namespace ExScoringMod
 
         public static void CreateField()
         {
-            if (field != null) return; // Unity-null: recreates after a scene change
+            if (field != null) // Unity-null: recreates after a scene change
+            {
+                // Stay hidden while the song list is showing the Options menu.
+                field.SetActive(!FolderRowManager.InGlobalOptions);
+                return;
+            }
 
             OptionsMenu menu = SongSearchScreen.primaryMenu;
             if (menu == null)
@@ -62,9 +67,16 @@ namespace ExScoringMod
             field.transform.localPosition = fieldLocalPos;
             field.transform.localRotation = Quaternion.identity;
             field.transform.localScale = fieldLocalScale;
-            field.SetActive(true);
+            field.SetActive(!FolderRowManager.InGlobalOptions);
 
             SongSearch.UpdateLiveText(); // show the placeholder
+        }
+
+        /// <summary>Show/hide the field (hidden while the song list is in the Options menu).</summary>
+        public static void SetVisible(bool visible)
+        {
+            if (field != null)
+                field.SetActive(visible);
         }
 
         private static void HideChild(Transform root, string name)
