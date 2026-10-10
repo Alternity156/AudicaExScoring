@@ -73,6 +73,7 @@ namespace ExScoringMod
         public static string scoringHeader = "[Header]Scoring";
         public static float ExScorePopupSize;
         public static float ExScorePopupOpacity;
+        public static bool ExScorePopupAbbreviated;
 
         public static string searchKeyboardHeader = "[Header]Search Keyboard";
         public static float SearchKeyboardPosX;
@@ -162,6 +163,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterString(Category, nameof(scoringHeader), "", "[Header]Scoring");
             MelonPrefs.RegisterFloat(Category, nameof(ExScorePopupSize), 100f, "Sets the EX score popup size [10,100,5,100] {P}");
             MelonPrefs.RegisterFloat(Category, nameof(ExScorePopupOpacity), 100f, "Sets the EX score popup opacity [0,100,5,100] {P}");
+            MelonPrefs.RegisterBool(Category, nameof(ExScorePopupAbbreviated), false, "Shortens EX score popup judgements to abbreviations (e.g. Impeccable Timing = IT, Good Aim = GA)");
 
             MelonPrefs.RegisterString(Category, nameof(searchKeyboardHeader), "", "[Header]Search Keyboard");
             MelonPrefs.RegisterFloat(Category, nameof(SearchKeyboardPosX), 0f, "Sets the search keyboard X position [-5,5,0.25,0] {P}");
@@ -227,6 +229,7 @@ namespace ExScoringMod
             SongCacheEnabled = MelonPrefs.GetBool(Category, nameof(SongCacheEnabled));
             ExScorePopupSize = MelonPrefs.GetFloat(Category, nameof(ExScorePopupSize));
             ExScorePopupOpacity = MelonPrefs.GetFloat(Category, nameof(ExScorePopupOpacity));
+            ExScorePopupAbbreviated = MelonPrefs.GetBool(Category, nameof(ExScorePopupAbbreviated));
             SearchKeyboardPosX = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardPosX));
             SearchKeyboardPosY = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardPosY));
             SearchKeyboardPosZ = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardPosZ));
@@ -252,6 +255,13 @@ namespace ExScoringMod
             if (value > 100f) value = 100f;
             MelonPrefs.SetFloat(Category, nameof(ExScorePopupOpacity), value);
             ExScorePopupOpacity = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateExScorePopupAbbreviated(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(ExScorePopupAbbreviated), value);
+            ExScorePopupAbbreviated = value;
             MelonPrefs.SaveConfig();
         }
 

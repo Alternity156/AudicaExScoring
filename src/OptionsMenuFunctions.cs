@@ -74,6 +74,7 @@ namespace ExScoringMod
         public static bool saveFailedRunData;
         public static float exScorePopupSize;
         public static float exScorePopupOpacity;
+        public static bool exScorePopupAbbreviated;
         public static float searchKeyboardPosX;
         public static float searchKeyboardPosY;
         public static float searchKeyboardPosZ;
@@ -100,6 +101,17 @@ namespace ExScoringMod
         {
             exScorePopupOpacity = value;
             Config.UpdateExScorePopupOpacity(value);
+        }
+
+        public static void GetExScorePopupAbbreviated()
+        {
+            exScorePopupAbbreviated = Config.ExScorePopupAbbreviated;
+        }
+
+        public static void SetExScorePopupAbbreviated(bool value)
+        {
+            exScorePopupAbbreviated = value;
+            Config.UpdateExScorePopupAbbreviated(value);
         }
 
         public static void GetSearchKeyboardPosX()

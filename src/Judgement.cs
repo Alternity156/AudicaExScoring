@@ -90,34 +90,59 @@ namespace ExScoringMod
             return "";
         }
 
-        public static string GetChainJudgementText(Judgement judgement)
+        // Short prefix used by the "Abbreviated Judgements" popup setting. Great is "Gr" so it
+        // doesn't collide with Good's "G" (Great Aim = GrA, Good Aim = GA).
+        private static string GetJudgementAbbreviation(Judgement judgement)
         {
-            string colorHex = "#" + ColorUtility.ToHtmlStringRGB(GetJudgementColor(judgement));
+            switch (judgement)
+            {
+                case Judgement.Impeccable:
+                    return "I";
+                case Judgement.Fantastic:
+                    return "F";
+                case Judgement.Excellent:
+                    return "E";
+                case Judgement.Great:
+                    return "Gr";
+                case Judgement.Good:
+                    return "G";
+            }
+            return "";
+        }
 
-            string judgementText = "<color=" + colorHex + ">";
+        // Builds one judgement label, e.g. "Impeccable Timing!!" — or, with the abbreviated popup
+        // setting on, "IT" (abbreviatedSuffix is the single letter standing in for fullSuffix).
+        private static string GetJudgementLabel(Judgement judgement, string fullSuffix, string abbreviatedSuffix)
+        {
+            if (Config.ExScorePopupAbbreviated)
+            {
+                string abbreviation = GetJudgementAbbreviation(judgement);
+                return abbreviation == "" ? "" : abbreviation + abbreviatedSuffix;
+            }
 
             switch (judgement)
             {
                 case Judgement.Impeccable:
-                    judgementText += "Impeccable Tracing!!";
-                    break;
+                    return "Impeccable " + fullSuffix + "!!";
                 case Judgement.Fantastic:
-                    judgementText += "Fantastic Tracing!";
-                    break;
+                    return "Fantastic " + fullSuffix + "!";
                 case Judgement.Excellent:
-                    judgementText += "Excellent Tracing";
-                    break;
+                    return "Excellent " + fullSuffix;
                 case Judgement.Great:
-                    judgementText += "Great Tracing";
-                    break;
+                    return "Great " + fullSuffix;
                 case Judgement.Good:
-                    judgementText += "Good Tracing";
-                    break;
+                    return "Good " + fullSuffix;
             }
+            return "";
+        }
 
-            judgementText += "</color>";
+        public static string GetChainJudgementText(Judgement judgement)
+        {
+            string colorHex = "#" + ColorUtility.ToHtmlStringRGB(GetJudgementColor(judgement));
 
-            return judgementText;
+            // Full text says "Tracing", abbreviated uses C for Chain (IC, FC, ...) so it can't be
+            // confused with Timing's T.
+            return "<color=" + colorHex + ">" + GetJudgementLabel(judgement, "Tracing", "C") + "</color>";
         }
 
         public static string GetJudgementText(Judgement timingJudgement, Judgement aimJudgement)
@@ -125,51 +150,8 @@ namespace ExScoringMod
             string timingColorHex = "#" + ColorUtility.ToHtmlStringRGB(GetJudgementColor(timingJudgement));
             string aimColorHex = "#" + ColorUtility.ToHtmlStringRGB(GetJudgementColor(aimJudgement));
 
-            string judgementText = "<color=" + timingColorHex + ">";
-
-            switch (timingJudgement)
-            {
-                case Judgement.Impeccable:
-                    judgementText += "Impeccable Timing!!";
-                    break;
-                case Judgement.Fantastic:
-                    judgementText += "Fantastic Timing!";
-                    break;
-                case Judgement.Excellent:
-                    judgementText += "Excellent Timing";
-                    break;
-                case Judgement.Great:
-                    judgementText += "Great Timing";
-                    break;
-                case Judgement.Good:
-                    judgementText += "Good Timing";
-                    break;
-            }
-
-            judgementText += "</color>\n<color=" + aimColorHex + ">";
-
-            switch (aimJudgement)
-            {
-                case Judgement.Impeccable:
-                    judgementText += "Impeccable Aim!!";
-                    break;
-                case Judgement.Fantastic:
-                    judgementText += "Fantastic Aim!";
-                    break;
-                case Judgement.Excellent:
-                    judgementText += "Excellent Aim";
-                    break;
-                case Judgement.Great:
-                    judgementText += "Great Aim";
-                    break;
-                case Judgement.Good:
-                    judgementText += "Good Aim";
-                    break;
-            }
-
-            judgementText += "</color>";
-
-            return judgementText;
+            return "<color=" + timingColorHex + ">" + GetJudgementLabel(timingJudgement, "Timing", "T") + "</color>\n"
+                + "<color=" + aimColorHex + ">" + GetJudgementLabel(aimJudgement, "Aim", "A") + "</color>";
         }
 
         public static Judgement GetTimingJudgement(float msOffset)

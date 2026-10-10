@@ -553,6 +553,7 @@ namespace ExScoringMod
 
                 OptionsMenuFunctions.GetExScorePopupSize();
                 OptionsMenuFunctions.GetExScorePopupOpacity();
+                OptionsMenuFunctions.GetExScorePopupAbbreviated();
 
                 var header = OptionsMenuClone.CreateHeader(0, "EX Score Popup");
                 OptionsMenuClone.AddRow(header);
@@ -568,6 +569,12 @@ namespace ExScoringMod
                     0f, 100f, 5f, 100f,
                     v => v.ToString("N0") + "%");
                 OptionsMenuClone.AddRow(sizeSlider, opacitySlider);
+
+                var abbreviatedToggle = OptionsMenuClone.CreateToggle(0, "Abbreviated Judgements",
+                    () => OptionsMenuFunctions.exScorePopupAbbreviated,
+                    v => { OptionsMenuFunctions.exScorePopupAbbreviated = v; OptionsMenuFunctions.SetExScorePopupAbbreviated(v); },
+                    "Shortens popup judgements to abbreviations (Impeccable Timing = IT, Great Aim = GrA, Good Chain = GC, etc.)");
+                OptionsMenuClone.AddRow(abbreviatedToggle);
             }),
         };
 
