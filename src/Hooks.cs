@@ -1388,6 +1388,31 @@ namespace ExScoringMod
                         ? $"{selectedSongData.title} ({KataConfig.I.GetDifficulty()})"
                         : "Results";
 
+                    // Long song titles overflow the Glass panel at native's own width. Cap the
+                    // label's rect width and let TMP squish the characters horizontally to fit
+                    // (font size pinned via min == max so height never shrinks, only width).
+                    // 6.5 found live in UnityExplorer.
+                    Transform songAndDifficulty = parent.Find("SongAndDifficulty");
+                    if (songAndDifficulty != null)
+                    {
+                        TextMeshPro songLabel = songAndDifficulty.gameObject.GetComponentInChildren<TextMeshPro>(true);
+                        if (songLabel != null)
+                        {
+                            songLabel.enableWordWrapping = false;
+                            // fontSizeMin/fontSizeMax deliberately left at native's values: TMP only
+                            // applies characterWidthAdjustment while fontSize > fontSizeMin, so
+                            // pinning min to the current size disables the squish entirely.
+                            songLabel.characterWidthAdjustment = 50f;
+                            songLabel.enableAutoSizing = true;
+
+                            RectTransform songLabelRect = songLabel.GetComponent<RectTransform>();
+                            if (songLabelRect != null)
+                                songLabelRect.sizeDelta = new Vector2(6.5f, songLabelRect.sizeDelta.y);
+
+                            songLabel.ForceMeshUpdate();
+                        }
+                    }
+
                     ShowGameplayStatsPanelOnResultsScreen(parent, exCues, GetCurrentMaxPossibleJudgementPercentage(), currentRunFailed);
 
                     return false;
