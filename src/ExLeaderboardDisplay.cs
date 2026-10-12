@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Linq;
 using Harmony;
 using MelonLoader;
@@ -36,18 +37,44 @@ namespace ExScoringMod
         // ApiContract.md section 4/4c `view` values the mod uses.
         private const string ViewTopParam = "top";
         private const string ViewFriendsParam = "friends";
+        private const string ViewSelfParam = "self";
+
+        // Text color for the requester's own row (entry.isRequester), on every view — Top, Friends,
+        // Self and the Total leaderboard. Yellow, matching how native Audica marks your own row.
+        private static readonly Color RequesterHighlightColor = new Color(1f, 0.92f, 0.016f, 1f);
+
+        // Each row text's own color from before we ever recolored it, keyed by the text
+        // component's instance ID. Rows are reused across fetches, so a row highlighted for one
+        // response has to go back to its original color for the next one — and back again when
+        // leaving EX (RestoreLeaderboardRows). Captured lazily the first time a text is touched.
+        private static readonly Dictionary<int, Color> leaderboardTextDefaultColors = new Dictionary<int, Color>();
 
         /// <summary>
-        /// Maps a native leaderboard mode to the AudicaEx `view` parameter. Only Friends has an
-        /// AudicaEx equivalent besides Top; it needs an API key (view=friends requires auth), so
-        /// without one it falls back to Top. Every other mode (Self — e.g. the post-song results
-        /// screen — Party, ...) shows Top, same as before.
+        /// Maps a native leaderboard mode to the AudicaEx `view` parameter. Friends and Self both
+        /// need an API key (view=friends/view=self require auth), so without one every mode falls
+        /// back to Top. Self is also what native uses for the post-song results screen, so that
+        /// screen opens centered on the player. Every other mode (Party, ...) shows Top.
         /// </summary>
         private static string GetExLeaderboardView(OnlineLeaderboard.LeaderboardMode mode)
         {
-            if (mode == OnlineLeaderboard.LeaderboardMode.Friends && !string.IsNullOrEmpty(Config.ApiKey))
+            if (string.IsNullOrEmpty(Config.ApiKey))
+                return ViewTopParam;
+
+            if (mode == OnlineLeaderboard.LeaderboardMode.Friends)
                 return ViewFriendsParam;
+            if (mode == OnlineLeaderboard.LeaderboardMode.Self)
+                return ViewSelfParam;
             return ViewTopParam;
+        }
+
+        /// <summary>
+        /// view=self returns an empty list (requesterRank null) when the player has no run on
+        /// this leaderboard yet (ApiContract.md section 4/4c). In that case the panel shows Top
+        /// instead of a blank page.
+        /// </summary>
+        private static bool IsEmptySelfResponse(string view, int entryCount)
+        {
+            return view == ViewSelfParam && entryCount == 0;
         }
 
         /// <summary>
@@ -60,8 +87,9 @@ namespace ExScoringMod
         /// making sure any EX-mode row/button changes from a previous view are cleaned up. When EX
         /// scoring is on, native is skipped entirely (return false) and the rows are populated from
         /// AudicaEx's leaderboard instead, fetched asynchronously. mode=Friends maps to AudicaEx's
-        /// view=friends (you + your friends, re-ranked within the group); every other mode shows Top
-        /// (see GetExLeaderboardView).
+        /// view=friends (you + your friends, re-ranked within the group), mode=Self to view=self (a
+        /// page centered on your rank, clamped at the top/bottom of the list); every other mode
+        /// shows Top (see GetExLeaderboardView).
         ///
         /// Song switches reset the panel to Top on their own: the song-select hooks (Hooks.cs) call
         /// ViewTop(), which lands here with mode=Top.
@@ -89,14 +117,15 @@ namespace ExScoringMod
 
                 HideNativeLeaderboardButtons(display);
 
-                // AudicaEx has Top and Friends views only. Native still calls this with mode=Self on
-                // its own (confirmed via logging: ReportScoreAndDisplayLeaderboard defaults the
-                // post-song results leaderboard to Self), even though the Self button is hidden
-                // above. Rather than blanking the panel for a mode AudicaEx doesn't have, show Top.
+                // AudicaEx has Top, Friends and Self views. Native also calls this with mode=Self on
+                // its own for the post-song results screen (confirmed via logging:
+                // ReportScoreAndDisplayLeaderboard defaults to Self), which now shows the centered
+                // Self page too. Any mode without an AudicaEx equivalent (or Friends/Self with no
+                // API key) shows Top rather than a blank panel.
                 string view = GetExLeaderboardView(mode);
                 if (mode != OnlineLeaderboard.LeaderboardMode.Top && view == ViewTopParam)
                 {
-                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: mode={mode} requested, showing Top instead (no AudicaEx equivalent, or no API key for Friends).");
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: mode={mode} requested, showing Top instead (no AudicaEx equivalent, or no API key for Friends/Self).");
                 }
 
                 if (display == null)
@@ -123,41 +152,61 @@ namespace ExScoringMod
 
                 string songId = selectedSongData.songID;
                 string difficulty = KataConfig.I.GetDifficulty().ToString();
-                int rowLimit = LeaderboardDisplay.kNumRows;
 
-                int requestVersion = ++leaderboardRequestVersion;
-                DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} starting songId={songId} difficulty={difficulty} rowLimit={rowLimit} view={view}");
-
-                FetchLeaderboard(songId, difficulty, rowLimit, view, response =>
-                {
-                    if (requestVersion != leaderboardRequestVersion)
-                    {
-                        DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} result discarded (stale — current is #{leaderboardRequestVersion}).");
-                        return;
-                    }
-
-                    if (!Config.ExType)
-                    {
-                        DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} result discarded (scoring type changed mid-fetch).");
-                        return;
-                    }
-
-                    if (response == null)
-                    {
-                        DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} failed (see ApiClient log above), blanking rows.");
-                        BlankAllLeaderboardRows(display);
-                        return;
-                    }
-
-                    if (view == ViewFriendsParam)
-                        SortFriendsEntries(response);
-
-                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} ({view}) applying {response.entries?.Length ?? 0} row(s).");
-                    PopulateLeaderboardRows(display, response);
-                });
+                FetchAndPopulateSongLeaderboard(display, songId, difficulty, view);
 
                 return false; // skip native — we're driving the rows ourselves
             }
+        }
+
+        /// <summary>
+        /// Fetches one song+difficulty's AudicaEx leaderboard (ApiContract.md section 4) in the given
+        /// `view` and writes it into the panel's rows. view=self asks for kNumRows entries and the
+        /// server centers that page on the player's rank, clamping at the top/bottom of the list, so
+        /// rank #1 still shows ranks 1..kNumRows. If view=self comes back empty (no run on this
+        /// chart yet), this fetches Top instead.
+        /// </summary>
+        private static void FetchAndPopulateSongLeaderboard(LeaderboardDisplay display, string songId, string difficulty, string view)
+        {
+            int rowLimit = LeaderboardDisplay.kNumRows;
+
+            int requestVersion = ++leaderboardRequestVersion;
+            DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} starting songId={songId} difficulty={difficulty} rowLimit={rowLimit} view={view}");
+
+            FetchLeaderboard(songId, difficulty, rowLimit, view, response =>
+            {
+                if (requestVersion != leaderboardRequestVersion)
+                {
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} result discarded (stale — current is #{leaderboardRequestVersion}).");
+                    return;
+                }
+
+                if (!Config.ExType)
+                {
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} result discarded (scoring type changed mid-fetch).");
+                    return;
+                }
+
+                if (response == null)
+                {
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} failed (see ApiClient log above), blanking rows.");
+                    BlankAllLeaderboardRows(display);
+                    return;
+                }
+
+                if (IsEmptySelfResponse(view, response.entries?.Length ?? 0))
+                {
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} (self) returned no entries (no run on {songId} {difficulty}), showing Top instead.");
+                    FetchAndPopulateSongLeaderboard(display, songId, difficulty, ViewTopParam);
+                    return;
+                }
+
+                if (view == ViewFriendsParam)
+                    SortFriendsEntries(response);
+
+                DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} ({view}) applying {response.entries?.Length ?? 0} row(s), requesterRank={response.requesterRank?.ToString() ?? "null"}.");
+                PopulateLeaderboardRows(display, response);
+            });
         }
 
         /// <summary>
@@ -187,7 +236,8 @@ namespace ExScoringMod
         /// main menu has no difficulty selector of its own — the API requires one per
         /// (listId, difficulty) pair (difficulties are never combined into one Total), so this reuses
         /// the same persistent global difficulty the per-song leaderboard already reads rather than
-        /// adding new state. `view` is "top" or "friends" (see GetExLeaderboardView).
+        /// adding new state. `view` is "top", "friends" or "self" (see GetExLeaderboardView); an
+        /// empty "self" response (player not ranked on this list yet) falls back to Top.
         /// </summary>
         private static void FetchAndPopulateTotalLeaderboard(LeaderboardDisplay display, string view)
         {
@@ -218,10 +268,17 @@ namespace ExScoringMod
                     return;
                 }
 
+                if (IsEmptySelfResponse(view, response.entries?.Length ?? 0))
+                {
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} (self) returned no entries (not ranked on {TotalLeaderboardListId} {difficulty}), showing Top instead.");
+                    FetchAndPopulateTotalLeaderboard(display, ViewTopParam);
+                    return;
+                }
+
                 if (view == ViewFriendsParam)
                     SortFriendsEntries(response);
 
-                DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} ({view}) applying {response.entries?.Length ?? 0} row(s).");
+                DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} ({view}) applying {response.entries?.Length ?? 0} row(s), requesterRank={response.requesterRank?.ToString() ?? "null"}.");
                 PopulateTotalLeaderboardRows(display, response);
             });
         }
@@ -287,7 +344,7 @@ namespace ExScoringMod
             ResetLeaderboardSelection();
             HideNativeLeaderboardButtons(display);
 
-            // Keep whichever tab the panel is already on (Top or Friends) rather than always
+            // Keep whichever tab the panel is already on (Top, Friends or Self) rather than always
             // forcing Top, so the shown rows match the native tab state.
             FetchAndPopulateTotalLeaderboard(display, GetExLeaderboardView(display.mode));
         }
@@ -323,21 +380,22 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// EX-mode button layout: Self and Extras are hidden (no AudicaEx equivalent). Friends stays
-        /// visible when an API key is set, since view=friends requires auth (ApiContract.md section
-        /// 4/4c) — without a key there's no friend list to show, so it's hidden too.
+        /// EX-mode button layout: Extras is hidden (no AudicaEx equivalent). Friends and Self stay
+        /// visible when an API key is set, since view=friends and view=self both require auth
+        /// (ApiContract.md section 4/4c) — without a key the server can't tell who "you" are, so
+        /// both are hidden too.
         /// </summary>
         private static void HideNativeLeaderboardButtons(LeaderboardDisplay display)
         {
             if (display == null) return;
 
-            bool friendsAvailable = !string.IsNullOrEmpty(Config.ApiKey);
+            bool authViewsAvailable = !string.IsNullOrEmpty(Config.ApiKey);
 
-            if (display.friendsButton != null) display.friendsButton.gameObject.SetActive(friendsAvailable);
-            if (display.selfButton != null) display.selfButton.gameObject.SetActive(false);
+            if (display.friendsButton != null) display.friendsButton.gameObject.SetActive(authViewsAvailable);
+            if (display.selfButton != null) display.selfButton.gameObject.SetActive(authViewsAvailable);
             if (display.extrasButton != null) display.extrasButton.gameObject.SetActive(false);
 
-            DebugLog.Log($"[ExScoring][Diag] HideNativeLeaderboardButtons: self/extras hidden, friends {(friendsAvailable ? "shown" : "hidden (no API key)")}.");
+            DebugLog.Log($"[ExScoring][Diag] HideNativeLeaderboardButtons: extras hidden, friends/self {(authViewsAvailable ? "shown" : "hidden (no API key)")}.");
         }
 
         private static void RestoreNativeLeaderboardButtons(LeaderboardDisplay display)
@@ -475,6 +533,8 @@ namespace ExScoringMod
 
             if (row.compareButton != null) row.compareButton.SetActive(false);
 
+            ApplyRequesterHighlight(row, entry.isRequester);
+
             row.gameObject.SetActive(true);
 
             // Stats-panel hit-box (LeaderboardStatsButton.cs) — cache this row's runId so shooting
@@ -569,6 +629,8 @@ namespace ExScoringMod
 
             if (row.compareButton != null) row.compareButton.SetActive(false);
 
+            ApplyRequesterHighlight(row, entry.isRequester);
+
             row.gameObject.SetActive(true);
 
             // Make sure this row can't still be pointing at a stale runId/hitbox from a previous
@@ -638,8 +700,40 @@ namespace ExScoringMod
             // Deliberately NOT row.SetNone() — that fills the row with native's "no score to
             // display" placeholder text (visible), where we want the row itself hidden instead.
             row.gameObject.SetActive(false);
+            ApplyRequesterHighlight(row, false);
             ClearLeaderboardRowGradeVisual(row.gameObject.GetInstanceID());
             ClearLeaderboardHitboxRun(row.gameObject.GetInstanceID());
+        }
+
+        /// <summary>
+        /// Colors the row's rank, nickname and score text yellow when it's the requester's own row
+        /// (entry.isRequester, set by the server on every view — Top, Friends, Self, and the Total
+        /// leaderboard), or puts them back to their original color otherwise. Rows are reused for
+        /// every fetch, so every row goes through this on every populate, not only the highlighted
+        /// one.
+        /// </summary>
+        private static void ApplyRequesterHighlight(LeaderboardRow row, bool isRequester)
+        {
+            if (row == null) return;
+
+            SetRowTextHighlight(row.rank, isRequester);
+            SetRowTextHighlight(row.username, isRequester);
+            SetRowTextHighlight(row.score, isRequester);
+        }
+
+        private static void SetRowTextHighlight(Graphic text, bool highlighted)
+        {
+            if (text == null) return;
+
+            int id = text.GetInstanceID();
+            Color defaultColor;
+            if (!leaderboardTextDefaultColors.TryGetValue(id, out defaultColor))
+            {
+                defaultColor = text.color;
+                leaderboardTextDefaultColors[id] = defaultColor;
+            }
+
+            text.color = highlighted ? RequesterHighlightColor : defaultColor;
         }
 
         private static void BlankAllLeaderboardRows(LeaderboardDisplay display)
@@ -744,6 +838,10 @@ namespace ExScoringMod
                     SetImageArrayEnabled(row.starDisplay.starMeters, true, "starMeters");
                     SetActiveForAllNamed(row.starDisplay.transform, "star_pip", true);
                 }
+
+                // Put the rank/nickname/score text back to its own color so a row we highlighted
+                // as the requester's doesn't stay yellow under native leaderboards.
+                ApplyRequesterHighlight(row, false);
 
                 ClearLeaderboardRowGradeVisual(row.gameObject.GetInstanceID());
                 restoredRows++;
