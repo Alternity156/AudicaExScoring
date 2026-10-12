@@ -199,7 +199,7 @@ namespace ExScoringMod
                                     "' -> '" + gameSongID + "'.");
                     selectedSong = gameSongID;
                     selectedSongData = gameSong;
-                    maxPossibleExScore = GetMaxPossibleExScore(selectedSong);
+                    maxPossibleExScore = GetMaxPossibleExScore(selectedSong, KataConfig.I.GetDifficulty());
                 }
                 else
                 {
@@ -428,6 +428,7 @@ namespace ExScoringMod
                 var songSelect = songSelectObj.GetComponent<SongSelect>();
                 songSelect.mDisplayingForDifficulty = diffButton.difficulty;
                 UpdateDifficultyIndicator(diffButton.difficulty);
+                maxPossibleExScore = GetMaxPossibleExScore(selectedSong, diffButton.difficulty);
                 RefreshIntensityGraph(); // also refreshes the heatmap internally
 
                 // Target-count labels (TotalTargets/Left/Right/Either) + difficulty button enabled-state,
@@ -532,7 +533,7 @@ namespace ExScoringMod
                 MarathonSetup.CancelIfActive();
 
                 selectedSong = __instance.mSongData.songID;
-                maxPossibleExScore = GetMaxPossibleExScore(selectedSong);
+                maxPossibleExScore = GetMaxPossibleExScore(selectedSong, KataConfig.I.GetDifficulty());
                 selectedSongData = __instance.mSongData;
 
                 if (!isAutoSelecting)
@@ -1413,7 +1414,9 @@ namespace ExScoringMod
                         }
                     }
 
-                    ShowGameplayStatsPanelOnResultsScreen(parent, exCues, GetCurrentMaxPossibleJudgementPercentage(), currentRunFailed);
+                    // Final percentage, not the running one: a failed run is scored against the whole
+                    // chart (see GetFinalJudgementPercentage in Judgement.cs).
+                    ShowGameplayStatsPanelOnResultsScreen(parent, exCues, GetFinalJudgementPercentage(), currentRunFailed);
 
                     return false;
                 }
@@ -1445,7 +1448,7 @@ namespace ExScoringMod
                     if (scoreAndPercent != null)
                     {
                         TextMeshPro tmp = scoreAndPercent.GetComponent<TextMeshPro>();
-                        string formatted = $"{GetCurrentMaxPossibleJudgementPercentage():0.00}%";
+                        string formatted = $"{GetFinalJudgementPercentage():0.00}%";
                         if (tmp.text != formatted)
                             tmp.text = formatted;
                     }
@@ -1462,7 +1465,7 @@ namespace ExScoringMod
 
                             if (endSequenceGradeVisualObject == null)
                             {
-                                Grade grade = GetGrade(GetCurrentMaxPossibleJudgementPercentage(), currentRunFailed);
+                                Grade grade = GetGrade(GetFinalJudgementPercentage(), currentRunFailed);
                                 CreateOrUpdateEndSequenceGradeVisual(starDisplay, grade);
                             }
                         }

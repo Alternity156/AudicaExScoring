@@ -1,5 +1,4 @@
 ﻿using MelonLoader;
-using System.Linq;
 
 namespace ExScoringMod
 {
@@ -92,15 +91,35 @@ namespace ExScoringMod
             else return 0;
         }
 
-        public static float GetMaxPossibleExScore(string songId)
+        /// <summary>
+        /// Max possible EX score for the whole chart of songId at the given difficulty (was always
+        /// Expert regardless of what was selected). Main thread only (Il2Cpp). Returns 0 (never
+        /// throws) if the song isn't installed, has no chart at that difficulty, or anything else
+        /// goes wrong. No HookUpChains needed: GetMaxExScoreForCue never reads chainNext.
+        /// </summary>
+        public static float GetMaxPossibleExScore(string songId, KataConfig.Difficulty difficulty)
         {
-            float maxExScore = 0;
+            float maxExScore = 0f;
 
-            SongCues.Cue[] cues = SongCues.GetCues(SongList.I.GetSong(songId), KataConfig.Difficulty.Expert).ToArray();
-
-            foreach (SongCues.Cue cue in cues)
+            try
             {
-                maxExScore += GetMaxExScoreForCue(cue);
+                if (string.IsNullOrEmpty(songId) || SongList.I == null) return 0f;
+
+                var songData = SongList.I.GetSong(songId);
+                if (songData == null) return 0f;
+
+                var cues = SongCues.GetCues(songData, difficulty);
+                if (cues == null) return 0f;
+
+                foreach (SongCues.Cue cue in cues)
+                {
+                    maxExScore += GetMaxExScoreForCue(cue);
+                }
+            }
+            catch (System.Exception ex)
+            {
+                DebugLog.Log($"[ExScoring] Failed to compute max EX score for {songId}/{difficulty}: {ex}");
+                return 0f;
             }
 
             return maxExScore;

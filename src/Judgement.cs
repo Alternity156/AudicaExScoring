@@ -1,6 +1,5 @@
 ﻿using MelonLoader;
 using System;
-using System.Linq;
 using UnityEngine;
 
 namespace ExScoringMod
@@ -225,23 +224,88 @@ namespace ExScoringMod
             return 0;
         }
 
-        public static float GetMaxPossibleJudgementScore(string songId)
+        /// <summary>
+        /// Max possible judgement score for the WHOLE chart of songId at the given difficulty — the
+        /// equivalent of ITGmania's m_iPossibleDancePoints (computed once from the full chart at
+        /// load), as opposed to currentMaxPossibleJudgementScore, which only grows as cues are
+        /// judged (ITGmania's m_iCurPossibleDancePoints, what the in-game HUD shows).
+        ///
+        /// HookUpChains is required: a cold GetCues() call never populates chainNext (see
+        /// RunDataRecalculator.BuildChainTailLookup), which would make every Chain cue look like a
+        /// tail. Main thread only (Il2Cpp). Returns 0 (never throws) if the song isn't installed,
+        /// has no chart at that difficulty, or anything else goes wrong — callers treat 0 as
+        /// "unknown" and fall back to whatever max they already have.
+        /// </summary>
+        public static float GetMaxPossibleJudgementScore(string songId, KataConfig.Difficulty difficulty)
         {
-            float maxJudgementScore = 0;
+            float maxJudgementScore = 0f;
 
-            SongCues.Cue[] cues = SongCues.GetCues(SongList.I.GetSong(songId), KataConfig.Difficulty.Expert).ToArray();
-
-            foreach (SongCues.Cue cue in cues)
+            try
             {
-                maxJudgementScore += GetMaxJudgementScoreForCue(cue);
+                if (string.IsNullOrEmpty(songId) || SongList.I == null) return 0f;
+
+                var songData = SongList.I.GetSong(songId);
+                if (songData == null) return 0f;
+
+                var cues = SongCues.GetCues(songData, difficulty);
+                if (cues == null) return 0f;
+
+                SongCues.HookUpChains(cues);
+
+                foreach (SongCues.Cue cue in cues)
+                {
+                    maxJudgementScore += GetMaxJudgementScoreForCue(cue);
+                }
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Log($"[ExScoring] Failed to compute max judgement score for {songId}/{difficulty}: {ex}");
+                return 0f;
             }
 
             return maxJudgementScore;
         }
 
+        /// <summary>
+        /// Running percentage against only the cues judged so far (ITGmania's "current possible").
+        /// This is what the in-game HUD shows — it must NOT use the whole-chart max, or the live
+        /// percentage would start near 0% and climb through the song.
+        /// </summary>
         public static float GetCurrentMaxPossibleJudgementPercentage()
         {
             return (judgementScore / currentMaxPossibleJudgementScore) * 100;
+        }
+
+        // Whole-chart max for the current run, computed lazily the first time a failed run's final
+        // percentage is asked for (see GetFinalJudgementPercentage). -1 = not computed yet for this
+        // run. Reset by ResetExScore() at the start of every run.
+        private static float totalMaxPossibleJudgementScore = -1f;
+
+        /// <summary>
+        /// Final percentage for the results screen. A completed run judged every cue, so the
+        /// running max already equals the whole-chart max and the result is unchanged. A failed run
+        /// is scored against the whole chart, ITGmania-style: targets never reached add 0 to the
+        /// score but still count toward the max (hit 1 of 100 targets -> ~1%, not 100%).
+        /// Falls back to the running max if the chart couldn't be read (song gone, etc.), and never
+        /// uses a max smaller than what was actually judged.
+        /// </summary>
+        public static float GetFinalJudgementPercentage()
+        {
+            float max = currentMaxPossibleJudgementScore;
+
+            if (currentRunFailed)
+            {
+                if (totalMaxPossibleJudgementScore < 0f)
+                {
+                    totalMaxPossibleJudgementScore = selectedSongData != null
+                        ? GetMaxPossibleJudgementScore(selectedSongData.songID, KataConfig.I.GetDifficulty())
+                        : 0f;
+                }
+
+                max = Math.Max(max, totalMaxPossibleJudgementScore);
+            }
+
+            return max > 0f ? (judgementScore / max) * 100f : 0f;
         }
     }
 }

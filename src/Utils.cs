@@ -57,6 +57,7 @@ namespace ExScoringMod
             judgementScore = 0;
             currentMaxPossibleExScore = 0;
             currentMaxPossibleJudgementScore = 0;
+            totalMaxPossibleJudgementScore = -1f; // whole-chart max, recomputed lazily for a failed run (Judgement.cs)
             DestroyIntensityGraph();
             DestroyIntensityGraph();
             DestroyHeatmap();

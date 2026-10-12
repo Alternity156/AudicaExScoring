@@ -223,7 +223,11 @@ namespace ExScoringMod
         // Vector3s), and why errors are collected as strings and logged from the main thread.
         // ------------------------------------------------------------------------------------
 
-        /// <summary>Score totals for one saved run, without the per-cue ExCue list.</summary>
+        /// <summary>
+        /// Score totals for one saved run, without the per-cue ExCue list. For a failed run,
+        /// maxJudgementScore is raised to the whole chart's max on the main thread after the worker
+        /// finishes (see ApplyWholeChartMax) — the worker can't load the chart itself.
+        /// </summary>
         public class RunSummary
         {
             public float judgementScore;
@@ -259,9 +263,14 @@ namespace ExScoringMod
 
         private static readonly Dictionary<float, bool> emptyChainTailLookup = new Dictionary<float, bool>();
 
-        // BuildChainTailLookup loads a chart (SongCues.GetCues) on the main thread — never let more
-        // than one of those land in the same frame, however many lookups finish together.
+        // LoadChartInfo loads a chart (SongCues.GetCues) on the main thread — never let more than
+        // one of those land in the same frame, however many lookups finish together.
         private static int lastChainTailLookupFrame = -1;
+
+        // songId|difficulty -> whole-chart max judgement score (see LoadChartInfo). Main thread
+        // only. Only real (> 0) values are cached, so a song that isn't installed yet is retried the
+        // next time instead of being stuck at "unknown" after the downloader installs it.
+        private static readonly Dictionary<string, float> chartMaxJudgementScoreCache = new Dictionary<string, float>();
 
         private static RunLoadJob EnqueueRunLoad(string songId, string difficulty, bool summaryOnly)
         {
@@ -495,49 +504,132 @@ namespace ExScoringMod
             return score;
         }
 
-        /// <summary>
-        /// Legacy-repair fallback: older saved runs never wrote isChainTail for a missed Chain
-        /// cue (fixed in BuildExCueSaveData), so it's not recoverable from the file itself. This
-        /// rebuilds tick -> isChainTail (cue.chainNext == null) from the live chart as a best-effort
-        /// substitute for exactly that gap. Returns an empty lookup (never throws) if the song is
-        /// no longer installed, the difficulty string doesn't parse, or anything else goes wrong —
-        /// callers treat a miss here the same as before this fix existed.
-        /// </summary>
-        private static Dictionary<float, bool> BuildChainTailLookup(string songId, string difficultyStr)
+        /// <summary>What LoadChartInfo reads from the live chart in one GetCues() pass.</summary>
+        private class ChartInfo
         {
+            /// <summary>tick -> isChainTail for every Chain cue. Empty if the chart couldn't be read.</summary>
+            public Dictionary<float, bool> chainTailLookup = emptyChainTailLookup;
+
+            /// <summary>Whole-chart max judgement score. 0 = unknown (chart couldn't be read).</summary>
+            public float maxJudgementScore;
+
+            /// <summary>True when ResolveChartInfo actually loaded the chart this frame (vs. cache / not needed).</summary>
+            public bool loadedChart;
+        }
+
+        private static string ChartCacheKey(string songId, string difficulty) => songId + "|" + difficulty;
+
+        /// <summary>
+        /// Loads the live chart once and derives both things saved runs may need from it:
+        ///
+        /// - chainTailLookup, the legacy-repair fallback: older saved runs never wrote isChainTail
+        ///   for a missed Chain cue (fixed in BuildExCueSaveData), so it's not recoverable from the
+        ///   file itself. This rebuilds tick -> isChainTail (cue.chainNext == null) as a best-effort
+        ///   substitute for exactly that gap.
+        /// - maxJudgementScore, the whole chart's max, which a failed run is scored against
+        ///   (ITGmania-style — see GetFinalJudgementPercentage in Judgement.cs). A failed run's file
+        ///   only holds the cues reached before the fail, so its own max is too small.
+        ///
+        /// Main thread only (Il2Cpp). Never throws: if the song is no longer installed, the
+        /// difficulty string doesn't parse, or anything else goes wrong, returns an empty lookup and
+        /// a max of 0 — callers then behave exactly as before this existed.
+        /// </summary>
+        private static ChartInfo LoadChartInfo(string songId, string difficultyStr)
+        {
+            var info = new ChartInfo();
             var lookup = new Dictionary<float, bool>();
 
             try
             {
-                if (!Enum.TryParse(difficultyStr, out KataConfig.Difficulty difficulty)) return lookup;
+                if (!Enum.TryParse(difficultyStr, out KataConfig.Difficulty difficulty)) return info;
 
                 var songData = SongList.I.GetSong(songId);
-                if (songData == null) return lookup;
+                if (songData == null) return info;
 
                 var cues = SongCues.GetCues(songData, difficulty);
+                if (cues == null) return info;
 
                 // Confirmed via live testing: a cold GetCues() call (i.e. outside an active
                 // gameplay session, like from this history screen) returns cues whose chainNext
                 // is never populated — it's only assigned as a side effect of HookUpChains,
                 // which normally only runs during gameplay setup. Without calling it here first,
                 // every Chain cue's chainNext reads null, not just true tails, which silently
-                // resolves every ambiguous cue as a tail instead of just the real one.
+                // resolves every ambiguous cue as a tail instead of just the real one (and would
+                // inflate the whole-chart max the same way).
                 SongCues.HookUpChains(cues);
 
+                float max = 0f;
                 foreach (SongCues.Cue cue in cues)
                 {
                     if (cue.behavior == Target.TargetBehavior.Chain)
                     {
                         lookup[cue.tick] = cue.chainNext == null;
                     }
+
+                    max += GetMaxJudgementScoreForCue(cue);
                 }
+
+                info.chainTailLookup = lookup;
+                info.maxJudgementScore = max;
+
+                if (max > 0f) chartMaxJudgementScoreCache[ChartCacheKey(songId, difficultyStr)] = max;
             }
             catch (Exception ex)
             {
-                DebugLog.Log($"[ExScoring] Failed to build chain-tail lookup for {songId}/{difficultyStr}: {ex}");
+                DebugLog.Log($"[ExScoring] Failed to read chart for {songId}/{difficultyStr}: {ex}");
             }
 
-            return lookup;
+            return info;
+        }
+
+        /// <summary>Chain-tail lookup only (see LoadChartInfo). Used by the leaderboard-stats path.</summary>
+        private static Dictionary<float, bool> BuildChainTailLookup(string songId, string difficultyStr)
+        {
+            return LoadChartInfo(songId, difficultyStr).chainTailLookup;
+        }
+
+        private static bool IsFailedRunFile(LoadedRunFile file)
+        {
+            if (file.summary != null) return file.summary.failed;
+            return file.data != null && file.data.failed;
+        }
+
+        /// <summary>
+        /// Main-thread step shared by both loaders below: loads the chart (at most one chart load
+        /// per frame) only when this batch actually needs it — a legacy save needing the chain-tail
+        /// repair, or a failed run whose whole-chart max isn't cached yet — and fills `result`.
+        /// </summary>
+        private static IEnumerator ResolveChartInfo(RunLoadJob job, string songId, string difficulty, ChartInfo result)
+        {
+            bool needsLookup = false;
+            bool hasFailedRun = false;
+            for (int i = 0; i < job.files.Count; i++)
+            {
+                if (job.files[i].needsChainTailLookup) needsLookup = true;
+                if (IsFailedRunFile(job.files[i])) hasFailedRun = true;
+            }
+
+            bool haveCachedMax = chartMaxJudgementScoreCache.TryGetValue(ChartCacheKey(songId, difficulty), out float cachedMax);
+            if (haveCachedMax) result.maxJudgementScore = cachedMax;
+
+            if (!needsLookup && !(hasFailedRun && !haveCachedMax)) yield break;
+
+            while (Time.frameCount == lastChainTailLookupFrame) yield return null;
+            lastChainTailLookupFrame = Time.frameCount;
+
+            ChartInfo loaded = LoadChartInfo(songId, difficulty);
+            result.loadedChart = true;
+            result.chainTailLookup = loaded.chainTailLookup;
+            if (loaded.maxJudgementScore > 0f) result.maxJudgementScore = loaded.maxJudgementScore;
+        }
+
+        /// <summary>
+        /// A failed run is scored against the whole chart, not just the cues it reached
+        /// (ITGmania-style). Never lowers the max, and leaves it alone when the chart is unknown.
+        /// </summary>
+        private static float ApplyWholeChartMax(float savedMax, bool failed, float chartMax)
+        {
+            return failed && chartMax > savedMax ? chartMax : savedMax;
         }
 
         /// <summary>
@@ -716,7 +808,7 @@ namespace ExScoringMod
                 judgementScore = judgementScore,
                 maxJudgementScore = maxJudgementScore,
                 missCount = missCount,
-                fullCombo = missCount == 0,
+                fullCombo = !data.failed && missCount == 0,
                 failed = data.failed,
                 exCues = exCues
             };
@@ -762,9 +854,9 @@ namespace ExScoringMod
         /// gzip, JSON, scoring — runs on the background loader thread, and the main thread only
         /// picks the winner. Invokes onComplete with null when there are no saved runs.
         ///
-        /// The one main-thread cost left is the legacy chain-tail repair (BuildChainTailLookup,
-        /// which has to load the chart through Il2Cpp): only for songs that actually have old saves
-        /// needing it, and never more than one per frame.
+        /// The one main-thread cost left is loading the chart through Il2Cpp (LoadChartInfo): only
+        /// for songs that have old saves needing the chain-tail repair, or a failed run whose
+        /// whole-chart max isn't cached yet — and never more than one per frame.
         /// </summary>
         public static IEnumerator LoadBestRunSummaryForSong(string songId, string difficulty, Action<RunSummary> onComplete)
         {
@@ -773,17 +865,9 @@ namespace ExScoringMod
 
             LogRunLoadErrors(job);
 
-            bool needsLookup = false;
-            for (int i = 0; i < job.files.Count; i++)
-                if (job.files[i].needsChainTailLookup) { needsLookup = true; break; }
-
-            Dictionary<float, bool> chainTailLookup = emptyChainTailLookup;
-            if (needsLookup)
-            {
-                while (Time.frameCount == lastChainTailLookupFrame) yield return null;
-                lastChainTailLookupFrame = Time.frameCount;
-                chainTailLookup = BuildChainTailLookup(songId, difficulty);
-            }
+            var chart = new ChartInfo();
+            yield return ResolveChartInfo(job, songId, difficulty, chart);
+            Dictionary<float, bool> chainTailLookup = chart.chainTailLookup;
 
             RunSummary best = null;
             for (int i = 0; i < job.files.Count; i++)
@@ -803,6 +887,8 @@ namespace ExScoringMod
                         continue;
                     }
                 }
+
+                summary.maxJudgementScore = ApplyWholeChartMax(summary.maxJudgementScore, summary.failed, chart.maxJudgementScore);
 
                 if (best == null || summary.judgementPercent > best.judgementPercent)
                     best = summary;
@@ -827,20 +913,14 @@ namespace ExScoringMod
 
             List<RecalculatedRun> results = new List<RecalculatedRun>(job.files.Count);
 
-            // Built once for the whole batch, and only if some file here is a legacy save that
-            // will actually consult it (see NeedsChainTailLookup / ResolveIsChainTail).
-            bool needsLookup = false;
-            for (int i = 0; i < job.files.Count; i++)
-                if (job.files[i].needsChainTailLookup) { needsLookup = true; break; }
-
-            Dictionary<float, bool> chainTailLookup = emptyChainTailLookup;
-            if (needsLookup)
-            {
-                while (Time.frameCount == lastChainTailLookupFrame) yield return null;
-                lastChainTailLookupFrame = Time.frameCount;
-                chainTailLookup = BuildChainTailLookup(songId, difficulty);
+            // Chart read once for the whole batch, and only if some file here is a legacy save
+            // that will consult the chain-tail lookup (see NeedsChainTailLookup /
+            // ResolveIsChainTail) or a failed run whose whole-chart max isn't cached yet.
+            var chart = new ChartInfo();
+            yield return ResolveChartInfo(job, songId, difficulty, chart);
+            Dictionary<float, bool> chainTailLookup = chart.chainTailLookup;
+            if (chart.loadedChart)
                 yield return null; // the chart load was this frame's share of work
-            }
 
             const double frameBudgetMs = 2.0;
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -851,7 +931,9 @@ namespace ExScoringMod
 
                 try
                 {
-                    results.Add(Recalculate(file.data, file.fileName, chainTailLookup));
+                    RecalculatedRun run = Recalculate(file.data, file.fileName, chainTailLookup);
+                    run.maxJudgementScore = ApplyWholeChartMax(run.maxJudgementScore, run.failed, chart.maxJudgementScore);
+                    results.Add(run);
                 }
                 catch (Exception ex)
                 {
