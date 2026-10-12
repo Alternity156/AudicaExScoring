@@ -51,8 +51,8 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Undoes everything SetTopScoreItem does to one row: re-enables the StarDisplayUI script,
-        /// reactivates every descendant we'd hidden under it, destroys our grade visual, and makes
+        /// Undoes everything SetTopScoreItem does to one row: re-shows the score label, re-enables
+        /// the StarDisplayUI script, reactivates every descendant we'd hidden under it, destroys our grade visual, and makes
         /// sure the row itself is active (we hide it entirely when there's no saved EX run). Safe to
         /// call on a row that was never touched by EX mode — every step is a no-op in that case.
         /// </summary>
@@ -61,6 +61,10 @@ namespace ExScoringMod
             if (item == null) return;
 
             item.gameObject.SetActive(true);
+
+            // EX hides the raw judgement score label (see SetTopScoreItem) — native only sets
+            // its text, so turn it back on here.
+            if (item.score != null) item.score.gameObject.SetActive(true);
 
             if (item.stars != null)
             {
@@ -152,11 +156,10 @@ namespace ExScoringMod
             if (item.difficulty != null)
                 item.difficulty.text = run.difficulty;
 
+            // EX shows the percent only — the raw judgement score label stays hidden.
+            // RestoreNativeTopScoreItem turns it back on when returning to native scoring.
             if (item.score != null)
-            {
-                item.score.gameObject.SetActive(true);
-                item.score.text = run.judgementScore.ToString("0.00");
-            }
+                item.score.gameObject.SetActive(false);
 
             if (item.percent != null)
             {

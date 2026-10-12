@@ -11,7 +11,6 @@ namespace ExScoringMod
     {
         private class CachedExRowScore
         {
-            public float judgementScore;
             public float judgementPercent;
             public bool failed;
         }
@@ -60,40 +59,11 @@ namespace ExScoringMod
             DebugLog.Log($"[ExScoring] RefreshAllVisibleSongRowScores: {boundCount}/{viewCount} row(s) bound and refreshed.");
         }
 
-        // The EX layout nudges highScoreLabel over to make room for the longer judgement-score
-        // text. Native position is captured per row (keyed by row GameObject instance ID) the first
-        // time we touch it, so reverting to Audica scoring puts it back exactly rather than assuming
-        // a hardcoded default — pooled rows all share the same prefab default anyway, but this is
-        // correct even if that ever isn't true.
-        private static readonly Dictionary<int, Vector3> nativeHighScoreLabelPositions = new Dictionary<int, Vector3>();
-        private static readonly Vector3 ExHighScoreLabelLocalPosition = new Vector3(52.5f, 20f, 0f);
-
-        /// <summary>Moves highScoreLabel to the EX layout position, capturing its native position
-        /// first (once per row) if we haven't already.</summary>
-        private static void ApplyExRowLayout(SongSelectItem item)
-        {
-            if (item == null || item.highScoreLabel == null) return;
-
-            int key = item.gameObject.GetInstanceID();
-            if (!nativeHighScoreLabelPositions.ContainsKey(key))
-                nativeHighScoreLabelPositions[key] = item.highScoreLabel.transform.localPosition;
-
-            item.highScoreLabel.transform.localPosition = ExHighScoreLabelLocalPosition;
-        }
-
-        /// <summary>Puts highScoreLabel back at its captured native position, if we ever moved it.</summary>
-        private static void RestoreNativeRowLayout(SongSelectItem item)
-        {
-            if (item == null || item.highScoreLabel == null) return;
-
-            int key = item.gameObject.GetInstanceID();
-            if (nativeHighScoreLabelPositions.TryGetValue(key, out Vector3 pos))
-                item.highScoreLabel.transform.localPosition = pos;
-        }
-
         /// <summary>
         /// Replaces a song-list row's native high-score/percent/stars with our best saved EX run for
-        /// that song+difficulty, whenever EX scoring is on. Rows are pooled and rebound to different
+        /// that song+difficulty, whenever EX scoring is on. EX rows show only the judgement percent
+        /// and grade — the raw judgement score is never shown, so highScoreLabel stays hidden for
+        /// every EX row (see ApplySongRowScore). Rows are pooled and rebound to different
         /// songs as the list scrolls (VirtualSongList) rather than rebuilt every frame, but the
         /// library can still be big enough that this needs caching rather than reading from disk on
         /// every bind.
@@ -128,7 +98,6 @@ namespace ExScoringMod
             {
                 if (!Config.ExType)
                 {
-                    RestoreNativeRowLayout(__instance);
                     if (__instance != null)
                     {
                         // Simple leaf labels — safe to force active regardless. If this song
@@ -144,8 +113,6 @@ namespace ExScoringMod
                 }
 
                 if (__instance == null || __instance.mSongData == null) return false;
-
-                ApplyExRowLayout(__instance);
 
                 string songId = __instance.mSongData.songID;
                 KataConfig.Difficulty difficulty = KataConfig.I.GetDifficulty();
@@ -218,7 +185,6 @@ namespace ExScoringMod
                 {
                     exRowScoreCache[key] = new CachedExRowScore
                     {
-                        judgementScore = best.judgementScore,
                         judgementPercent = best.judgementPercent,
                         failed = best.failed
                     };
@@ -262,11 +228,9 @@ namespace ExScoringMod
         {
             if (item == null) return;
 
-            if (item.highScoreLabel != null)
-            {
-                item.highScoreLabel.gameObject.SetActive(true);
-                item.highScoreLabel.text = cached.judgementScore.ToString("0.00");
-            }
+            // EX shows the percent only — the raw judgement score label stays hidden. The !ExType
+            // branch of SongSelectItemUpdateHighScoreInfoPatch reactivates it for native scoring.
+            if (item.highScoreLabel != null) item.highScoreLabel.gameObject.SetActive(false);
 
             if (item.percentLabel != null)
             {

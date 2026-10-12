@@ -459,9 +459,12 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Total-leaderboard counterpart to ApplyLeaderboardEntryToRow. TotalLeaderboardApiEntry has
-        /// no grade/fullCombo/platform/runId — an aggregate totalScore across a song-list isn't tied
-        /// to any single run — so this hides the star/grade visual and platform icon rather than
+        /// Total-leaderboard counterpart to ApplyLeaderboardEntryToRow. The score column shows the
+        /// player's averagePercent across the list (ApiContract.md section 4c, v2.23 — unplayed songs
+        /// count as 0%), in the same "0.00%" format as a per-song row; the raw totalScore is never
+        /// shown. If the server doesn't send averagePercent, the column shows "-" rather than a
+        /// misleading 0.00%. TotalLeaderboardApiEntry has no grade/fullCombo/platform/runId — an
+        /// aggregate across a song-list isn't tied to any single run — so this hides the star/grade visual and platform icon rather than
         /// populating them from data that doesn't exist, and deliberately clears any hitbox mapping
         /// instead of creating one (ClearLeaderboardHitboxRun, not EnsureLeaderboardHitbox): there's
         /// no single run behind an aggregate total score to fetch via GET /api/runs/:runId, so this
@@ -479,7 +482,8 @@ namespace ExScoringMod
                 row.username.text = LeaderboardDisplay.LaurelWrap(nickname, false);
             }
 
-            if (row.score != null) row.score.text = entry.totalScore.ToString("N0");
+            if (row.score != null)
+                row.score.text = entry.averagePercent.HasValue ? $"{entry.averagePercent.Value:0.00}%" : "-";
 
             if (row.percentile != null) row.percentile.gameObject.SetActive(false);
 

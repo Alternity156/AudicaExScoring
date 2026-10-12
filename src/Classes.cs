@@ -142,14 +142,20 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Entry shape for GET /api/leaderboard/total (ApiContract.md section 4c) — the main-menu
-        /// Total leaderboard, scoped per song-list per difficulty. No grade/fullCombo concept here
-        /// (totalScore is a sum across many songs, not a single run), unlike LeaderboardApiEntry.
+        /// Entry shape for GET /api/leaderboard/total (ApiContract.md section 4c, v2.23) — the
+        /// main-menu Total leaderboard, scoped per song-list per difficulty. No grade/fullCombo
+        /// concept here (it aggregates many songs, not a single run), unlike LeaderboardApiEntry.
+        ///
+        /// averagePercent is the ranking value: the player's best judgementPercent averaged over
+        /// every song in the list, unplayed songs counting as 0%. Nullable so a server that doesn't
+        /// send it yet reads as "not available" instead of a real 0%. totalScore is deprecated by
+        /// the API (v2.23) and no longer displayed — kept only so the shape still matches.
         /// </summary>
         public class TotalLeaderboardApiEntry
         {
             public int rank;
             public string nickname;
+            public float? averagePercent;
             public float totalScore;
             public int songsPlayed;
             public bool isRequester;

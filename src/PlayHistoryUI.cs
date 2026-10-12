@@ -30,9 +30,11 @@ namespace ExScoringMod
                 if (!Config.ExType)
                 {
                     // Was EX mode last time this panel populated? Tear down anything left behind
-                    // (hitboxes, row grade visuals, the history-detail stats panel + graphs) so
-                    // native history renders cleanly with nothing extra layered on top.
+                    // (hitboxes, row grade visuals, the history-detail stats panel + graphs, the
+                    // hidden score labels) so native history renders cleanly with nothing extra
+                    // layered on top.
                     CleanupExHistoryUI();
+                    RestoreHistoryScoreLabels(__instance);
                     return;
                 }
 
@@ -67,6 +69,26 @@ namespace ExScoringMod
             historyHitboxLastHighlightTime.Clear();
 
             ClearAllRowGradeVisuals();
+        }
+
+        /// <summary>
+        /// EX history rows hide each row's score label (only the percent is shown in EX mode — see
+        /// SetHistoryItem). Native's history build only sets that label's text, so turn it back on
+        /// for every row before native fills them in. Rows themselves are left alone — native
+        /// decides which rows are visible.
+        /// </summary>
+        private static void RestoreHistoryScoreLabels(SongInfoPanel panel)
+        {
+            if (panel == null || panel.history == null) return;
+
+            var items = panel.history;
+            int count = items.Count;
+            for (int i = 0; i < count; i++)
+            {
+                var item = items[i];
+                if (item != null && item.score != null)
+                    item.score.gameObject.SetActive(true);
+            }
         }
 
         private static IEnumerator PopulateHistoryCoroutine(SongInfoPanel panel, string songId, string difficulty)
@@ -128,11 +150,10 @@ namespace ExScoringMod
             if (item.difficulty != null)
                 item.difficulty.text = run.difficulty;
 
+            // EX shows the percent only — the raw judgement score label stays hidden.
+            // RestoreHistoryScoreLabels turns it back on when returning to native scoring.
             if (item.score != null)
-            {
-                item.score.gameObject.SetActive(true);
-                item.score.text = run.judgementScore.ToString("0.00");
-            }
+                item.score.gameObject.SetActive(false);
 
             if (item.percent != null)
             {
