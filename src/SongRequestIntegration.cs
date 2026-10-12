@@ -78,13 +78,13 @@ namespace ExScoringMod
 
             if (songRequestsType == null)
             {
-                MelonLogger.Log("[SongRequestIntegration] SongRequest mod not detected — integration disabled.");
+                DebugLog.Log("[SongRequestIntegration] SongRequest mod not detected — integration disabled.");
                 present = false;
                 return;
             }
 
             present = true;
-            MelonLogger.Log("[SongRequestIntegration] SongRequest mod detected — enabling integration.");
+            DebugLog.Log("[SongRequestIntegration] SongRequest mod detected — enabling integration.");
 
             getRequestsMethod = ResolveMethod(songRequestsType, "GetRequests", Type.EmptyTypes);
             getMissingSongsMethod = ResolveMethod(songRequestsType, "GetMissingSongs", Type.EmptyTypes);
@@ -94,7 +94,7 @@ namespace ExScoringMod
             if (requestUIType != null)
                 enableQueueMethod = ResolveMethod(requestUIType, "EnableQueue", new[] { typeof(bool) });
             else
-                MelonLogger.Log("[SongRequestIntegration] AudicaModding.RequestUI not found — queue toggle will be inert.");
+                DebugLog.Log("[SongRequestIntegration] AudicaModding.RequestUI not found — queue toggle will be inert.");
 
             // Members used to drive SongRequest's own messaging / available-queue for parity.
             emitMessageMethod = ResolveMethod(songRequestsType, "EmitMessage",
@@ -115,7 +115,7 @@ namespace ExScoringMod
             }
             else
             {
-                MelonLogger.Log("[SongRequestIntegration] AudicaModding.Config not found — mods won't bypass a disabled queue.");
+                DebugLog.Log("[SongRequestIntegration] AudicaModding.Config not found — mods won't bypass a disabled queue.");
             }
 
             // Field accessors live on the request element types, not on SongRequests.
@@ -132,13 +132,13 @@ namespace ExScoringMod
             }
             else
             {
-                MelonLogger.Log("[SongRequestIntegration] AudicaModding.Request not found — request reads will be empty.");
+                DebugLog.Log("[SongRequestIntegration] AudicaModding.Request not found — request reads will be empty.");
             }
 
             if (missingType != null)
                 fDownloadURL = missingType.GetField("DownloadURL", PUB_INST);
             else
-                MelonLogger.Log("[SongRequestIntegration] AudicaModding.MissingRequest not found — download URLs unavailable.");
+                DebugLog.Log("[SongRequestIntegration] AudicaModding.MissingRequest not found — download URLs unavailable.");
         }
 
         // ── Reads ──────────────────────────────────────────────────────────────
@@ -172,7 +172,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[SongRequestIntegration] {method.Name} read failed: {e.Message}");
+                DebugLog.Log($"[SongRequestIntegration] {method.Name} read failed: {e.Message}");
             }
             return list;
         }
@@ -192,7 +192,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[SongRequestIntegration] request field read failed: {e.Message}");
+                DebugLog.Log($"[SongRequestIntegration] request field read failed: {e.Message}");
             }
             return info;
         }
@@ -210,7 +210,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[SongRequestIntegration] RemoveRequest failed: {e.Message}");
+                DebugLog.Log($"[SongRequestIntegration] RemoveRequest failed: {e.Message}");
             }
         }
 
@@ -224,7 +224,7 @@ namespace ExScoringMod
                 try { return (bool)requestsEnabledField.GetValue(null); }
                 catch (Exception e)
                 {
-                    MelonLogger.Log($"[SongRequestIntegration] read requestsEnabled failed: {e.Message}");
+                    DebugLog.Log($"[SongRequestIntegration] read requestsEnabled failed: {e.Message}");
                     return false;
                 }
             }
@@ -242,7 +242,7 @@ namespace ExScoringMod
                     if (letModsIgnoreProp != null) return (bool)letModsIgnoreProp.GetValue(null);
                     if (letModsIgnoreField != null) return (bool)letModsIgnoreField.GetValue(null);
                 }
-                catch (Exception e) { MelonLogger.Log($"[SongRequestIntegration] read LetModsIgnoreQueueStatus failed: {e.Message}"); }
+                catch (Exception e) { DebugLog.Log($"[SongRequestIntegration] read LetModsIgnoreQueueStatus failed: {e.Message}"); }
                 return false;
             }
         }
@@ -258,13 +258,13 @@ namespace ExScoringMod
             if (enableQueueMethod != null)
             {
                 try { enableQueueMethod.Invoke(null, new object[] { enabled }); return; }
-                catch (Exception e) { MelonLogger.Log($"[SongRequestIntegration] EnableQueue failed: {e.Message}"); }
+                catch (Exception e) { DebugLog.Log($"[SongRequestIntegration] EnableQueue failed: {e.Message}"); }
             }
 
             if (requestsEnabledField != null)
             {
                 try { requestsEnabledField.SetValue(null, enabled); }
-                catch (Exception e) { MelonLogger.Log($"[SongRequestIntegration] set requestsEnabled failed: {e.Message}"); }
+                catch (Exception e) { DebugLog.Log($"[SongRequestIntegration] set requestsEnabled failed: {e.Message}"); }
             }
         }
 
@@ -276,7 +276,7 @@ namespace ExScoringMod
             EnsureInitialized();
             if (!present || emitMessageMethod == null) return;
             try { emitMessageMethod.Invoke(null, new object[] { "NewSongQueueItem", null, title ?? "", artist ?? "", mapper ?? "" }); }
-            catch (Exception e) { MelonLogger.Log($"[SongRequestIntegration] EmitNewSongQueueItem failed: {e.Message}"); }
+            catch (Exception e) { DebugLog.Log($"[SongRequestIntegration] EmitNewSongQueueItem failed: {e.Message}"); }
         }
 
         /// <summary>Emit SongRequest's native "already in the queue" message/event.</summary>
@@ -285,7 +285,7 @@ namespace ExScoringMod
             EnsureInitialized();
             if (!present || emitMessageMethod == null) return;
             try { emitMessageMethod.Invoke(null, new object[] { "SongAlreadyInQueue", null, title ?? "", "", "" }); }
-            catch (Exception e) { MelonLogger.Log($"[SongRequestIntegration] EmitSongAlreadyInQueue failed: {e.Message}"); }
+            catch (Exception e) { DebugLog.Log($"[SongRequestIntegration] EmitSongAlreadyInQueue failed: {e.Message}"); }
         }
 
         /// <summary>Emit SongRequest's native "not found" message/event for a query.</summary>
@@ -294,7 +294,7 @@ namespace ExScoringMod
             EnsureInitialized();
             if (!present || emitMessageMethod == null) return;
             try { emitMessageMethod.Invoke(null, new object[] { "SongNotFound", null, query ?? "", "", "" }); }
-            catch (Exception e) { MelonLogger.Log($"[SongRequestIntegration] EmitSongNotFound failed: {e.Message}"); }
+            catch (Exception e) { DebugLog.Log($"[SongRequestIntegration] EmitSongNotFound failed: {e.Message}"); }
         }
 
         /// <summary>
@@ -307,7 +307,7 @@ namespace ExScoringMod
             EnsureInitialized();
             if (!present || emitMessageMethod == null) return;
             try { emitMessageMethod.Invoke(null, new object[] { "Request list cleared.", null, "", "", "" }); }
-            catch (Exception e) { MelonLogger.Log($"[SongRequestIntegration] EmitQueueCleared failed: {e.Message}"); }
+            catch (Exception e) { DebugLog.Log($"[SongRequestIntegration] EmitQueueCleared failed: {e.Message}"); }
         }
 
         /// <summary>Emit SongRequest's native "Request queue enabled/disabled." chat message (and websocket).</summary>
@@ -316,7 +316,7 @@ namespace ExScoringMod
             EnsureInitialized();
             if (!present || emitMessageMethod == null) return;
             try { emitMessageMethod.Invoke(null, new object[] { enabled ? "QueueEnabled" : "QueueDisabled", null, "", "", "" }); }
-            catch (Exception e) { MelonLogger.Log($"[SongRequestIntegration] EmitQueueStateChanged failed: {e.Message}"); }
+            catch (Exception e) { DebugLog.Log($"[SongRequestIntegration] EmitQueueStateChanged failed: {e.Message}"); }
         }
 
         /// <summary>
@@ -328,7 +328,7 @@ namespace ExScoringMod
             EnsureInitialized();
             if (!present || addRequestMethod == null || song == null) return;
             try { addRequestMethod.Invoke(null, new object[] { song, requestedBy ?? "", requestedAt }); }
-            catch (Exception e) { MelonLogger.Log($"[SongRequestIntegration] AddAvailableRequest failed: {e.Message}"); }
+            catch (Exception e) { DebugLog.Log($"[SongRequestIntegration] AddAvailableRequest failed: {e.Message}"); }
         }
 
         /// <summary>
@@ -344,7 +344,7 @@ namespace ExScoringMod
                 if (downloadNameCacheField.GetValue(null) is System.Collections.IList list && !list.Contains(songID))
                     list.Add(songID);
             }
-            catch (Exception e) { MelonLogger.Log($"[SongRequestIntegration] PrimeDownloadNameCache failed: {e.Message}"); }
+            catch (Exception e) { DebugLog.Log($"[SongRequestIntegration] PrimeDownloadNameCache failed: {e.Message}"); }
         }
 
         // ── Diagnostics ───────────────────────────────────────────────────────────
@@ -355,19 +355,19 @@ namespace ExScoringMod
             EnsureInitialized();
             if (!present)
             {
-                MelonLogger.Log("[SongRequestIntegration] not present.");
+                DebugLog.Log("[SongRequestIntegration] not present.");
                 return;
             }
 
             List<RequestInfo> avail = GetAvailableRequests();
             List<RequestInfo> missing = GetMissingRequests();
 
-            MelonLogger.Log($"[SongRequestIntegration] requestsEnabled={RequestsEnabled}; " +
+            DebugLog.Log($"[SongRequestIntegration] requestsEnabled={RequestsEnabled}; " +
                             $"available={avail.Count}, missing={missing.Count}");
             foreach (RequestInfo r in avail)
-                MelonLogger.Log($"  [avail]   {r.SongID} | {r.Title} - {r.Artist} ({r.Mapper})");
+                DebugLog.Log($"  [avail]   {r.SongID} | {r.Title} - {r.Artist} ({r.Mapper})");
             foreach (RequestInfo r in missing)
-                MelonLogger.Log($"  [missing] {r.SongID} | {r.Title} - {r.Artist} ({r.Mapper}) url={r.DownloadURL}");
+                DebugLog.Log($"  [missing] {r.SongID} | {r.Title} - {r.Artist} ({r.Mapper}) url={r.DownloadURL}");
         }
 
         // ── Reflection helpers ────────────────────────────────────────────────────
@@ -383,10 +383,10 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[SongRequestIntegration] resolving {t.Name}.{name} threw: {e.Message}");
+                DebugLog.Log($"[SongRequestIntegration] resolving {t.Name}.{name} threw: {e.Message}");
             }
             if (mi == null)
-                MelonLogger.Log($"[SongRequestIntegration] method {t.Name}.{name} not found — that feature will be inert.");
+                DebugLog.Log($"[SongRequestIntegration] method {t.Name}.{name} not found — that feature will be inert.");
             return mi;
         }
 
@@ -394,7 +394,7 @@ namespace ExScoringMod
         {
             FieldInfo fi = t.GetField(name, BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
             if (fi == null)
-                MelonLogger.Log($"[SongRequestIntegration] field {t.Name}.{name} not found — that feature will be inert.");
+                DebugLog.Log($"[SongRequestIntegration] field {t.Name}.{name} not found — that feature will be inert.");
             return fi;
         }
 

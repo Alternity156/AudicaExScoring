@@ -88,7 +88,7 @@ namespace ExScoringMod
                 amType = FindType("AuthorableModifiers.AuthorableModifiersMod");
                 if (amType == null)
                 {
-                    MelonLogger.Log(Tag + "AuthorableModifiers type not found; bridge disabled.");
+                    DebugLog.Log(Tag + "AuthorableModifiers type not found; bridge disabled.");
                     return;
                 }
 
@@ -105,7 +105,7 @@ namespace ExScoringMod
 
                 if (!Available)
                 {
-                    MelonLogger.Log(Tag + "AuthorableModifiers is missing expected members " +
+                    DebugLog.Log(Tag + "AuthorableModifiers is missing expected members " +
                                     "(unsupported version?); bridge disabled, AM left untouched.");
                     amType = null;
                     return;
@@ -121,12 +121,12 @@ namespace ExScoringMod
                 restartGateActive = onRestart != null && TryPatch(harmony, onRestart,
                     typeof(AuthorableBridge).GetMethod(nameof(RestartGatePrefix), P), "OnRestart");
 
-                MelonLogger.Log(Tag + "ready (loadGate=" + loadGateActive +
+                DebugLog.Log(Tag + "ready (loadGate=" + loadGateActive +
                                 ", restartGate=" + restartGateActive + ").");
             }
             catch (Exception e)
             {
-                MelonLogger.Log(Tag + "Init failed; bridge disabled: " + e);
+                DebugLog.Log(Tag + "Init failed; bridge disabled: " + e);
                 amType = null;
             }
         }
@@ -141,7 +141,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log(Tag + "could not patch AuthorableModifiers." + name + ": " + e.Message);
+                DebugLog.Log(Tag + "could not patch AuthorableModifiers." + name + ": " + e.Message);
                 return false;
             }
         }
@@ -205,7 +205,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log(Tag + "RestartGate failed, falling back to AM's own handling: " + e);
+                DebugLog.Log(Tag + "RestartGate failed, falling back to AM's own handling: " + e);
                 return true;
             }
         }
@@ -235,7 +235,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log(Tag + "InterceptPlay failed, launching without bridge: " + e);
+                DebugLog.Log(Tag + "InterceptPlay failed, launching without bridge: " + e);
                 preparing = false;
                 return false;
             }
@@ -259,7 +259,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log(Tag + "OnInGameRestart failed: " + e);
+                DebugLog.Log(Tag + "OnInGameRestart failed: " + e);
             }
         }
 
@@ -282,7 +282,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log(Tag + "OnMenuStateChanged failed: " + e);
+                DebugLog.Log(Tag + "OnMenuStateChanged failed: " + e);
             }
         }
 
@@ -291,7 +291,7 @@ namespace ExScoringMod
         {
             if (!Available || mSetEndless == null) return;
             try { mSetEndless.Invoke(null, new object[] { active }); }
-            catch (Exception e) { MelonLogger.Log(Tag + "SetEndlessActive failed: " + e.Message); }
+            catch (Exception e) { DebugLog.Log(Tag + "SetEndlessActive failed: " + e.Message); }
         }
 
         /// <summary>
@@ -309,7 +309,7 @@ namespace ExScoringMod
             catch (Exception e)
             {
                 busy = false;
-                MelonLogger.Log(Tag + "BeginLoadForCurrentSong failed: " + e);
+                DebugLog.Log(Tag + "BeginLoadForCurrentSong failed: " + e);
             }
         }
 
@@ -340,7 +340,7 @@ namespace ExScoringMod
                 deadline = Time.unscaledTime + LoadTimeout;
                 while ((!GetLoaded() || IsSwitching()) && Time.unscaledTime < deadline) yield return null;
                 if (Time.unscaledTime >= deadline)
-                    MelonLogger.Log(Tag + "timed out waiting for modifiers/arena; launching anyway.");
+                    DebugLog.Log(Tag + "timed out waiting for modifiers/arena; launching anyway.");
                 if (PrepareCancelled(panel, seq, startState)) { AbortPrepare(seq); yield break; }
 
                 // AM shows its flashing-lights / rotating-arena warning on load and destroys it
@@ -374,7 +374,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log(Tag + "deferred Play failed: " + e);
+                DebugLog.Log(Tag + "deferred Play failed: " + e);
                 ResetIfLoaded(true);
             }
             finally
@@ -414,7 +414,7 @@ namespace ExScoringMod
             if (IsGameplayState(SafeMenuState())) yield break;
             if (!GetFound()) yield break;
 
-            MelonLogger.Log(Tag + "clearing modifiers left active outside gameplay.");
+            DebugLog.Log(Tag + "clearing modifiers left active outside gameplay.");
             SetEndless(false);
             InvokeReset(!fromGameplay);
         }
@@ -462,7 +462,7 @@ namespace ExScoringMod
             catch (Exception e)
             {
                 Exception inner = (e is TargetInvocationException && e.InnerException != null) ? e.InnerException : e;
-                MelonLogger.Log(Tag + "AuthorableModifiers failed to load '" + path +
+                DebugLog.Log(Tag + "AuthorableModifiers failed to load '" + path +
                                 "'; playing without modifiers: " + inner.Message);
                 Recover(fromRestart);
                 return false;
@@ -523,7 +523,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log(Tag + "Reset failed: " + e.Message);
+                DebugLog.Log(Tag + "Reset failed: " + e.Message);
             }
         }
 

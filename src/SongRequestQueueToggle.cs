@@ -48,14 +48,14 @@ namespace ExScoringMod
             indicator = null;
 
             var parent = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center");
-            if (parent == null) { MelonLogger.Log("[QueueToggle] song-page center not found; will retry next entry."); return; }
+            if (parent == null) { DebugLog.Log("[QueueToggle] song-page center not found; will retry next entry."); return; }
 
             // The PracticeToggle may be inactive (launch panel blanked when no song is selected), so reach it
             // through its (always-active) parent with transform.Find — that traverses inactive children,
             // whereas GameObject.Find only sees active ones.
             var launchCenter = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center");
             Transform refT = launchCenter != null ? launchCenter.transform.Find("NoFailPracticeToggle/PracticeToggle") : null;
-            if (refT == null) { MelonLogger.Log("[QueueToggle] PracticeToggle source not found; will retry next entry."); return; }
+            if (refT == null) { DebugLog.Log("[QueueToggle] PracticeToggle source not found; will retry next entry."); return; }
 
             toggle = GameObject.Instantiate(refT.gameObject, parent.transform);
             toggle.name = "ExScoring_QueueToggle";
@@ -120,7 +120,7 @@ namespace ExScoringMod
 
             if (indicator == null)
             {
-                MelonLogger.Log($"[QueueToggle] ({reason}) indicator source not ready; polling for it.");
+                DebugLog.Log($"[QueueToggle] ({reason}) indicator source not ready; polling for it.");
                 if (!indicatorRetryRunning)
                 {
                     indicatorRetryRunning = true;
@@ -130,7 +130,7 @@ namespace ExScoringMod
             }
 
             SyncIndicator();
-            MelonLogger.Log($"[QueueToggle] ({reason}) highlight set to {(SongRequestIntegration.RequestsEnabled ? "ON" : "OFF")}.");
+            DebugLog.Log($"[QueueToggle] ({reason}) highlight set to {(SongRequestIntegration.RequestsEnabled ? "ON" : "OFF")}.");
         }
 
         /// <summary>Polls until the indicator can be created (or the toggle is gone), then applies the setting.</summary>
@@ -149,18 +149,18 @@ namespace ExScoringMod
 
             if (toggle == null)
             {
-                MelonLogger.Log("[QueueToggle] toggle destroyed while waiting for the indicator; will rebuild on next song-page entry.");
+                DebugLog.Log("[QueueToggle] toggle destroyed while waiting for the indicator; will rebuild on next song-page entry.");
                 yield break;
             }
 
             if (indicator == null)
             {
-                MelonLogger.Log($"[QueueToggle] indicator source still missing after {frames} frames; will retry next song-page entry.");
+                DebugLog.Log($"[QueueToggle] indicator source still missing after {frames} frames; will retry next song-page entry.");
                 yield break;
             }
 
             SyncIndicator();
-            MelonLogger.Log($"[QueueToggle] indicator ready after {frames} frame(s); highlight set to {(SongRequestIntegration.RequestsEnabled ? "ON" : "OFF")}.");
+            DebugLog.Log($"[QueueToggle] indicator ready after {frames} frame(s); highlight set to {(SongRequestIntegration.RequestsEnabled ? "ON" : "OFF")}.");
         }
 
         /// <summary>

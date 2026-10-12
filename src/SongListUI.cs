@@ -363,7 +363,7 @@ namespace ExScoringMod
             SongList.SongData songData = selectedSongData ?? SongDataHolder.I?.songData;
             if (songData == null)
             {
-                MelonLogger.Log("[ExScoring] UpdateLaunchPanelInfo: no song data available (selectedSongData and SongDataHolder.I.songData both null), aborting.");
+                DebugLog.Log("[ExScoring] UpdateLaunchPanelInfo: no song data available (selectedSongData and SongDataHolder.I.songData both null), aborting.");
                 return;
             }
 
@@ -424,7 +424,7 @@ namespace ExScoringMod
             }
             catch (System.Exception ex)
             {
-                MelonLogger.Log($"[BlindData] play count check failed for {songId}: {ex.Message}");
+                DebugLog.Log($"[BlindData] play count check failed for {songId}: {ex.Message}");
                 return false;
             }
         }

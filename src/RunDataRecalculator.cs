@@ -354,7 +354,7 @@ namespace ExScoringMod
         private static void LogRunLoadErrors(RunLoadJob job)
         {
             for (int i = 0; i < job.errors.Count; i++)
-                MelonLogger.Log("[ExScoring] " + job.errors[i]);
+                DebugLog.Log("[ExScoring] " + job.errors[i]);
         }
 
         /// <summary>
@@ -534,7 +534,7 @@ namespace ExScoringMod
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[ExScoring] Failed to build chain-tail lookup for {songId}/{difficultyStr}: {ex}");
+                DebugLog.Log($"[ExScoring] Failed to build chain-tail lookup for {songId}/{difficultyStr}: {ex}");
             }
 
             return lookup;
@@ -799,7 +799,7 @@ namespace ExScoringMod
                     }
                     catch (Exception ex)
                     {
-                        MelonLogger.Log($"[ExScoring] Failed to summarize run file {file.fileName}: {ex}");
+                        DebugLog.Log($"[ExScoring] Failed to summarize run file {file.fileName}: {ex}");
                         continue;
                     }
                 }
@@ -855,7 +855,7 @@ namespace ExScoringMod
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[ExScoring] Failed to recalculate run file {file.fileName}: {ex}");
+                    DebugLog.Log($"[ExScoring] Failed to recalculate run file {file.fileName}: {ex}");
                 }
 
                 file.data = null; // parsed JSON no longer needed once the ExCues exist

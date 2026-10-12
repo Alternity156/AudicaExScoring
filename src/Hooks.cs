@@ -90,7 +90,7 @@ namespace ExScoringMod
                 MenuState.State state
                 )
             {
-                MelonLogger.Log($"SetState: {menuState} -> {state}");
+                DebugLog.Log($"SetState: {menuState} -> {state}");
 
                 // Clears anything AuthorableModifiers still holds once we're really out of
                 // gameplay / the song page (ExScoring has no launch page, so AM's own
@@ -109,7 +109,7 @@ namespace ExScoringMod
                 if (menuState == MenuState.State.SettingsPage && state == MenuState.State.Launching)
                 {
                     launchedOutsideSongFlow = true;
-                    MelonLogger.Log("[ExScoring] SetState: SettingsPage -> Launching detected (calibration?) — launchedOutsideSongFlow = true");
+                    DebugLog.Log("[ExScoring] SetState: SettingsPage -> Launching detected (calibration?) — launchedOutsideSongFlow = true");
                 }
 
                 if (menuState == MenuState.State.Launched && state != MenuState.State.Launched)
@@ -183,7 +183,7 @@ namespace ExScoringMod
                 var gameSong = holder != null ? holder.songData : null;
                 string gameSongID = gameSong != null ? gameSong.songID : null;
 
-                MelonLogger.Log("[SelectDiag] Launching: gameSong=" + (gameSongID ?? "NULL") +
+                DebugLog.Log("[SelectDiag] Launching: gameSong=" + (gameSongID ?? "NULL") +
                                 ", modSelected=" + (selectedSong ?? "NULL") +
                                 ", failedSelect=" + (failedSelectSongID ?? "none"));
 
@@ -194,7 +194,7 @@ namespace ExScoringMod
 
                 if (gameSong != null && gameSongID != selectedSong)
                 {
-                    MelonLogger.Log("[SelectDiag] Launching after a failed select of '" + failed +
+                    DebugLog.Log("[SelectDiag] Launching after a failed select of '" + failed +
                                     "' — re-syncing mod selection '" + (selectedSong ?? "NULL") +
                                     "' -> '" + gameSongID + "'.");
                     selectedSong = gameSongID;
@@ -203,13 +203,13 @@ namespace ExScoringMod
                 }
                 else
                 {
-                    MelonLogger.Log("[SelectDiag] Launching after a failed select of '" + failed +
+                    DebugLog.Log("[SelectDiag] Launching after a failed select of '" + failed +
                                     "' — game and mod selection already agree, nothing to re-sync.");
                 }
             }
             catch (Exception e)
             {
-                MelonLogger.Log("[SelectDiag] CheckSelectionOnLaunch failed: " + e);
+                DebugLog.Log("[SelectDiag] CheckSelectionOnLaunch failed: " + e);
             }
         }
 
@@ -250,7 +250,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log("[ExScoring] SetupSongPageWhenReady: setup failed: " + e);
+                DebugLog.Log("[ExScoring] SetupSongPageWhenReady: setup failed: " + e);
             }
             finally
             {
@@ -275,7 +275,7 @@ namespace ExScoringMod
                 }
                 catch (Exception e)
                 {
-                    MelonLogger.Log("[ExScoring] SetupSongPageWhenReady: RestoreIfPending failed: " + e);
+                    DebugLog.Log("[ExScoring] SetupSongPageWhenReady: RestoreIfPending failed: " + e);
                 }
             }
             else if (!launchedOutsideSongFlow)
@@ -292,7 +292,7 @@ namespace ExScoringMod
                 // slower than AutoSelectSong's bind window accounts for on this path, so skip it
                 // rather than let it silently fail. UpdateLaunchPanelInfo/RefreshLeaderboardWhenReady
                 // below still run and don't depend on this succeeding.
-                MelonLogger.Log("[ExScoring] SetupSongPageWhenReady: skipping AutoSelectSong (launchedOutsideSongFlow) — likely returning from calibration");
+                DebugLog.Log("[ExScoring] SetupSongPageWhenReady: skipping AutoSelectSong (launchedOutsideSongFlow) — likely returning from calibration");
             }
 
             // Consumed exactly once here regardless of which branch ran above, so it can never
@@ -355,14 +355,14 @@ namespace ExScoringMod
                 // since this was queued, so a stale request can't clobber a newer, correct one.
                 if (menuState != MenuState.State.SongPage || selectedSong != songIdAtCallTime)
                 {
-                    MelonLogger.Log($"[ExScoring] RefreshLeaderboardWhenReady: aborting for {songIdAtCallTime} (state/song changed).");
+                    DebugLog.Log($"[ExScoring] RefreshLeaderboardWhenReady: aborting for {songIdAtCallTime} (state/song changed).");
                     yield break;
                 }
 
                 var leaderboard = UnityEngine.Object.FindObjectOfType<LeaderboardDisplay>();
                 if (leaderboard != null)
                 {
-                    MelonLogger.Log($"[ExScoring] RefreshLeaderboardWhenReady: found LeaderboardDisplay after {f} frame(s) for {songIdAtCallTime}, calling ViewTop().");
+                    DebugLog.Log($"[ExScoring] RefreshLeaderboardWhenReady: found LeaderboardDisplay after {f} frame(s) for {songIdAtCallTime}, calling ViewTop().");
                     leaderboard.ViewTop();
                     yield break;
                 }
@@ -370,7 +370,7 @@ namespace ExScoringMod
                 yield return null;
             }
 
-            MelonLogger.Log($"[ExScoring] RefreshLeaderboardWhenReady: LeaderboardDisplay never found within {maxFrames} frames for {songIdAtCallTime}.");
+            DebugLog.Log($"[ExScoring] RefreshLeaderboardWhenReady: LeaderboardDisplay never found within {maxFrames} frames for {songIdAtCallTime}.");
         }
 
         [HarmonyPatch(typeof(SongPreview), "OnLaunchScreen")]
@@ -408,7 +408,7 @@ namespace ExScoringMod
                         Transform backT = songBack.transform;
                         if (t == backT || t.IsChildOf(backT))
                         {
-                            MelonLogger.Log("[Options] bottom Back shot while in Options -> returning to song list");
+                            DebugLog.Log("[Options] bottom Back shot while in Options -> returning to song list");
                             FolderRowManager.NavBack();
                             KataUtil.PlayFMODEvent("event:/shell/button_shatter");
                             return false;
@@ -421,7 +421,7 @@ namespace ExScoringMod
                 DifficultySelectButton diffButton = parent.GetComponent<DifficultySelectButton>();
                 if (diffButton == null) return true;
 
-                MelonLogger.Log($"[ExScoring] GunButtonOnHit: difficulty button hit -> {diffButton.difficulty}");
+                DebugLog.Log($"[ExScoring] GunButtonOnHit: difficulty button hit -> {diffButton.difficulty}");
 
                 KataConfig.I.SetDifficulty(diffButton.difficulty);
                 var songSelectObj = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect");
@@ -432,7 +432,7 @@ namespace ExScoringMod
 
                 // Target-count labels (TotalTargets/Left/Right/Either) + difficulty button enabled-state,
                 // same call already used on song select — GetCueStats reads KataConfig.I.mDifficulty fresh.
-                MelonLogger.Log("[ExScoring] GunButtonOnHit: refreshing launch panel info (target data).");
+                DebugLog.Log("[ExScoring] GunButtonOnHit: refreshing launch panel info (target data).");
                 UpdateLaunchPanelInfo();
 
                 // EX leaderboard — panel already exists/active on the song page here, so a direct find +
@@ -440,17 +440,17 @@ namespace ExScoringMod
                 var leaderboard = UnityEngine.Object.FindObjectOfType<LeaderboardDisplay>();
                 if (leaderboard != null)
                 {
-                    MelonLogger.Log("[ExScoring] GunButtonOnHit: refreshing leaderboard via ViewTop().");
+                    DebugLog.Log("[ExScoring] GunButtonOnHit: refreshing leaderboard via ViewTop().");
                     leaderboard.ViewTop();
                 }
                 else
                 {
-                    MelonLogger.Log("[ExScoring] GunButtonOnHit: no LeaderboardDisplay found, skipping leaderboard refresh.");
+                    DebugLog.Log("[ExScoring] GunButtonOnHit: no LeaderboardDisplay found, skipping leaderboard refresh.");
                 }
 
                 // Song-list row high scores — VirtualSongList skips UpdateHighScoreInfo() when a pooled row
                 // is rebound to the same song, so nothing else re-triggers this on a pure difficulty change.
-                MelonLogger.Log("[ExScoring] GunButtonOnHit: refreshing visible song-list row scores.");
+                DebugLog.Log("[ExScoring] GunButtonOnHit: refreshing visible song-list row scores.");
                 RefreshAllVisibleSongRowScores();
 
                 // History panel, if currently open. ApplyHistoryToPanel (inside the coroutine) already calls
@@ -460,7 +460,7 @@ namespace ExScoringMod
                     var songInfoPanel = UnityEngine.Object.FindObjectOfType<SongInfoPanel>();
                     if (songInfoPanel != null && songInfoPanel.gameObject.activeInHierarchy)
                     {
-                        MelonLogger.Log($"[ExScoring] GunButtonOnHit: history panel open, repopulating for {selectedSong}|{diffButton.difficulty}.");
+                        DebugLog.Log($"[ExScoring] GunButtonOnHit: history panel open, repopulating for {selectedSong}|{diffButton.difficulty}.");
                         MelonCoroutines.Start(PopulateHistoryCoroutine(songInfoPanel, selectedSong, diffButton.difficulty.ToString()));
                     }
                 }
@@ -502,7 +502,7 @@ namespace ExScoringMod
                     // method throws, so a value still set at launch means the select failed.
                     failedSelectSongID = data != null ? data.songID : null;
 
-                    MelonLogger.Log("[SelectDiag] OnSelect: item=" + __instance.gameObject.name +
+                    DebugLog.Log("[SelectDiag] OnSelect: item=" + __instance.gameObject.name +
                                     ", song=" + (data != null ? data.songID : "NULL") +
                                     ", moggSongEmpty=" + (data != null ? string.IsNullOrEmpty(data.moggSong).ToString() : "n/a") +
                                     ", mSongSelect=" + (selectMissing ? "NULL" : "ok") +
@@ -516,7 +516,7 @@ namespace ExScoringMod
                 }
                 catch (Exception e)
                 {
-                    MelonLogger.Log("[SelectDiag] OnSelect diagnostics failed: " + e);
+                    DebugLog.Log("[SelectDiag] OnSelect diagnostics failed: " + e);
                 }
             }
 
@@ -572,7 +572,7 @@ namespace ExScoringMod
         {
             public static bool Prefix(Animation __instance, string animation)
             {
-                MelonLogger.Log($"Animation.Play({animation}) on {__instance.gameObject.name} suppress={suppressShellPageAnimations}");
+                DebugLog.Log($"Animation.Play({animation}) on {__instance.gameObject.name} suppress={suppressShellPageAnimations}");
                 if (suppressShellPageAnimations)
                 {
                     if (__instance.gameObject.name == "ShellPage_Launch")
@@ -1636,7 +1636,7 @@ namespace ExScoringMod
                     __instance.Pointer == OptionsMenuClone.Menu.Pointer &&
                     !OptionsMenuClone.allowShowPage)
                 {
-                    MelonLogger.Log($"[ShowPage CLONE] BLOCKED page={page}");
+                    DebugLog.Log($"[ShowPage CLONE] BLOCKED page={page}");
                     return false;
                 }
 
@@ -1818,7 +1818,7 @@ namespace ExScoringMod
                 FolderRowManager.InjectAllSongs(__result);
 
                 RandomSong.UpdateAvailableSongs(__result, extras);
-                MelonLogger.Log($"[RandomSong] UpdateAvailableSongs called: extras={extras}, count={__result.Count}");
+                DebugLog.Log($"[RandomSong] UpdateAvailableSongs called: extras={extras}, count={__result.Count}");
             }
         }
 
@@ -2095,7 +2095,7 @@ namespace ExScoringMod
             {
                 if (newState == StartupLoader.State.HMXLogo)
                 {
-                    MelonLoader.MelonLogger.Log("Skipping HMXLogo state, redirecting to Complete");
+                    DebugLog.Log("Skipping HMXLogo state, redirecting to Complete");
                     newState = StartupLoader.State.Complete;
                 }
                 return true;
@@ -2111,7 +2111,7 @@ namespace ExScoringMod
                 __instance.displayTime = 0.2f;
                 __instance.fadeInTime = 0.2f;
                 __instance.fadeOutTime = 0.2f;
-                MelonLoader.MelonLogger.Log("Shortened StartupLogo timings (moderate)");
+                DebugLog.Log("Shortened StartupLogo timings (moderate)");
             }
         }
 
@@ -2242,7 +2242,7 @@ namespace ExScoringMod
                 {
                     lastActiveCount[key] = activeCount;
                     scrollRect.QueueUpdateSize();
-                    MelonLogger.Log($"[SongInfoPanel] History list active count changed to {activeCount}; queued scroll size update.");
+                    DebugLog.Log($"[SongInfoPanel] History list active count changed to {activeCount}; queued scroll size update.");
                 }
             }
         }

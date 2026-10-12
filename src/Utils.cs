@@ -192,7 +192,7 @@ namespace ExScoringMod
                 yield return null;
             }
 
-            MelonLogger.Log($"[ExScoring] WaitForDLCEntitlementResolution: gave up after {maxFrames} frames, " +
+            DebugLog.Log($"[ExScoring] WaitForDLCEntitlementResolution: gave up after {maxFrames} frames, " +
                              $"{SongList.I.mPendingDLCEntitlementChecks.Count} still pending.");
         }
 

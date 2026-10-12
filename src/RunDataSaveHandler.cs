@@ -81,7 +81,7 @@ namespace ExScoringMod
                     writer.Write(json);
                 }
 
-                MelonLogger.Log($"[ExScoring] Saved run data to {filePath}");
+                DebugLog.Log($"[ExScoring] Saved run data to {filePath}");
 
                 // Keep the background loader's run file index (RunDataRecalculator.cs) in sync.
                 RunFileIndexAdd(fileName);
@@ -100,7 +100,7 @@ namespace ExScoringMod
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[ExScoring] Failed to save run data: {ex}");
+                DebugLog.Log($"[ExScoring] Failed to save run data: {ex}");
             }
         }
 
@@ -132,7 +132,7 @@ namespace ExScoringMod
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[ExScoring] Failed to read platform: {ex}");
+                DebugLog.Log($"[ExScoring] Failed to read platform: {ex}");
                 return "Unknown";
             }
         }
@@ -208,7 +208,7 @@ namespace ExScoringMod
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[ExScoring] Failed to enforce run data limits: {ex}");
+                DebugLog.Log($"[ExScoring] Failed to enforce run data limits: {ex}");
             }
         }
 
@@ -218,11 +218,11 @@ namespace ExScoringMod
             {
                 file.Delete();
                 RunFileIndexRemove(file.Name); // keep the run file index (RunDataRecalculator.cs) in sync
-                MelonLogger.Log($"[ExScoring] Deleted old run data file: {file.Name}");
+                DebugLog.Log($"[ExScoring] Deleted old run data file: {file.Name}");
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[ExScoring] Failed to delete run data file {file.Name}: {ex}");
+                DebugLog.Log($"[ExScoring] Failed to delete run data file {file.Name}: {ex}");
             }
         }
 

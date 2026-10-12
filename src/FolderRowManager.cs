@@ -77,7 +77,7 @@ namespace ExScoringMod
             ResetNav();                          // generated folders only exist at root
             SongFolderManager.openFolder = null; // collapse on mode switch
 
-            MelonLogger.Log($"[FolderRowManager] Sort -> {currentSort}");
+            DebugLog.Log($"[FolderRowManager] Sort -> {currentSort}");
 
             if (VirtualSongList.IsActive)
                 Apply();
@@ -132,7 +132,7 @@ namespace ExScoringMod
             bool opening = SongFolderManager.openFolder != folderName;
             SongFolderManager.openFolder = opening ? folderName : null;
 
-            MelonLogger.Log($"[FolderRowManager] Toggle '{folderName}' -> open={SongFolderManager.openFolder ?? "none"}");
+            DebugLog.Log($"[FolderRowManager] Toggle '{folderName}' -> open={SongFolderManager.openFolder ?? "none"}");
 
             Apply();
 
@@ -601,7 +601,7 @@ namespace ExScoringMod
             }
 
             // DIAGNOSTIC: confirm the Playlists row is present at index 0.
-            MelonLogger.Log($"[FolderRowManager] BuildRootView: {rows.Count} rows; " +
+            DebugLog.Log($"[FolderRowManager] BuildRootView: {rows.Count} rows; " +
                 $"row0 = {(rows.Count > 0 ? rows[0].kind + " '" + (rows[0].label ?? rows[0].folderName) + "'" : "none")}");
 
             return rows;
@@ -756,7 +756,7 @@ namespace ExScoringMod
                         rows.Add(ViewRow.SongRow(id));
             }
 
-            MelonLogger.Log($"[FolderRowManager] BuildAlphaView ({(reversed ? "Z-A" : "A-Z")}): " +
+            DebugLog.Log($"[FolderRowManager] BuildAlphaView ({(reversed ? "Z-A" : "A-Z")}): " +
                 $"{groups.Count} letter folder(s), open={open ?? "none"}");
             return rows;
         }
@@ -858,12 +858,12 @@ namespace ExScoringMod
                 }
                 catch (System.Exception ex)
                 {
-                    MelonLogger.Log($"[FolderRowManager] star calc failed for {id}: {ex.Message}");
+                    DebugLog.Log($"[FolderRowManager] star calc failed for {id}: {ex.Message}");
                 }
                 starCache[id] = enc;
             }
 
-            MelonLogger.Log($"[FolderRowManager] Star cache built: {starCache.Count} songs");
+            DebugLog.Log($"[FolderRowManager] Star cache built: {starCache.Count} songs");
         }
 
         private static string StarLabel(int tier) => tier == 6 ? "Gold Stars" : (tier == 1 ? "1 Star" : tier + " Stars");
@@ -974,7 +974,7 @@ namespace ExScoringMod
                         rows.Add(ViewRow.SongRow(id));
             }
 
-            MelonLogger.Log($"[FolderRowManager] BuildStarsView ({(reversed ? "Least" : "Most")}Stars): " +
+            DebugLog.Log($"[FolderRowManager] BuildStarsView ({(reversed ? "Least" : "Most")}Stars): " +
                 $"{groups.Count} bucket(s), open={open ?? "none"}");
             return rows;
         }
@@ -1081,7 +1081,7 @@ namespace ExScoringMod
             {
                 // Something never reported back. Settle the stragglers as Unplayed so the view can
                 // still be built instead of sitting on the loading row (or reloading forever).
-                MelonLogger.Log($"[FolderRowManager] Grade load timed out with {gradeLoadPending} song(s) pending.");
+                DebugLog.Log($"[FolderRowManager] Grade load timed out with {gradeLoadPending} song(s) pending.");
                 for (int i = 0; i < songIds.Count; i++)
                 {
                     string key = GradeKey(songIds[i], difficulty);
@@ -1091,7 +1091,7 @@ namespace ExScoringMod
             }
 
             gradeLoadRunning = false;
-            MelonLogger.Log($"[FolderRowManager] Grade cache loaded for {difficulty}: {songIds.Count} song(s) checked, {queued} with runs.");
+            DebugLog.Log($"[FolderRowManager] Grade cache loaded for {difficulty}: {songIds.Count} song(s) checked, {queued} with runs.");
 
             string reveal = pendingGradeReveal;
             pendingGradeReveal = null;
@@ -1194,7 +1194,7 @@ namespace ExScoringMod
                         rows.Add(ViewRow.SongRow(id));
             }
 
-            MelonLogger.Log($"[FolderRowManager] BuildGradeView ({(reversed ? "Low" : "High")} grade, {CurrentDifficultyName()}): " +
+            DebugLog.Log($"[FolderRowManager] BuildGradeView ({(reversed ? "Low" : "High")} grade, {CurrentDifficultyName()}): " +
                 $"{groups.Count} bucket(s), open={open ?? "none"}");
             return rows;
         }
@@ -1312,7 +1312,7 @@ namespace ExScoringMod
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[FolderRowManager] Sort label update failed: {ex.Message}");
+                DebugLog.Log($"[FolderRowManager] Sort label update failed: {ex.Message}");
                 sortLabelTexts = null;
             }
         }
@@ -1323,13 +1323,13 @@ namespace ExScoringMod
             Transform label = sortMenuObj.transform.Find(relativePath);
             if (label == null)
             {
-                MelonLogger.Log($"[FolderRowManager] Sort label not found: {relativePath}");
+                DebugLog.Log($"[FolderRowManager] Sort label not found: {relativePath}");
                 return null;
             }
 
             TMP_Text text = label.GetComponent<TMP_Text>();
             if (text == null) text = label.gameObject.GetComponentInChildren<TMP_Text>(true);
-            if (text == null) MelonLogger.Log($"[FolderRowManager] No text component on sort label: {relativePath}");
+            if (text == null) DebugLog.Log($"[FolderRowManager] No text component on sort label: {relativePath}");
             return text;
         }
 
@@ -1405,12 +1405,12 @@ namespace ExScoringMod
                 }
                 catch (System.Exception ex)
                 {
-                    MelonLogger.Log($"[FolderRowManager] play count failed for {id}: {ex.Message}");
+                    DebugLog.Log($"[FolderRowManager] play count failed for {id}: {ex.Message}");
                 }
                 playCache[id] = count;
             }
 
-            MelonLogger.Log($"[FolderRowManager] Play cache built: {playCache.Count} songs");
+            DebugLog.Log($"[FolderRowManager] Play cache built: {playCache.Count} songs");
         }
 
         private static string PlayLabel(int count) =>
@@ -1477,7 +1477,7 @@ namespace ExScoringMod
                         rows.Add(ViewRow.SongRow(id));
             }
 
-            MelonLogger.Log($"[FolderRowManager] BuildPlaysView ({(reversed ? "Least" : "Most")}Played): " +
+            DebugLog.Log($"[FolderRowManager] BuildPlaysView ({(reversed ? "Least" : "Most")}Played): " +
                 $"{groups.Count} bucket(s), open={open ?? "none"}");
             return rows;
         }
@@ -1524,12 +1524,12 @@ namespace ExScoringMod
                 }
                 catch (System.Exception ex)
                 {
-                    MelonLogger.Log($"[FolderRowManager] recency failed for {id}: {ex.Message}");
+                    DebugLog.Log($"[FolderRowManager] recency failed for {id}: {ex.Message}");
                 }
                 recentCache[id] = daysAgo;
             }
 
-            MelonLogger.Log($"[FolderRowManager] Recent cache built: {recentCache.Count} songs");
+            DebugLog.Log($"[FolderRowManager] Recent cache built: {recentCache.Count} songs");
         }
 
         /// <summary>Graduated recency label: days, then 30-day months, then 365-day years.</summary>
@@ -1604,7 +1604,7 @@ namespace ExScoringMod
                         rows.Add(ViewRow.SongRow(id));
             }
 
-            MelonLogger.Log($"[FolderRowManager] BuildRecentView (MostRecent): {groups.Count} bucket(s), open={open ?? "none"}");
+            DebugLog.Log($"[FolderRowManager] BuildRecentView (MostRecent): {groups.Count} bucket(s), open={open ?? "none"}");
             return rows;
         }
 
@@ -1786,7 +1786,7 @@ namespace ExScoringMod
                     if (titleExact && artistOk && mapperOk) return s;
                 }
             }
-            catch (System.Exception e) { MelonLogger.Log($"[FolderRowManager] FindLocalRequestSong failed: {e.Message}"); }
+            catch (System.Exception e) { DebugLog.Log($"[FolderRowManager] FindLocalRequestSong failed: {e.Message}"); }
             return null;
         }
 

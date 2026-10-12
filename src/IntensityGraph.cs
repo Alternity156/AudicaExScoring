@@ -65,7 +65,7 @@ namespace ExScoringMod
 
         public static void CreateIntensityGraph(Transform parent, string songId, KataConfig.Difficulty difficulty)
         {
-            MelonLogger.Log($"CreateIntensityGraph called, songId: {songId}");
+            DebugLog.Log($"CreateIntensityGraph called, songId: {songId}");
 
             // Destroy existing graph if any
             DestroyIntensityGraph();
@@ -171,8 +171,8 @@ namespace ExScoringMod
                 && difficulty == lastBuiltDifficulty)
                 return;
 
-            MelonLogger.Log("RefreshIntensityGraph called");
-            MelonLogger.Log($"selectedSong: {selectedSong}");
+            DebugLog.Log("RefreshIntensityGraph called");
+            DebugLog.Log($"selectedSong: {selectedSong}");
 
             GameObject launchPanelCenter = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center");
             if (launchPanelCenter == null) return;

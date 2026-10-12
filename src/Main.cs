@@ -102,7 +102,7 @@ namespace ExScoringMod
             if (MelonHandler.Mods.Any(it => it.Assembly.GetName().Name == "AuthorableModifiers"))
             {
                 authorableInstalled = true;
-                MelonLogger.Log("AuthorableModifiers detected");
+                DebugLog.Log("AuthorableModifiers detected");
                 AuthorableBridge.Init();
             }
 
@@ -110,7 +110,7 @@ namespace ExScoringMod
             if (MelonHandler.Mods.Any(it => it.Assembly.GetName().Name == "ModSettings"))
             {
                 modSettingsInstalled = true;
-                MelonLogger.Log("ModSettings detected");
+                DebugLog.Log("ModSettings detected");
                 ModSettingsBlocker.Apply();
             }
 
@@ -118,7 +118,7 @@ namespace ExScoringMod
             if (MelonHandler.Mods.Any(it => it.Info.SystemType.Name == "SongDataLoader"))
             {
                 songDataLoaderInstalled = true;
-                MelonLogger.Log("SongDataLoader detected — album art enabled");
+                DebugLog.Log("SongDataLoader detected — album art enabled");
             }
 
             // Check if SongRequest (Silzoid's optional mod) is installed.
@@ -127,7 +127,7 @@ namespace ExScoringMod
             if (SongRequestIntegration.IsPresent)
             {
                 songRequestInstalled = true;
-                MelonLogger.Log("SongRequest detected — request folder integration enabled");
+                DebugLog.Log("SongRequest detected — request folder integration enabled");
                 SongRequestBlocker.Apply();
                 SongRequestInterceptor.Apply();
             }
@@ -179,13 +179,13 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[WARNING] Could not read Downloads folder: {e.Message}");
+                DebugLog.Log($"[WARNING] Could not read Downloads folder: {e.Message}");
                 return;
             }
 
             if (files.Length == 0) return;
 
-            MelonLogger.Log($"Moving {files.Length} downloaded song(s) to songs folder...");
+            DebugLog.Log($"Moving {files.Length} downloaded song(s) to songs folder...");
 
             foreach (string filePath in files)
             {
@@ -198,17 +198,17 @@ namespace ExScoringMod
                     {
                         // Already in songs folder — just clean up the download copy
                         File.Delete(filePath);
-                        MelonLogger.Log($"  Deleted duplicate: {fileName}");
+                        DebugLog.Log($"  Deleted duplicate: {fileName}");
                     }
                     else
                     {
                         File.Move(filePath, destination);
-                        MelonLogger.Log($"  Moved: {fileName}");
+                        DebugLog.Log($"  Moved: {fileName}");
                     }
                 }
                 catch (Exception e)
                 {
-                    MelonLogger.Log($"[WARNING] Could not move {fileName}: {e.Message}");
+                    DebugLog.Log($"[WARNING] Could not move {fileName}: {e.Message}");
                     // File stays in Downloads — the fallback directory registration
                     // will ensure it still gets loaded
                 }
@@ -224,11 +224,11 @@ namespace ExScoringMod
             try
             {
                 SongList.AddSongSearchDir(Application.dataPath, downloadsDirectory);
-                MelonLogger.Log("Registered Downloads as additional song source directory");
+                DebugLog.Log("Registered Downloads as additional song source directory");
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[WARNING] Could not register Downloads directory: {e.Message}");
+                DebugLog.Log($"[WARNING] Could not register Downloads directory: {e.Message}");
             }
         }
 
@@ -248,7 +248,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[WARNING] Could not enumerate song subfolders: {e.Message}");
+                DebugLog.Log($"[WARNING] Could not enumerate song subfolders: {e.Message}");
                 return;
             }
 
@@ -257,11 +257,11 @@ namespace ExScoringMod
                 try
                 {
                     SongList.AddSongSearchDir(Application.streamingAssetsPath, subdir);
-                    MelonLogger.Log($"Registered song subfolder: {Path.GetFileName(subdir)}");
+                    DebugLog.Log($"Registered song subfolder: {Path.GetFileName(subdir)}");
                 }
                 catch (Exception e)
                 {
-                    MelonLogger.Log($"[WARNING] Could not register subfolder {Path.GetFileName(subdir)}: {e.Message}");
+                    DebugLog.Log($"[WARNING] Could not register subfolder {Path.GetFileName(subdir)}: {e.Message}");
                 }
             }
         }
@@ -293,21 +293,21 @@ namespace ExScoringMod
             yield return www;
             try
             {
-                MelonLogger.Log($"[SongCount] API response length: {www.text?.Length}");
+                DebugLog.Log($"[SongCount] API response length: {www.text?.Length}");
                 int newSongCount = MelonLoader.TinyJSON.JSON.Load(www.text).Make<NewAPISongList>().count;
-                MelonLogger.Log($"[SongCount] API count: {newSongCount}, LastSongCount: {Config.LastSongCount}");
-                MelonLogger.Log($"[SongCount] notificationPanel null? {SongListNotification.notificationPanel == null}");
+                DebugLog.Log($"[SongCount] API count: {newSongCount}, LastSongCount: {Config.LastSongCount}");
+                DebugLog.Log($"[SongCount] notificationPanel null? {SongListNotification.notificationPanel == null}");
                 if (SongListNotification.notificationPanel != null)
                 {
                     if (Config.LastSongCount == 0)
                     {
                         Config.UpdateSongCount(newSongCount);
-                        MelonLogger.Log("[SongCount] First run, storing count");
+                        DebugLog.Log("[SongCount] First run, storing count");
                     }
                     else if (Config.LastSongCount == newSongCount)
                     {
                         SongListNotification.SetText("There are no new songs available");
-                        MelonLogger.Log("[SongCount] No new songs");
+                        DebugLog.Log("[SongCount] No new songs");
                     }
                     else
                     {
@@ -316,14 +316,14 @@ namespace ExScoringMod
                         string pre = isSingular ? "is " : "are ";
                         string noun = isSingular ? "song" : "songs";
                         SongListNotification.SetText("There " + pre + diff.ToString() + " new " + noun + " available");
-                        MelonLogger.Log($"[SongCount] {diff} new songs");
+                        DebugLog.Log($"[SongCount] {diff} new songs");
                     }
                     Config.UpdateSongCount(newSongCount);
                 }
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[WARNING] Could not fetch song count: {e.Message}");
+                DebugLog.Log($"[WARNING] Could not fetch song count: {e.Message}");
             }
         }
 
@@ -394,14 +394,14 @@ namespace ExScoringMod
                     }
                     catch
                     {
-                        MelonLogger.Log($"[WARNING] Unable to delete {fileName}");
+                        DebugLog.Log($"[WARNING] Unable to delete {fileName}");
                     }
                 }
                 File.Delete(deletedDownloadsListPath);
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[WARNING] Could not process deletion list: {e.Message}");
+                DebugLog.Log($"[WARNING] Could not process deletion list: {e.Message}");
             }
         }
 
@@ -509,7 +509,7 @@ namespace ExScoringMod
         /// </summary>
         public static void ReloadSongList(bool fullReload = true)
         {
-            MelonLogger.Log("Reloading songlist");
+            DebugLog.Log("Reloading songlist");
             SongDownloader.needRefresh = false;
 
             if (fullReload)

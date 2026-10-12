@@ -192,7 +192,7 @@ namespace ExScoringMod
             if (searchFolderName != null && !availableFolders.Contains(searchFolderName))
                 availableFolders.Insert(0, searchFolderName);
 
-            MelonLogger.Log($"[SongFolderManager] Rebuilt: {songFolderMap.Count} songs across {availableFolders.Count} folder(s). Open: {openFolder ?? "none"}");
+            DebugLog.Log($"[SongFolderManager] Rebuilt: {songFolderMap.Count} songs across {availableFolders.Count} folder(s). Open: {openFolder ?? "none"}");
         }
 
         /// <summary>

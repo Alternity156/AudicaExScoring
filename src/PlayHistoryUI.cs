@@ -116,7 +116,7 @@ namespace ExScoringMod
             if (panel.historyScroll != null)
                 panel.historyScroll.QueueUpdateSize();
 
-            MelonLogger.Log($"[ExScoring] Populated {Math.Min(results.Count, count)} history row(s) from saved run data.");
+            DebugLog.Log($"[ExScoring] Populated {Math.Min(results.Count, count)} history row(s) from saved run data.");
         }
 
         // Placeholder formatting — score/percent/info text is easy to retune once we see it in-game.

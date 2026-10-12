@@ -50,7 +50,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[SongRequestStore] Load failed, starting empty: {e.Message}");
+                DebugLog.Log($"[SongRequestStore] Load failed, starting empty: {e.Message}");
                 store = new Store();
             }
         }
@@ -64,7 +64,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[SongRequestStore] Save failed: {e.Message}");
+                DebugLog.Log($"[SongRequestStore] Save failed: {e.Message}");
             }
         }
 

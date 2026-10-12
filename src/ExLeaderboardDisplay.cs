@@ -50,7 +50,7 @@ namespace ExScoringMod
         {
             public static bool Prefix(OnlineLeaderboard __instance, LeaderboardDisplay display, string leaderboardID, OnlineLeaderboard.LeaderboardMode mode)
             {
-                MelonLogger.Log($"[ExScoring] UpdateLeaderboard called: mode={mode} leaderboardID={leaderboardID} ExType={Config.ExType} totalLeaderboards={display?.totalLeaderboards}");
+                DebugLog.Log($"[ExScoring] UpdateLeaderboard called: mode={mode} leaderboardID={leaderboardID} ExType={Config.ExType} totalLeaderboards={display?.totalLeaderboards}");
 
                 // A leaderboard refresh means whatever run was selected in the stats panel (if any)
                 // belongs to a now-stale set of rows — close it rather than leave it pointing at a
@@ -78,12 +78,12 @@ namespace ExScoringMod
                 // way.
                 if (mode != OnlineLeaderboard.LeaderboardMode.Top)
                 {
-                    MelonLogger.Log($"[ExScoring] UpdateLeaderboard: mode={mode} requested, showing Top instead (AudicaEx has a single leaderboard).");
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: mode={mode} requested, showing Top instead (AudicaEx has a single leaderboard).");
                 }
 
                 if (display == null)
                 {
-                    MelonLogger.Log("[ExScoring] UpdateLeaderboard: display is NULL, aborting EX leaderboard fetch.");
+                    DebugLog.Log("[ExScoring] UpdateLeaderboard: display is NULL, aborting EX leaderboard fetch.");
                     return false;
                 }
 
@@ -98,7 +98,7 @@ namespace ExScoringMod
 
                 if (selectedSongData == null)
                 {
-                    MelonLogger.Log("[ExScoring] UpdateLeaderboard: selectedSongData is NULL, aborting EX leaderboard fetch.");
+                    DebugLog.Log("[ExScoring] UpdateLeaderboard: selectedSongData is NULL, aborting EX leaderboard fetch.");
                     BlankAllLeaderboardRows(display);
                     return false;
                 }
@@ -108,30 +108,30 @@ namespace ExScoringMod
                 int rowLimit = LeaderboardDisplay.kNumRows;
 
                 int requestVersion = ++leaderboardRequestVersion;
-                MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} starting songId={songId} difficulty={difficulty} rowLimit={rowLimit}");
+                DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} starting songId={songId} difficulty={difficulty} rowLimit={rowLimit}");
 
                 FetchLeaderboard(songId, difficulty, rowLimit, "top", response =>
                 {
                     if (requestVersion != leaderboardRequestVersion)
                     {
-                        MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} result discarded (stale — current is #{leaderboardRequestVersion}).");
+                        DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} result discarded (stale — current is #{leaderboardRequestVersion}).");
                         return;
                     }
 
                     if (!Config.ExType)
                     {
-                        MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} result discarded (scoring type changed mid-fetch).");
+                        DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} result discarded (scoring type changed mid-fetch).");
                         return;
                     }
 
                     if (response == null)
                     {
-                        MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} failed (see ApiClient log above), blanking rows.");
+                        DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} failed (see ApiClient log above), blanking rows.");
                         BlankAllLeaderboardRows(display);
                         return;
                     }
 
-                    MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} applying {response.entries?.Length ?? 0} row(s).");
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} applying {response.entries?.Length ?? 0} row(s).");
                     PopulateLeaderboardRows(display, response);
                 });
 
@@ -152,7 +152,7 @@ namespace ExScoringMod
             {
                 if (!Config.ExType) return true;
 
-                MelonLogger.Log("[ExScoring] OnDataReceived: native leaderboard data ignored (ExType is on).");
+                DebugLog.Log("[ExScoring] OnDataReceived: native leaderboard data ignored (ExType is on).");
                 return false;
             }
         }
@@ -174,30 +174,30 @@ namespace ExScoringMod
             int rowLimit = LeaderboardDisplay.kNumRows;
 
             int requestVersion = ++leaderboardRequestVersion;
-            MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} starting listId={TotalLeaderboardListId} difficulty={difficulty} rowLimit={rowLimit}");
+            DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} starting listId={TotalLeaderboardListId} difficulty={difficulty} rowLimit={rowLimit}");
 
             FetchTotalLeaderboard(TotalLeaderboardListId, difficulty, rowLimit, "top", response =>
             {
                 if (requestVersion != leaderboardRequestVersion)
                 {
-                    MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} result discarded (stale — current is #{leaderboardRequestVersion}).");
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} result discarded (stale — current is #{leaderboardRequestVersion}).");
                     return;
                 }
 
                 if (!Config.ExType)
                 {
-                    MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} result discarded (scoring type changed mid-fetch).");
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} result discarded (scoring type changed mid-fetch).");
                     return;
                 }
 
                 if (response == null)
                 {
-                    MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} failed (see ApiClient log above), blanking rows.");
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} failed (see ApiClient log above), blanking rows.");
                     BlankAllLeaderboardRows(display);
                     return;
                 }
 
-                MelonLogger.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} applying {response.entries?.Length ?? 0} row(s).");
+                DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} applying {response.entries?.Length ?? 0} row(s).");
                 PopulateTotalLeaderboardRows(display, response);
             });
         }
@@ -214,13 +214,13 @@ namespace ExScoringMod
         {
             if (display == null)
             {
-                MelonLogger.Log("[ExScoring] RefreshExTotalLeaderboard: display is NULL, skipping.");
+                DebugLog.Log("[ExScoring] RefreshExTotalLeaderboard: display is NULL, skipping.");
                 return;
             }
 
             if (!Config.ExType)
             {
-                MelonLogger.Log("[ExScoring] RefreshExTotalLeaderboard: ExType is off, skipping.");
+                DebugLog.Log("[ExScoring] RefreshExTotalLeaderboard: ExType is off, skipping.");
                 return;
             }
 
@@ -242,7 +242,7 @@ namespace ExScoringMod
             LeaderboardDisplay leaderboard = UnityEngine.Object.FindObjectOfType<LeaderboardDisplay>();
             if (leaderboard == null)
             {
-                MelonLogger.Log("[ExScoring] SyncLeaderboardButtonVisibility: no LeaderboardDisplay found (panel not open), skipping.");
+                DebugLog.Log("[ExScoring] SyncLeaderboardButtonVisibility: no LeaderboardDisplay found (panel not open), skipping.");
                 return;
             }
 
@@ -256,7 +256,7 @@ namespace ExScoringMod
                 RestoreLeaderboardRows(leaderboard);
             }
 
-            MelonLogger.Log($"[ExScoring] SyncLeaderboardButtonVisibility: synced (ExType={Config.ExType})");
+            DebugLog.Log($"[ExScoring] SyncLeaderboardButtonVisibility: synced (ExType={Config.ExType})");
         }
 
         private static void HideNativeLeaderboardButtons(LeaderboardDisplay display)
@@ -267,7 +267,7 @@ namespace ExScoringMod
             if (display.selfButton != null) display.selfButton.gameObject.SetActive(false);
             if (display.extrasButton != null) display.extrasButton.gameObject.SetActive(false);
 
-            MelonLogger.Log("[ExScoring][Diag] HideNativeLeaderboardButtons: friends/self/extras hidden.");
+            DebugLog.Log("[ExScoring][Diag] HideNativeLeaderboardButtons: friends/self/extras hidden.");
         }
 
         private static void RestoreNativeLeaderboardButtons(LeaderboardDisplay display)
@@ -278,7 +278,7 @@ namespace ExScoringMod
             if (display.selfButton != null) display.selfButton.gameObject.SetActive(true);
             if (display.extrasButton != null) display.extrasButton.gameObject.SetActive(true);
 
-            MelonLogger.Log("[ExScoring][Diag] RestoreNativeLeaderboardButtons: friends/self/extras restored.");
+            DebugLog.Log("[ExScoring][Diag] RestoreNativeLeaderboardButtons: friends/self/extras restored.");
         }
 
         /// <summary>
@@ -290,14 +290,14 @@ namespace ExScoringMod
         {
             if (display == null)
             {
-                MelonLogger.Log("[ExScoring] PopulateLeaderboardRows: display is NULL, aborting.");
+                DebugLog.Log("[ExScoring] PopulateLeaderboardRows: display is NULL, aborting.");
                 return;
             }
 
             Il2CppReferenceArray<LeaderboardRow> rows = display.rowsStandard;
             if (rows == null)
             {
-                MelonLogger.Log("[ExScoring] PopulateLeaderboardRows: rowsStandard is NULL, aborting.");
+                DebugLog.Log("[ExScoring] PopulateLeaderboardRows: rowsStandard is NULL, aborting.");
                 return;
             }
 
@@ -305,14 +305,14 @@ namespace ExScoringMod
             int entryCount = entries?.Length ?? 0;
             int rowCount = rows.Length;
 
-            MelonLogger.Log($"[ExScoring] PopulateLeaderboardRows: rowCount={rowCount} entryCount={entryCount}");
+            DebugLog.Log($"[ExScoring] PopulateLeaderboardRows: rowCount={rowCount} entryCount={entryCount}");
 
             for (int i = 0; i < rowCount; i++)
             {
                 LeaderboardRow row = rows[i];
                 if (row == null)
                 {
-                    MelonLogger.Log($"[ExScoring][Diag] PopulateLeaderboardRows: row[{i}] is NULL, skipping.");
+                    DebugLog.Log($"[ExScoring][Diag] PopulateLeaderboardRows: row[{i}] is NULL, skipping.");
                     continue;
                 }
 
@@ -346,27 +346,27 @@ namespace ExScoringMod
             if (display.rowsFriendsParent != null) display.rowsFriendsParent.SetActive(false);
             if (display.rowsTotalParent != null) display.rowsTotalParent.SetActive(false);
             if (display.rowsTotalFriendsParent != null) display.rowsTotalFriendsParent.SetActive(false);
-            MelonLogger.Log("[ExScoring][Diag] ShowLeaderboardPanelContent: rowsStandard set shown, other row sets hidden.");
+            DebugLog.Log("[ExScoring][Diag] ShowLeaderboardPanelContent: rowsStandard set shown, other row sets hidden.");
 
             if (display.spinner != null)
             {
                 display.spinner.gameObject.SetActive(false);
-                MelonLogger.Log("[ExScoring][Diag] ShowLeaderboardPanelContent: spinner hidden.");
+                DebugLog.Log("[ExScoring][Diag] ShowLeaderboardPanelContent: spinner hidden.");
             }
             else
             {
-                MelonLogger.Log("[ExScoring][Diag] ShowLeaderboardPanelContent: spinner is NULL.");
+                DebugLog.Log("[ExScoring][Diag] ShowLeaderboardPanelContent: spinner is NULL.");
             }
 
             if (display.scrollRect != null)
             {
                 display.scrollRect.enabled = true;
                 display.scrollRect.gameObject.SetActive(true);
-                MelonLogger.Log("[ExScoring][Diag] ShowLeaderboardPanelContent: scrollRect shown/enabled.");
+                DebugLog.Log("[ExScoring][Diag] ShowLeaderboardPanelContent: scrollRect shown/enabled.");
             }
             else
             {
-                MelonLogger.Log("[ExScoring][Diag] ShowLeaderboardPanelContent: scrollRect is NULL.");
+                DebugLog.Log("[ExScoring][Diag] ShowLeaderboardPanelContent: scrollRect is NULL.");
             }
         }
 
@@ -394,14 +394,14 @@ namespace ExScoringMod
             Grade grade;
             if (string.IsNullOrEmpty(gradeId) || !Enum.TryParse(gradeId, out grade))
             {
-                MelonLogger.Log($"[ExScoring] ApplyLeaderboardEntryToRow: unrecognized grade id '{gradeId}' for nickname={entry.nickname}, defaulting to F.");
+                DebugLog.Log($"[ExScoring] ApplyLeaderboardEntryToRow: unrecognized grade id '{gradeId}' for nickname={entry.nickname}, defaulting to F.");
                 grade = Grade.F;
             }
 
             if (row.starDisplay != null)
                 CreateOrUpdateLeaderboardRowGradeVisual(slot, row.starDisplay.transform, grade);
             else
-                MelonLogger.Log($"[ExScoring][Diag] ApplyLeaderboardEntryToRow: starDisplay NULL for row slot={slot}, cannot place grade visual.");
+                DebugLog.Log($"[ExScoring][Diag] ApplyLeaderboardEntryToRow: starDisplay NULL for row slot={slot}, cannot place grade visual.");
 
             if (row.compareButton != null) row.compareButton.SetActive(false);
 
@@ -423,14 +423,14 @@ namespace ExScoringMod
         {
             if (display == null)
             {
-                MelonLogger.Log("[ExScoring] PopulateTotalLeaderboardRows: display is NULL, aborting.");
+                DebugLog.Log("[ExScoring] PopulateTotalLeaderboardRows: display is NULL, aborting.");
                 return;
             }
 
             Il2CppReferenceArray<LeaderboardRow> rows = display.rowsStandard;
             if (rows == null)
             {
-                MelonLogger.Log("[ExScoring] PopulateTotalLeaderboardRows: rowsStandard is NULL, aborting.");
+                DebugLog.Log("[ExScoring] PopulateTotalLeaderboardRows: rowsStandard is NULL, aborting.");
                 return;
             }
 
@@ -438,14 +438,14 @@ namespace ExScoringMod
             int entryCount = entries?.Length ?? 0;
             int rowCount = rows.Length;
 
-            MelonLogger.Log($"[ExScoring] PopulateTotalLeaderboardRows: rowCount={rowCount} entryCount={entryCount}");
+            DebugLog.Log($"[ExScoring] PopulateTotalLeaderboardRows: rowCount={rowCount} entryCount={entryCount}");
 
             for (int i = 0; i < rowCount; i++)
             {
                 LeaderboardRow row = rows[i];
                 if (row == null)
                 {
-                    MelonLogger.Log($"[ExScoring][Diag] PopulateTotalLeaderboardRows: row[{i}] is NULL, skipping.");
+                    DebugLog.Log($"[ExScoring][Diag] PopulateTotalLeaderboardRows: row[{i}] is NULL, skipping.");
                     continue;
                 }
 
@@ -514,7 +514,7 @@ namespace ExScoringMod
         {
             if (platformImage == null)
             {
-                MelonLogger.Log("[ExScoring][Diag] ApplyPlatformIcon: platformImage is NULL.");
+                DebugLog.Log("[ExScoring][Diag] ApplyPlatformIcon: platformImage is NULL.");
                 return;
             }
 
@@ -541,7 +541,7 @@ namespace ExScoringMod
             }
             else
             {
-                MelonLogger.Log("[ExScoring][Diag] ApplyPlatformIcon: KataConfig.I is NULL.");
+                DebugLog.Log("[ExScoring][Diag] ApplyPlatformIcon: KataConfig.I is NULL.");
             }
 
             if (sprite != null)
@@ -573,7 +573,7 @@ namespace ExScoringMod
             Il2CppReferenceArray<LeaderboardRow> rows = display.rowsStandard;
             if (rows == null)
             {
-                MelonLogger.Log("[ExScoring][Diag] BlankAllLeaderboardRows: rowsStandard is NULL.");
+                DebugLog.Log("[ExScoring][Diag] BlankAllLeaderboardRows: rowsStandard is NULL.");
                 return;
             }
 
@@ -597,7 +597,7 @@ namespace ExScoringMod
         {
             if (stars == null)
             {
-                MelonLogger.Log("[ExScoring][Diag] HideLeaderboardRowStars: stars is NULL");
+                DebugLog.Log("[ExScoring][Diag] HideLeaderboardRowStars: stars is NULL");
                 return;
             }
 
@@ -606,7 +606,7 @@ namespace ExScoringMod
             int meterCount = SetImageArrayEnabled(stars.starMeters, false, "starMeters");
             int pipsHidden = SetActiveForAllNamed(stars.transform, "star_pip", false);
 
-            MelonLogger.Log($"[ExScoring][Diag] HideLeaderboardRowStars: hidden stars={starCount} goldRings={ringCount} starMeters={meterCount} pipsHidden={pipsHidden}");
+            DebugLog.Log($"[ExScoring][Diag] HideLeaderboardRowStars: hidden stars={starCount} goldRings={ringCount} starMeters={meterCount} pipsHidden={pipsHidden}");
         }
 
         /// <summary>
@@ -673,14 +673,14 @@ namespace ExScoringMod
                 restoredRows++;
             }
 
-            MelonLogger.Log($"[ExScoring][Diag] RestoreLeaderboardRows: restored {restoredRows} row(s).");
+            DebugLog.Log($"[ExScoring][Diag] RestoreLeaderboardRows: restored {restoredRows} row(s).");
         }
 
         private static int SetImageArrayEnabled(Il2CppReferenceArray<Image> images, bool enabled, string label)
         {
             if (images == null)
             {
-                MelonLogger.Log($"[ExScoring][Diag] SetImageArrayEnabled({label}): array is NULL");
+                DebugLog.Log($"[ExScoring][Diag] SetImageArrayEnabled({label}): array is NULL");
                 return -1;
             }
 

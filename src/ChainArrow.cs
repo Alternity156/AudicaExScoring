@@ -50,7 +50,7 @@ namespace ExScoringMod
                 Material template = src.sharedMaterial;
                 if (template == null)
                 {
-                    MelonLoader.MelonLogger.Log("[ChainArrow] chainLine.sharedMaterial is null, skipping arrow creation");
+                    DebugLog.Log("[ChainArrow] chainLine.sharedMaterial is null, skipping arrow creation");
                     return null;
                 }
                 sSharedArrowMaterial = new Material(template);

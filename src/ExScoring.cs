@@ -23,8 +23,8 @@ namespace ExScoringMod
 
         public static void PrintExScore(float exScore)
         {
-            MelonLogger.Log("EX Score: " + exScore.ToString());
-            MelonLogger.Log("EX Percentage: " + GetCurrentExPercentage().ToString() + "%");
+            DebugLog.Log("EX Score: " + exScore.ToString());
+            DebugLog.Log("EX Percentage: " + GetCurrentExPercentage().ToString() + "%");
         }
 
         public static bool ValidateExScore()

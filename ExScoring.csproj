@@ -241,6 +241,7 @@
     <Compile Include="src\Classes.cs" />
     <Compile Include="src\Config.cs" />
     <Compile Include="src\CueStats.cs" />
+    <Compile Include="src\DebugLog.cs" />
     <Compile Include="src\DeleteButton.cs" />
     <Compile Include="src\FavoriteButton.cs" />
     <Compile Include="src\GameplayStatsUI.cs" />

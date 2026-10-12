@@ -36,7 +36,7 @@ namespace ExScoringMod
 
             if (queue == null || queue.Count == 0)
             {
-                MelonLogger.Log("[Marathon] No songs in queue.");
+                DebugLog.Log("[Marathon] No songs in queue.");
                 PlaylistManager.state = PlaylistManager.PlaylistState.None;
                 yield break;
             }

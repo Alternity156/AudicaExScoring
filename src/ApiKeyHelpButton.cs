@@ -39,7 +39,7 @@ namespace ExScoringMod
                 GameObject refButton = GameObject.Find(BackButtonPath);
                 if (refButton == null)
                 {
-                    MelonLogger.Log("ApiKeyHelpButtons: back button template not found, skipping OpenSite button");
+                    DebugLog.Log("ApiKeyHelpButtons: back button template not found, skipping OpenSite button");
                 }
                 else
                 {
@@ -55,7 +55,7 @@ namespace ExScoringMod
                 GameObject refButton = GameObject.Find(BackButtonPath);
                 if (refButton == null)
                 {
-                    MelonLogger.Log("ApiKeyHelpButtons: back button template not found, skipping PasteKey button");
+                    DebugLog.Log("ApiKeyHelpButtons: back button template not found, skipping PasteKey button");
                 }
                 else
                 {
@@ -76,7 +76,7 @@ namespace ExScoringMod
 
         private static void OnOpenSiteButtonShot()
         {
-            MelonLogger.Log("[ExScoring] ApiKeyHelpButtons: opening " + OpenSiteUrl);
+            DebugLog.Log("[ExScoring] ApiKeyHelpButtons: opening " + OpenSiteUrl);
             Application.OpenURL(OpenSiteUrl);
         }
 

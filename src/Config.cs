@@ -92,6 +92,9 @@ namespace ExScoringMod
         // EnableScoreUpload again, so a manual disable always sticks.
         public static bool ScoreUploadUserConfigured;
 
+        public static string debugHeader = "[Header]Debug";
+        public static bool DebugLogs;
+
         public static void RegisterConfig()
         {
             MelonPrefs.RegisterString(Category, nameof(typeHeader), "", "[Header]Scoring Type");
@@ -176,6 +179,9 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(EnableScoreUpload), false, "Automatically uploads runs to the online leaderboard after each song");
             MelonPrefs.RegisterBool(Category, nameof(ScoreUploadUserConfigured), false, "");
 
+            MelonPrefs.RegisterString(Category, nameof(debugHeader), "", "[Header]Debug");
+            MelonPrefs.RegisterBool(Category, nameof(DebugLogs), false, "Writes the mod's debug logs to the MelonLoader console/log file");
+
             OnModSettingsApplied();
         }
 
@@ -238,6 +244,15 @@ namespace ExScoringMod
             ApiKey = MelonPrefs.GetString(Category, nameof(ApiKey));
             EnableScoreUpload = MelonPrefs.GetBool(Category, nameof(EnableScoreUpload));
             ScoreUploadUserConfigured = MelonPrefs.GetBool(Category, nameof(ScoreUploadUserConfigured));
+
+            DebugLogs = MelonPrefs.GetBool(Category, nameof(DebugLogs));
+        }
+
+        public static void UpdateDebugLogs(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(DebugLogs), value);
+            DebugLogs = value;
+            MelonPrefs.SaveConfig();
         }
 
         public static void UpdateExScorePopupSize(float value)

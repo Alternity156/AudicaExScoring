@@ -58,13 +58,13 @@ namespace ExScoringMod
                 string json = JsonConvert.SerializeObject(submitData, runDataSerializerSettings);
                 byte[] gzipBody = GzipCompress(json);
 
-                MelonLogger.Log($"[ExScoring] Submitting run {submitData.clientRunId} ({submitData.songId}/{submitData.difficulty})");
+                DebugLog.Log($"[ExScoring] Submitting run {submitData.clientRunId} ({submitData.songId}/{submitData.difficulty})");
                 SetApiSubmitStatus(ApiSubmitStatus.Sending, "Sending score...", Color.white);
                 MelonCoroutines.Start(SubmitRunCoroutine(submitData.songId, submitData.difficulty, gzipBody));
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[ExScoring] Failed to prepare run submission: {ex}");
+                DebugLog.Log($"[ExScoring] Failed to prepare run submission: {ex}");
             }
         }
 
@@ -105,7 +105,7 @@ namespace ExScoringMod
                 if (request.isNetworkError || request.isHttpError)
                 {
                     string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
-                    MelonLogger.Log($"[ExScoring] Run submission failed ({request.responseCode}): {request.error} | Body: {errorBody}");
+                    DebugLog.Log($"[ExScoring] Run submission failed ({request.responseCode}): {request.error} | Body: {errorBody}");
                     SetApiSubmitStatus(ApiSubmitStatus.Failed, "Send Failed", Color.red);
                     yield break;
                 }
@@ -113,7 +113,7 @@ namespace ExScoringMod
                 try
                 {
                     RunSubmitResponse response = JsonConvert.DeserializeObject<RunSubmitResponse>(request.downloadHandler.text);
-                    MelonLogger.Log($"[ExScoring] Run submitted: runId={response.runId}, rank={response.rank}, " +
+                    DebugLog.Log($"[ExScoring] Run submitted: runId={response.runId}, rank={response.rank}, " +
                         $"grade={response.grade?.text}, judgementPercent={response.judgementPercent:N2}, personalBest={response.isPersonalBest}, " +
                         $"mapDataNeeded={response.mapDataNeeded}");
 
@@ -130,7 +130,7 @@ namespace ExScoringMod
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[ExScoring] Run submitted but failed to parse response ({request.downloadHandler.text}): {ex}");
+                    DebugLog.Log($"[ExScoring] Run submitted but failed to parse response ({request.downloadHandler.text}): {ex}");
                     SetApiSubmitStatus(ApiSubmitStatus.Failed, "Send Failed", Color.red);
                 }
             }
@@ -155,7 +155,7 @@ namespace ExScoringMod
         {
             if (string.IsNullOrEmpty(songId))
             {
-                MelonLogger.Log("[ExScoring] FetchLeaderboard: songId is null/empty, aborting.");
+                DebugLog.Log("[ExScoring] FetchLeaderboard: songId is null/empty, aborting.");
                 onComplete?.Invoke(null);
                 return;
             }
@@ -165,12 +165,12 @@ namespace ExScoringMod
                 // Shouldn't be reachable in practice — the Self button is gated on having a key
                 // (see UpdateSelfButtonAvailability in ExLeaderboardDisplay.cs) — but guard here too
                 // rather than firing a request the server will just reject.
-                MelonLogger.Log("[ExScoring] FetchLeaderboard: view=self requested but no API key is set, aborting.");
+                DebugLog.Log("[ExScoring] FetchLeaderboard: view=self requested but no API key is set, aborting.");
                 onComplete?.Invoke(null);
                 return;
             }
 
-            MelonLogger.Log($"[ExScoring] FetchLeaderboard: starting songId={songId} difficulty={difficulty} limit={limit} view={view}");
+            DebugLog.Log($"[ExScoring] FetchLeaderboard: starting songId={songId} difficulty={difficulty} limit={limit} view={view}");
             MelonCoroutines.Start(FetchLeaderboardCoroutine(songId, difficulty, limit, view, onComplete));
         }
 
@@ -178,7 +178,7 @@ namespace ExScoringMod
         {
             string url = $"{ApiBaseUrl}/api/leaderboard?songId={Uri.EscapeDataString(songId)}&difficulty={Uri.EscapeDataString(difficulty)}&limit={limit}&offset=0&view={Uri.EscapeDataString(view)}";
 
-            MelonLogger.Log($"[ExScoring] FetchLeaderboard: GET {url}");
+            DebugLog.Log($"[ExScoring] FetchLeaderboard: GET {url}");
 
             UnityWebRequest request = UnityWebRequest.Get(url);
             try
@@ -193,7 +193,7 @@ namespace ExScoringMod
                 if (request.isNetworkError || request.isHttpError)
                 {
                     string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
-                    MelonLogger.Log($"[ExScoring] FetchLeaderboard failed ({request.responseCode}): {request.error} | songId={songId} difficulty={difficulty} | Body: {errorBody}");
+                    DebugLog.Log($"[ExScoring] FetchLeaderboard failed ({request.responseCode}): {request.error} | songId={songId} difficulty={difficulty} | Body: {errorBody}");
                     onComplete?.Invoke(null);
                     yield break;
                 }
@@ -202,12 +202,12 @@ namespace ExScoringMod
                 {
                     LeaderboardApiResponse response = JsonConvert.DeserializeObject<LeaderboardApiResponse>(request.downloadHandler.text);
                     int entryCount = response?.entries?.Length ?? 0;
-                    MelonLogger.Log($"[ExScoring] FetchLeaderboard succeeded: songId={songId} difficulty={difficulty} entries={entryCount} total={response?.total ?? -1}");
+                    DebugLog.Log($"[ExScoring] FetchLeaderboard succeeded: songId={songId} difficulty={difficulty} entries={entryCount} total={response?.total ?? -1}");
                     onComplete?.Invoke(response);
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[ExScoring] FetchLeaderboard: failed to parse response ({request.downloadHandler.text}): {ex}");
+                    DebugLog.Log($"[ExScoring] FetchLeaderboard: failed to parse response ({request.downloadHandler.text}): {ex}");
                     onComplete?.Invoke(null);
                 }
             }
@@ -228,19 +228,19 @@ namespace ExScoringMod
         {
             if (string.IsNullOrEmpty(listId))
             {
-                MelonLogger.Log("[ExScoring] FetchTotalLeaderboard: listId is null/empty, aborting.");
+                DebugLog.Log("[ExScoring] FetchTotalLeaderboard: listId is null/empty, aborting.");
                 onComplete?.Invoke(null);
                 return;
             }
 
             if (view == "self" && string.IsNullOrEmpty(Config.ApiKey))
             {
-                MelonLogger.Log("[ExScoring] FetchTotalLeaderboard: view=self requested but no API key is set, aborting.");
+                DebugLog.Log("[ExScoring] FetchTotalLeaderboard: view=self requested but no API key is set, aborting.");
                 onComplete?.Invoke(null);
                 return;
             }
 
-            MelonLogger.Log($"[ExScoring] FetchTotalLeaderboard: starting listId={listId} difficulty={difficulty} limit={limit} view={view}");
+            DebugLog.Log($"[ExScoring] FetchTotalLeaderboard: starting listId={listId} difficulty={difficulty} limit={limit} view={view}");
             MelonCoroutines.Start(FetchTotalLeaderboardCoroutine(listId, difficulty, limit, view, onComplete));
         }
 
@@ -248,7 +248,7 @@ namespace ExScoringMod
         {
             string url = $"{ApiBaseUrl}/api/leaderboard/total?listId={Uri.EscapeDataString(listId)}&difficulty={Uri.EscapeDataString(difficulty)}&limit={limit}&offset=0&view={Uri.EscapeDataString(view)}";
 
-            MelonLogger.Log($"[ExScoring] FetchTotalLeaderboard: GET {url}");
+            DebugLog.Log($"[ExScoring] FetchTotalLeaderboard: GET {url}");
 
             UnityWebRequest request = UnityWebRequest.Get(url);
             try
@@ -263,7 +263,7 @@ namespace ExScoringMod
                 if (request.isNetworkError || request.isHttpError)
                 {
                     string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
-                    MelonLogger.Log($"[ExScoring] FetchTotalLeaderboard failed ({request.responseCode}): {request.error} | listId={listId} difficulty={difficulty} | Body: {errorBody}");
+                    DebugLog.Log($"[ExScoring] FetchTotalLeaderboard failed ({request.responseCode}): {request.error} | listId={listId} difficulty={difficulty} | Body: {errorBody}");
                     onComplete?.Invoke(null);
                     yield break;
                 }
@@ -272,12 +272,12 @@ namespace ExScoringMod
                 {
                     TotalLeaderboardApiResponse response = JsonConvert.DeserializeObject<TotalLeaderboardApiResponse>(request.downloadHandler.text);
                     int entryCount = response?.entries?.Length ?? 0;
-                    MelonLogger.Log($"[ExScoring] FetchTotalLeaderboard succeeded: listId={listId} difficulty={difficulty} entries={entryCount} total={response?.total ?? -1}");
+                    DebugLog.Log($"[ExScoring] FetchTotalLeaderboard succeeded: listId={listId} difficulty={difficulty} entries={entryCount} total={response?.total ?? -1}");
                     onComplete?.Invoke(response);
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[ExScoring] FetchTotalLeaderboard: failed to parse response ({request.downloadHandler.text}): {ex}");
+                    DebugLog.Log($"[ExScoring] FetchTotalLeaderboard: failed to parse response ({request.downloadHandler.text}): {ex}");
                     onComplete?.Invoke(null);
                 }
             }
@@ -299,12 +299,12 @@ namespace ExScoringMod
         {
             if (string.IsNullOrEmpty(runId))
             {
-                MelonLogger.Log("[ExScoring] FetchRun: runId is null/empty, aborting.");
+                DebugLog.Log("[ExScoring] FetchRun: runId is null/empty, aborting.");
                 onComplete?.Invoke(null);
                 return;
             }
 
-            MelonLogger.Log($"[ExScoring] FetchRun: starting runId={runId}");
+            DebugLog.Log($"[ExScoring] FetchRun: starting runId={runId}");
             MelonCoroutines.Start(FetchRunCoroutine(runId, onComplete));
         }
 
@@ -312,7 +312,7 @@ namespace ExScoringMod
         {
             string url = $"{ApiBaseUrl}/api/runs/{Uri.EscapeDataString(runId)}";
 
-            MelonLogger.Log($"[ExScoring] FetchRun: GET {url}");
+            DebugLog.Log($"[ExScoring] FetchRun: GET {url}");
 
             UnityWebRequest request = UnityWebRequest.Get(url);
             try
@@ -322,7 +322,7 @@ namespace ExScoringMod
                 if (request.isNetworkError || request.isHttpError)
                 {
                     string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
-                    MelonLogger.Log($"[ExScoring] FetchRun failed ({request.responseCode}): {request.error} | runId={runId} | Body: {errorBody}");
+                    DebugLog.Log($"[ExScoring] FetchRun failed ({request.responseCode}): {request.error} | runId={runId} | Body: {errorBody}");
                     onComplete?.Invoke(null);
                     yield break;
                 }
@@ -331,12 +331,12 @@ namespace ExScoringMod
                 {
                     RunDetailApiResponse response = JsonConvert.DeserializeObject<RunDetailApiResponse>(request.downloadHandler.text);
                     int cueCount = response?.exCues?.Length ?? 0;
-                    MelonLogger.Log($"[ExScoring] FetchRun succeeded: runId={runId} songId={response?.songId} difficulty={response?.difficulty} cues={cueCount}");
+                    DebugLog.Log($"[ExScoring] FetchRun succeeded: runId={runId} songId={response?.songId} difficulty={response?.difficulty} cues={cueCount}");
                     onComplete?.Invoke(response);
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[ExScoring] FetchRun: failed to parse response ({request.downloadHandler.text}): {ex}");
+                    DebugLog.Log($"[ExScoring] FetchRun: failed to parse response ({request.downloadHandler.text}): {ex}");
                     onComplete?.Invoke(null);
                 }
             }
@@ -363,14 +363,14 @@ namespace ExScoringMod
             {
                 if (!Enum.TryParse(difficultyStr, out KataConfig.Difficulty difficulty))
                 {
-                    MelonLogger.Log($"[ExScoring] UploadMapData: couldn't parse difficulty '{difficultyStr}', aborting.");
+                    DebugLog.Log($"[ExScoring] UploadMapData: couldn't parse difficulty '{difficultyStr}', aborting.");
                     return;
                 }
 
                 var songData = SongList.I.GetSong(songId);
                 if (songData == null)
                 {
-                    MelonLogger.Log($"[ExScoring] UploadMapData: song '{songId}' not found, aborting.");
+                    DebugLog.Log($"[ExScoring] UploadMapData: song '{songId}' not found, aborting.");
                     return;
                 }
 
@@ -411,12 +411,12 @@ namespace ExScoringMod
                 string json = JsonConvert.SerializeObject(uploadData, runDataSerializerSettings);
                 byte[] gzipBody = GzipCompress(json);
 
-                MelonLogger.Log($"[ExScoring] Uploading map data for {songId}/{difficultyStr} ({mapCues.Count} cues)");
+                DebugLog.Log($"[ExScoring] Uploading map data for {songId}/{difficultyStr} ({mapCues.Count} cues)");
                 MelonCoroutines.Start(UploadMapDataCoroutine(songId, difficultyStr, gzipBody));
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[ExScoring] Failed to prepare map upload for {songId}/{difficultyStr}: {ex}");
+                DebugLog.Log($"[ExScoring] Failed to prepare map upload for {songId}/{difficultyStr}: {ex}");
             }
         }
 
@@ -438,18 +438,18 @@ namespace ExScoringMod
                 if (request.isNetworkError || request.isHttpError)
                 {
                     string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
-                    MelonLogger.Log($"[ExScoring] Map upload failed ({request.responseCode}) for {songId}/{difficultyStr}: {request.error} | Body: {errorBody}");
+                    DebugLog.Log($"[ExScoring] Map upload failed ({request.responseCode}) for {songId}/{difficultyStr}: {request.error} | Body: {errorBody}");
                     yield break;
                 }
 
                 try
                 {
                     MapUploadResponse response = JsonConvert.DeserializeObject<MapUploadResponse>(request.downloadHandler.text);
-                    MelonLogger.Log($"[ExScoring] Map upload for {songId}/{difficultyStr}: stored={response.stored}");
+                    DebugLog.Log($"[ExScoring] Map upload for {songId}/{difficultyStr}: stored={response.stored}");
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[ExScoring] Map upload succeeded but failed to parse response ({request.downloadHandler.text}): {ex}");
+                    DebugLog.Log($"[ExScoring] Map upload succeeded but failed to parse response ({request.downloadHandler.text}): {ex}");
                 }
             }
             finally
@@ -491,12 +491,12 @@ namespace ExScoringMod
         {
             if (string.IsNullOrEmpty(Config.ApiKey))
             {
-                MelonLogger.Log("[ExScoring] FetchProfile: no API key set, aborting.");
+                DebugLog.Log("[ExScoring] FetchProfile: no API key set, aborting.");
                 onComplete?.Invoke(new ProfileFetchResult { status = ProfileFetchStatus.ConnectionError });
                 return;
             }
 
-            MelonLogger.Log("[ExScoring] FetchProfile: starting");
+            DebugLog.Log("[ExScoring] FetchProfile: starting");
             MelonCoroutines.Start(FetchProfileCoroutine(onComplete));
         }
 
@@ -504,7 +504,7 @@ namespace ExScoringMod
         {
             string url = $"{ApiBaseUrl}/api/users/me";
 
-            MelonLogger.Log($"[ExScoring] FetchProfile: GET {url}");
+            DebugLog.Log($"[ExScoring] FetchProfile: GET {url}");
 
             UnityWebRequest request = UnityWebRequest.Get(url);
             try
@@ -515,7 +515,7 @@ namespace ExScoringMod
 
                 if (request.isNetworkError)
                 {
-                    MelonLogger.Log($"[ExScoring] FetchProfile failed (network error): {request.error}");
+                    DebugLog.Log($"[ExScoring] FetchProfile failed (network error): {request.error}");
                     onComplete?.Invoke(new ProfileFetchResult { status = ProfileFetchStatus.ConnectionError });
                     yield break;
                 }
@@ -523,7 +523,7 @@ namespace ExScoringMod
                 if (request.isHttpError)
                 {
                     string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
-                    MelonLogger.Log($"[ExScoring] FetchProfile failed ({request.responseCode}): {request.error} | Body: {errorBody}");
+                    DebugLog.Log($"[ExScoring] FetchProfile failed ({request.responseCode}): {request.error} | Body: {errorBody}");
 
                     // 401 per ApiContract.md Section 2 ("Missing or invalid key -> 401 Unauthorized") is the
                     // one case we know for certain means "the key itself is bad", not "something's down".
@@ -537,12 +537,12 @@ namespace ExScoringMod
                 try
                 {
                     ProfileApiResponse response = JsonConvert.DeserializeObject<ProfileApiResponse>(request.downloadHandler.text);
-                    MelonLogger.Log($"[ExScoring] FetchProfile succeeded: nickname={response?.nickname}");
+                    DebugLog.Log($"[ExScoring] FetchProfile succeeded: nickname={response?.nickname}");
                     onComplete?.Invoke(new ProfileFetchResult { status = ProfileFetchStatus.Success, response = response });
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[ExScoring] FetchProfile: failed to parse response ({request.downloadHandler.text}): {ex}");
+                    DebugLog.Log($"[ExScoring] FetchProfile: failed to parse response ({request.downloadHandler.text}): {ex}");
                     onComplete?.Invoke(new ProfileFetchResult { status = ProfileFetchStatus.ConnectionError });
                 }
             }
@@ -563,14 +563,14 @@ namespace ExScoringMod
         {
             if (string.IsNullOrEmpty(Config.ApiKey))
             {
-                MelonLogger.Log("[ExScoring] UpdateUserSettings: no API key set, aborting.");
+                DebugLog.Log("[ExScoring] UpdateUserSettings: no API key set, aborting.");
                 onComplete?.Invoke(null);
                 return;
             }
 
             if (settings == null)
             {
-                MelonLogger.Log("[ExScoring] UpdateUserSettings: nothing to send, aborting.");
+                DebugLog.Log("[ExScoring] UpdateUserSettings: nothing to send, aborting.");
                 onComplete?.Invoke(null);
                 return;
             }
@@ -581,12 +581,12 @@ namespace ExScoringMod
                 {
                     NullValueHandling = NullValueHandling.Ignore
                 });
-                MelonLogger.Log($"[ExScoring] UpdateUserSettings: starting, body={json}");
+                DebugLog.Log($"[ExScoring] UpdateUserSettings: starting, body={json}");
                 MelonCoroutines.Start(UpdateUserSettingsCoroutine(Encoding.UTF8.GetBytes(json), onComplete));
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[ExScoring] UpdateUserSettings: failed to build request: {ex}");
+                DebugLog.Log($"[ExScoring] UpdateUserSettings: failed to build request: {ex}");
                 onComplete?.Invoke(null);
             }
         }
@@ -608,7 +608,7 @@ namespace ExScoringMod
                 if (request.isNetworkError || request.isHttpError)
                 {
                     string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
-                    MelonLogger.Log($"[ExScoring] UpdateUserSettings failed ({request.responseCode}): {request.error} | Body: {errorBody}");
+                    DebugLog.Log($"[ExScoring] UpdateUserSettings failed ({request.responseCode}): {request.error} | Body: {errorBody}");
                     onComplete?.Invoke(null);
                     yield break;
                 }
@@ -616,12 +616,12 @@ namespace ExScoringMod
                 try
                 {
                     UserSettingsData response = JsonConvert.DeserializeObject<UserSettingsData>(request.downloadHandler.text);
-                    MelonLogger.Log($"[ExScoring] UpdateUserSettings succeeded: {request.downloadHandler.text}");
+                    DebugLog.Log($"[ExScoring] UpdateUserSettings succeeded: {request.downloadHandler.text}");
                     onComplete?.Invoke(response);
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[ExScoring] UpdateUserSettings: failed to parse response ({request.downloadHandler.text}): {ex}");
+                    DebugLog.Log($"[ExScoring] UpdateUserSettings: failed to parse response ({request.downloadHandler.text}): {ex}");
                     onComplete?.Invoke(null);
                 }
             }

@@ -108,7 +108,7 @@ namespace ExScoringMod
             GameObject prefabItem = VirtualSongList.SongItemPrefab;
             if (prefabItem == null)
             {
-                MelonLogger.Log("[ExScoring] Could not find song row prefab for history hit-box.");
+                DebugLog.Log("[ExScoring] Could not find song row prefab for history hit-box.");
                 return;
             }
 
@@ -126,7 +126,7 @@ namespace ExScoringMod
             Transform quad = FindChildRecursive(clone.transform, "Quad");
             if (quad == null)
             {
-                MelonLogger.Log("[ExScoring] Cloned history hit-box has no Quad child — check the prefab structure.");
+                DebugLog.Log("[ExScoring] Cloned history hit-box has no Quad child — check the prefab structure.");
                 historyHitboxes[slot] = clone;
                 return;
             }
@@ -179,7 +179,7 @@ namespace ExScoringMod
             }
             else
             {
-                MelonLogger.Log("[ExScoring] Cloned history hit-box's Quad has no GunButton — check the prefab structure.");
+                DebugLog.Log("[ExScoring] Cloned history hit-box's Quad has no GunButton — check the prefab structure.");
             }
 
             MeshCollider quadCollider = quad.GetComponent<MeshCollider>();
@@ -192,7 +192,7 @@ namespace ExScoringMod
         {
             if (!historyHitboxRuns.TryGetValue(slot, out RecalculatedRun run) || run == null) return;
 
-            MelonLogger.Log($"[ExScoring] History row shot: {run.songId} ({run.difficulty}), " +
+            DebugLog.Log($"[ExScoring] History row shot: {run.songId} ({run.difficulty}), " +
                             $"judgement {run.judgementScore:0.00}/{run.maxJudgementScore:0.00} ({run.judgementPercent:0.00}%)");
 
             // Shooting the already-selected row again closes the panel instead of re-showing it.

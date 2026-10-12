@@ -132,16 +132,16 @@ namespace ExScoringMod
                     if (loadedEntries != null)
                         entries = loadedEntries;
 
-                    MelonLogger.Log($"[SongCache] Loaded {entries.Count} cached song entries");
+                    DebugLog.Log($"[SongCache] Loaded {entries.Count} cached song entries");
                 }
                 else
                 {
-                    MelonLogger.Log("[SongCache] No existing cache file found, starting fresh");
+                    DebugLog.Log("[SongCache] No existing cache file found, starting fresh");
                 }
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[SongCache] Failed to load cache, starting fresh: {ex}");
+                DebugLog.Log($"[SongCache] Failed to load cache, starting fresh: {ex}");
                 entries = new Dictionary<string, CachedSongEntry>();
             }
         }
@@ -201,11 +201,11 @@ namespace ExScoringMod
                 string json = JsonConvert.SerializeObject(entries, Formatting.Indented);
                 File.WriteAllText(cacheFilePath, json);
                 dirty = false;
-                MelonLogger.Log($"[SongCache] Saved {entries.Count} cached song entries");
+                DebugLog.Log($"[SongCache] Saved {entries.Count} cached song entries");
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[SongCache] Failed to save cache: {ex}");
+                DebugLog.Log($"[SongCache] Failed to save cache: {ex}");
             }
         }
 
@@ -221,7 +221,7 @@ namespace ExScoringMod
             pendingEntitlementPaths.Clear();
             dirty = true;
             SaveIfDirty();
-            MelonLogger.Log("[SongCache] Cache cleared, next scan will be a full rescan");
+            DebugLog.Log("[SongCache] Cache cleared, next scan will be a full rescan");
         }
 
         public static int CachedCount

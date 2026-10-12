@@ -88,7 +88,7 @@ namespace ExScoringMod
             yield return null;
 
             bool doFullAssemble = SongList.sFirstTime;
-            MelonLogger.Log($"[SongListAssembler] sFirstTime={SongList.sFirstTime} -> " +
+            DebugLog.Log($"[SongListAssembler] sFirstTime={SongList.sFirstTime} -> " +
                              (doFullAssemble ? "running full assemble" : "skipping assemble, precompute only"));
 
             if (doFullAssemble)
@@ -100,7 +100,7 @@ namespace ExScoringMod
                     try { moved = assemblePhase.MoveNext(); }
                     catch (Exception ex)
                     {
-                        MelonLogger.Log($"[SongListAssembler] Assemble phase threw, aborting assemble: {ex}");
+                        DebugLog.Log($"[SongListAssembler] Assemble phase threw, aborting assemble: {ex}");
                         break;
                     }
                     if (!moved) break;
@@ -116,7 +116,7 @@ namespace ExScoringMod
                 try { moved = precomputePhase.MoveNext(); }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[SongListAssembler] Precompute phase threw, aborting precompute: {ex}");
+                    DebugLog.Log($"[SongListAssembler] Precompute phase threw, aborting precompute: {ex}");
                     break;
                 }
                 if (!moved) break;
@@ -125,7 +125,7 @@ namespace ExScoringMod
 
             // ── Phase D: finish (replaces cases 0xd-0xf) ──
             TimeSpan elapsed = DateTime.Now - startTime;
-            MelonLogger.Log($"[SongListAssembler] Song list loaded in {elapsed.TotalSeconds:F2}s " +
+            DebugLog.Log($"[SongListAssembler] Song list loaded in {elapsed.TotalSeconds:F2}s " +
                              $"({SongList.I.songs.Count} songs)");
             SongList.OnSongListLoaded.SetLoaded();
             SongList.I.LoadingTag = "";
@@ -156,7 +156,7 @@ namespace ExScoringMod
             AddChecksumsFor(SongFolderManager.audicaDLCSongIDs, songIDHashes, ref added);
 
             if (added > 0)
-                MelonLogger.Log($"[SongListAssembler] Pre-populated {added} official/DLC song checksums into songIDHashes");
+                DebugLog.Log($"[SongListAssembler] Pre-populated {added} official/DLC song checksums into songIDHashes");
         }
 
         private static void AddChecksumsFor(HashSet<string> ids, Il2CppSystem.Collections.Generic.List<string> songIDHashes, ref int added)
@@ -174,7 +174,7 @@ namespace ExScoringMod
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[SongListAssembler] Failed to compute/add checksum for official songID '{id}': {ex}");
+                    DebugLog.Log($"[SongListAssembler] Failed to compute/add checksum for official songID '{id}': {ex}");
                 }
             }
         }
@@ -206,7 +206,7 @@ namespace ExScoringMod
                     }
                     catch (Exception ex)
                     {
-                        MelonLogger.Log($"[SongListAssembler] DLC callback failed: {ex}");
+                        DebugLog.Log($"[SongListAssembler] DLC callback failed: {ex}");
                     }
                 }));
             }
@@ -228,7 +228,7 @@ namespace ExScoringMod
                 try { files = SongList.I.GetSongFileList(dir); }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[SongListAssembler] GetSongFileList failed for '{dir.dir}': {ex}");
+                    DebugLog.Log($"[SongListAssembler] GetSongFileList failed for '{dir.dir}': {ex}");
                     continue;
                 }
                 if (files == null)
@@ -267,7 +267,7 @@ namespace ExScoringMod
                     }
                     catch (Exception ex)
                     {
-                        MelonLogger.Log($"[SongListAssembler] Failed processing '{found}': {ex}");
+                        DebugLog.Log($"[SongListAssembler] Failed processing '{found}': {ex}");
                     }
 
                     processedThisBatch++;
@@ -281,7 +281,7 @@ namespace ExScoringMod
                 }
             }
 
-            MelonLogger.Log($"[SongListAssembler] Assemble phase done: {cacheHits} cache hits, " +
+            DebugLog.Log($"[SongListAssembler] Assemble phase done: {cacheHits} cache hits, " +
                              $"{cacheMisses} cache misses, {SongList.I.songs.Count} songs total");
 
             // SongList.I.songs.Sort has no Comparison<T> overload available across the
@@ -336,23 +336,23 @@ namespace ExScoringMod
             try
             {
                 bool mountedRelative = HmxAudioPlugin.MountZip(cached.ZipPath);
-                MelonLogger.Log($"[MountCheck] MountZip(relative='{cached.ZipPath}') -> {mountedRelative}");
+                DebugLog.Log($"[MountCheck] MountZip(relative='{cached.ZipPath}') -> {mountedRelative}");
 
                 if (!mountedRelative)
                 {
                     bool mountedAbsolute = HmxAudioPlugin.MountZip(found);
-                    MelonLogger.Log($"[MountCheck] MountZip(absolute='{found}') -> {mountedAbsolute}");
+                    DebugLog.Log($"[MountCheck] MountZip(absolute='{found}') -> {mountedAbsolute}");
 
                     if (!mountedAbsolute)
                     {
-                        MelonLogger.Log($"[SongListAssembler] MountZip failed (both forms) for '{relativePath}', falling back to live scan");
+                        DebugLog.Log($"[SongListAssembler] MountZip failed (both forms) for '{relativePath}', falling back to live scan");
                         return false;
                     }
                 }
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[SongListAssembler] MountZip threw for '{relativePath}', falling back to live scan: {ex}");
+                DebugLog.Log($"[SongListAssembler] MountZip threw for '{relativePath}', falling back to live scan: {ex}");
                 return false;
             }
 
@@ -401,7 +401,7 @@ namespace ExScoringMod
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[SongListAssembler] Failed to reconstruct tempos for '{relativePath}', " +
+                    DebugLog.Log($"[SongListAssembler] Failed to reconstruct tempos for '{relativePath}', " +
                                      $"falling back to live scan: {ex}");
                     return false;
                 }
@@ -422,7 +422,7 @@ namespace ExScoringMod
                 if (SongList.I.eliminateChecksums.Contains(cached.CueChecksum))
                 {
                     // Rejected, same as vanilla ProcessSingleSong returning false here.
-                    MelonLogger.Log($"[RejectCheck] songID={songData.songID} REJECTED via cache-hit path: " +
+                    DebugLog.Log($"[RejectCheck] songID={songData.songID} REJECTED via cache-hit path: " +
                                      $"cueChecksum={cached.CueChecksum} was found in eliminateChecksums " +
                                      $"(songIdChecksum={songIdChecksum} not in songIDHashes)");
                     return true;
@@ -448,7 +448,7 @@ namespace ExScoringMod
                 }
             }
 
-            MelonLogger.Log(
+            DebugLog.Log(
                 $"[FieldCheck][HIT] songID={songData.songID} " +
                 $"isDynamic={songData.isDynamic} extrasSong={songData.extrasSong} " +
                 $"sustainSongRight={songData.sustainSongRight} sustainSongLeft={songData.sustainSongLeft} " +
@@ -460,7 +460,7 @@ namespace ExScoringMod
             try { temposLengthHit = songData.tempos != null ? songData.tempos.Length : 0; }
             catch { /* leave as -1 to signal the property itself threw */ }
 
-            MelonLogger.Log(
+            DebugLog.Log(
                 $"[FullDump][HIT] songID={songData.songID} " +
                 $"moggSong={songData.moggSong} title={songData.title} artist={songData.artist} author={songData.author} " +
                 $"midiFile={songData.midiFile} targetDrums={songData.targetDrums} " +
@@ -486,7 +486,7 @@ namespace ExScoringMod
             }
             else
             {
-                MelonLogger.Log($"[SongListAssembler] Duplicate songID '{songData.songID}' skipped (cache hit)");
+                DebugLog.Log($"[SongListAssembler] Duplicate songID '{songData.songID}' skipped (cache hit)");
             }
 
             return true;
@@ -525,7 +525,7 @@ namespace ExScoringMod
             try { fileInfo = new FileInfo(found); }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[SongListAssembler] Could not stat '{found}' for caching: {ex}");
+                DebugLog.Log($"[SongListAssembler] Could not stat '{found}' for caching: {ex}");
                 return;
             }
 
@@ -536,7 +536,7 @@ namespace ExScoringMod
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[SongListAssembler] Failed to harvest cache data for '{relativePath}': {ex}");
+                DebugLog.Log($"[SongListAssembler] Failed to harvest cache data for '{relativePath}': {ex}");
                 return;
             }
 
@@ -544,7 +544,7 @@ namespace ExScoringMod
             bool wasInSongIdHashes = SongList.I.songIDHashes.Contains(songIdChecksum);
             bool wasInExtrasHashes = SongList.I.extrasSongIDHashes.Contains(songIdChecksum);
 
-            MelonLogger.Log(
+            DebugLog.Log(
                 $"[FieldCheck][MISS] songID={newest.songID} " +
                 $"isDynamic={newest.isDynamic} extrasSong={newest.extrasSong} " +
                 $"sustainSongRight={newest.sustainSongRight} sustainSongLeft={newest.sustainSongLeft} " +
@@ -561,7 +561,7 @@ namespace ExScoringMod
             try { temposLength = newest.tempos != null ? newest.tempos.Length : 0; }
             catch { /* leave as -1 to signal the property itself threw */ }
 
-            MelonLogger.Log(
+            DebugLog.Log(
                 $"[FullDump][MISS] songID={newest.songID} " +
                 $"moggSong={newest.moggSong} title={newest.title} artist={newest.artist} author={newest.author} " +
                 $"midiFile={newest.midiFile} targetDrums={newest.targetDrums} " +
@@ -591,7 +591,7 @@ namespace ExScoringMod
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[SongListAssembler] Failed to harvest tempos for '{relativePath}': {ex}");
+                DebugLog.Log($"[SongListAssembler] Failed to harvest tempos for '{relativePath}': {ex}");
             }
 
             var entry = new CachedSongEntry
@@ -712,7 +712,7 @@ namespace ExScoringMod
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[SongListAssembler] Precompute failed for '{song.songID}': {ex}");
+                    DebugLog.Log($"[SongListAssembler] Precompute failed for '{song.songID}': {ex}");
                 }
 
                 processedThisBatch++;
@@ -725,7 +725,7 @@ namespace ExScoringMod
                 }
             }
 
-            MelonLogger.Log($"[SongListAssembler] Precompute phase done: {rawScoreCacheHits} raw-score cache hits, " +
+            DebugLog.Log($"[SongListAssembler] Precompute phase done: {rawScoreCacheHits} raw-score cache hits, " +
                              $"{rawScoreCacheMisses} raw-score cache misses (of {SongList.I.songs.Count} songs)");
 
             // The assemble phase's SaveIfDirty() runs before precompute ever starts, so

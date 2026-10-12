@@ -65,7 +65,7 @@ namespace ExScoringMod
             GameObject prefabItem = VirtualSongList.SongItemPrefab;
             if (prefabItem == null)
             {
-                MelonLogger.Log("[ExScoring] Could not find song row prefab for leaderboard stats hit-box.");
+                DebugLog.Log("[ExScoring] Could not find song row prefab for leaderboard stats hit-box.");
                 return;
             }
 
@@ -81,7 +81,7 @@ namespace ExScoringMod
             Transform quad = FindChildRecursive(clone.transform, "Quad");
             if (quad == null)
             {
-                MelonLogger.Log("[ExScoring] Cloned leaderboard stats hit-box has no Quad child — check the prefab structure.");
+                DebugLog.Log("[ExScoring] Cloned leaderboard stats hit-box has no Quad child — check the prefab structure.");
                 leaderboardHitboxes[slot] = clone;
                 return;
             }
@@ -127,7 +127,7 @@ namespace ExScoringMod
             }
             else
             {
-                MelonLogger.Log("[ExScoring] Cloned leaderboard stats hit-box's Quad has no GunButton — check the prefab structure.");
+                DebugLog.Log("[ExScoring] Cloned leaderboard stats hit-box's Quad has no GunButton — check the prefab structure.");
             }
 
             MeshCollider quadCollider = quad.GetComponent<MeshCollider>();
@@ -239,7 +239,7 @@ namespace ExScoringMod
         {
             if (!leaderboardHitboxRunIds.TryGetValue(slot, out string runId) || string.IsNullOrEmpty(runId)) return;
 
-            MelonLogger.Log($"[ExScoring] Leaderboard row shot: slot={slot} runId={runId}");
+            DebugLog.Log($"[ExScoring] Leaderboard row shot: slot={slot} runId={runId}");
 
             // Shooting the already-selected row again closes the panel instead of re-fetching it.
             if (leaderboardSelectedRowId.HasValue && leaderboardSelectedRowId.Value == slot)
@@ -265,7 +265,7 @@ namespace ExScoringMod
             Transform panel = ShowLeaderboardStatsPanelShell("Loading...");
             if (panel == null)
             {
-                MelonLogger.Log("[ExScoring] FetchAndShowLeaderboardStats: could not open leaderboard stats panel shell.");
+                DebugLog.Log("[ExScoring] FetchAndShowLeaderboardStats: could not open leaderboard stats panel shell.");
                 return;
             }
 
@@ -276,7 +276,7 @@ namespace ExScoringMod
             {
                 if (requestVersion != leaderboardStatsRequestVersion)
                 {
-                    MelonLogger.Log($"[ExScoring] FetchAndShowLeaderboardStats: fetch for runId={runId} discarded (stale — current is #{leaderboardStatsRequestVersion}).");
+                    DebugLog.Log($"[ExScoring] FetchAndShowLeaderboardStats: fetch for runId={runId} discarded (stale — current is #{leaderboardStatsRequestVersion}).");
                     return;
                 }
 
@@ -294,7 +294,7 @@ namespace ExScoringMod
                 RecalculatedRun run = RecalculateFromApiResponse(response);
                 if (run == null)
                 {
-                    MelonLogger.Log($"[ExScoring] FetchAndShowLeaderboardStats: RecalculateFromApiResponse returned null for runId={runId}.");
+                    DebugLog.Log($"[ExScoring] FetchAndShowLeaderboardStats: RecalculateFromApiResponse returned null for runId={runId}.");
                     return;
                 }
 

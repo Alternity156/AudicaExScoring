@@ -38,7 +38,7 @@ namespace ExScoringMod
             songs.Add(song);
             if (songNames.ContainsKey(song))
             {
-                MelonLogger.Log("Songname already exists. Updating value.");
+                DebugLog.Log("Songname already exists. Updating value.");
                 songNames[song] = GetSongName(song);
             }
             else
@@ -59,7 +59,7 @@ namespace ExScoringMod
         {
             if (!songs.Contains(song))
             {
-                MelonLogger.Log($"{song} doesn't exist in playlist");
+                DebugLog.Log($"{song} doesn't exist in playlist");
                 return;
             }
             songs.Remove(song);

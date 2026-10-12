@@ -29,7 +29,7 @@ namespace ExScoringMod
                 }
                 catch (Exception ex)
                 {
-                    MelonLogger.Log($"[WARNING] Unable to load favorites from file: {ex.Message}");
+                    DebugLog.Log($"[WARNING] Unable to load favorites from file: {ex.Message}");
 
                     string backupPath = favoritesPath + DateTime.Now.ToString("yyyyMMdd_hhmmss") + ".temp";
                     File.Copy(favoritesPath, backupPath);
@@ -68,7 +68,7 @@ namespace ExScoringMod
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[WARNING] Unable to save favorites: {ex.Message}");
+                DebugLog.Log($"[WARNING] Unable to save favorites: {ex.Message}");
                 KataConfig.I.CreateDebugText("Unable to save favorites", new Vector3(0f, -1f, 5f), 5f, null, false, 0.2f);
             }
         }

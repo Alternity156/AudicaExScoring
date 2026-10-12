@@ -82,7 +82,7 @@ namespace ExScoringMod
 
         public static void CreateHeatmap(Transform parent, string songId, KataConfig.Difficulty difficulty)
         {
-            MelonLogger.Log($"CreateHeatmap called, songId: {songId}");
+            DebugLog.Log($"CreateHeatmap called, songId: {songId}");
 
             DestroyHeatmap();
 
@@ -281,7 +281,7 @@ namespace ExScoringMod
         {
             if (selectedSong == null) return;
 
-            MelonLogger.Log("RefreshHeatmap called");
+            DebugLog.Log("RefreshHeatmap called");
 
             GameObject launchPanelCenter = GameObject.Find("menu/ShellPage_Launch/page/ShellPanel_Center");
             if (launchPanelCenter == null) return;

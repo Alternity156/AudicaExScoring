@@ -140,7 +140,7 @@ namespace ExScoringMod
             }
             catch
             {
-                MelonLogger.Log($"[WARNING] Encountered an error while loading {Path.GetFileName(playlistJson)} - please check if the file has valid json.");
+                DebugLog.Log($"[WARNING] Encountered an error while loading {Path.GetFileName(playlistJson)} - please check if the file has valid json.");
                 return null;
             }
         }

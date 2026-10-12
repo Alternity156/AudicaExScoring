@@ -47,7 +47,7 @@ namespace ExScoringMod
                 GameObject center = GameObject.Find(CenterPanelPath);
                 if (center == null)
                 {
-                    MelonLogger.Log("ModeButtons: ShellPanel_Center not found");
+                    DebugLog.Log("ModeButtons: ShellPanel_Center not found");
                     return;
                 }
 
@@ -55,7 +55,7 @@ namespace ExScoringMod
                 Transform template = center.transform.Find(TemplateName);
                 if (template == null)
                 {
-                    MelonLogger.Log("ModeButtons: " + TemplateName + " button template not found");
+                    DebugLog.Log("ModeButtons: " + TemplateName + " button template not found");
                     return;
                 }
 
@@ -111,7 +111,7 @@ namespace ExScoringMod
             }
             else
             {
-                MelonLogger.Log("ModeButtons: no GunButton found on " + name);
+                DebugLog.Log("ModeButtons: no GunButton found on " + name);
             }
 
             // Set absolutely rather than via Rotate(), since the template's own rotation is copied.
@@ -128,7 +128,7 @@ namespace ExScoringMod
             Transform indicator = button.transform.Find(IndicatorName);
             if (indicator == null)
             {
-                MelonLogger.Log("ModeButtons: " + IndicatorName + " not found on " + button.name);
+                DebugLog.Log("ModeButtons: " + IndicatorName + " not found on " + button.name);
                 return null;
             }
 
@@ -170,7 +170,7 @@ namespace ExScoringMod
             var displays = UnityEngine.Object.FindObjectsOfType<LeaderboardDisplay>();
             if (displays == null || displays.Length == 0)
             {
-                MelonLogger.Log("[ExScoring] ModeButtons: no LeaderboardDisplay found, skipping leaderboard refresh.");
+                DebugLog.Log("[ExScoring] ModeButtons: no LeaderboardDisplay found, skipping leaderboard refresh.");
                 return;
             }
 
@@ -181,18 +181,18 @@ namespace ExScoringMod
 
                 if (ex)
                 {
-                    MelonLogger.Log("[ExScoring] ModeButtons: refreshing Total leaderboard via direct EX fetch.");
+                    DebugLog.Log("[ExScoring] ModeButtons: refreshing Total leaderboard via direct EX fetch.");
                     ExScoring.RefreshExTotalLeaderboard(display);
                 }
                 else
                 {
-                    MelonLogger.Log("[ExScoring] ModeButtons: refreshing Total leaderboard via ViewTop().");
+                    DebugLog.Log("[ExScoring] ModeButtons: refreshing Total leaderboard via ViewTop().");
                     display.ViewTop();
                 }
                 return;
             }
 
-            MelonLogger.Log("[ExScoring] ModeButtons: no Total LeaderboardDisplay among " + displays.Length + " found, skipping leaderboard refresh.");
+            DebugLog.Log("[ExScoring] ModeButtons: no Total LeaderboardDisplay among " + displays.Length + " found, skipping leaderboard refresh.");
         }
     }
 }

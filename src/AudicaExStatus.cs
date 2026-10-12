@@ -54,7 +54,7 @@ namespace ExScoringMod
             {
                 if (thisRequest != requestVersion)
                 {
-                    MelonLogger.Log("[ExScoring] AudicaExStatus: stale profile fetch result discarded.");
+                    DebugLog.Log("[ExScoring] AudicaExStatus: stale profile fetch result discarded.");
                     return;
                 }
 

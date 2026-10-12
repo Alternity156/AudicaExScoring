@@ -576,6 +576,20 @@ namespace ExScoringMod
                     "Shortens popup judgements to abbreviations (Impeccable Timing = IT, Great Aim = GrA, Good Chain = GC, etc.)");
                 OptionsMenuClone.AddRow(abbreviatedToggle);
             }),
+
+            new OptionsCategory("opt_debug", "Debug", () =>
+            {
+                OptionsMenuFunctions.GetDebugLogs();
+
+                var header = OptionsMenuClone.CreateHeader(0, "Debug");
+                OptionsMenuClone.AddRow(header);
+
+                var debugLogsToggle = OptionsMenuClone.CreateToggle(0, "Enable Logs",
+                    () => OptionsMenuFunctions.debugLogs,
+                    v => { OptionsMenuFunctions.debugLogs = v; OptionsMenuFunctions.SetDebugLogs(v); },
+                    "Writes the mod's debug logs to the MelonLoader console/log file");
+                OptionsMenuClone.AddRow(debugLogsToggle);
+            }),
         };
 
         // ── Song-list view (Back + categories) ────────────────────────────────
@@ -593,7 +607,7 @@ namespace ExScoringMod
 
         private static void OnCategoryShot(OptionsCategory cat)
         {
-            MelonLogger.Log($"[Options] category shot: {cat.Title}");
+            DebugLog.Log($"[Options] category shot: {cat.Title}");
             activeCategory = cat;
             VirtualSongList.SetSelectedAction(cat.Id);
             ShowCategory(cat);
@@ -607,7 +621,7 @@ namespace ExScoringMod
             {
                 panelShown = true;
                 launchPage = GameObject.Find("menu/ShellPage_Launch");
-                MelonLogger.Log("[Options] hiding launch panel (animated), then showing clone");
+                DebugLog.Log("[Options] hiding launch panel (animated), then showing clone");
                 ExScoring.HideLaunchPanel();
                 MelonCoroutines.Start(ShowAfterHide(cat));
             }
@@ -630,13 +644,13 @@ namespace ExScoringMod
         private static IEnumerator ShowAfterHide(OptionsCategory cat)
         {
             float len = LaunchHideAnimLength();
-            MelonLogger.Log($"[Options] waiting hideAnim length {len:N2}s before disabling launch page");
+            DebugLog.Log($"[Options] waiting hideAnim length {len:N2}s before disabling launch page");
             yield return new WaitForSeconds(len);
 
             if (launchPage != null) launchPage.SetActive(false);
             yield return null;
             DrawCategory(cat);
-            MelonLogger.Log("[Options] launch page disabled, category shown");
+            DebugLog.Log("[Options] launch page disabled, category shown");
         }
 
         public static void HidePanel()
@@ -645,7 +659,7 @@ namespace ExScoringMod
             activeCategory = null;
             if (!panelShown) return;
             panelShown = false;
-            MelonLogger.Log("[Options] hiding clone, restoring launch panel");
+            DebugLog.Log("[Options] hiding clone, restoring launch panel");
 
             OptionsMenuClone.Wipe();
             OptionsMenuClone.Hide();
@@ -708,7 +722,7 @@ namespace ExScoringMod
             }
 
             // in RestoreIfPending, log entry + which category
-            MelonLogger.Log($"[Options] RestoreIfPending: catId={restoreCategoryId}");
+            DebugLog.Log($"[Options] RestoreIfPending: catId={restoreCategoryId}");
         }
 
         private static void DrawCategory(OptionsCategory cat)

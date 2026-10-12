@@ -164,17 +164,17 @@ namespace ExScoringMod
                     if (!alreadyRegistered)
                     {
                         defaultAsset.fallbackSpriteAssets.Add(practiceIconsSpriteAsset);
-                        MelonLogger.Log("PracticeIcons sprite asset registered as fallback");
+                        DebugLog.Log("PracticeIcons sprite asset registered as fallback");
                     }
                 }
 
                 practiceIconsInitialized = true;
-                MelonLogger.Log($"PracticeIcons initialized: {iconCount} icons in {atlasWidth}x{atlasHeight} atlas");
+                DebugLog.Log($"PracticeIcons initialized: {iconCount} icons in {atlasWidth}x{atlasHeight} atlas");
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"Failed to initialize PracticeIcons: {ex.Message}");
-                MelonLogger.Log(ex.StackTrace);
+                DebugLog.Log($"Failed to initialize PracticeIcons: {ex.Message}");
+                DebugLog.Log(ex.StackTrace);
             }
         }
 
@@ -224,7 +224,7 @@ namespace ExScoringMod
             GameObject refButton = GameObject.Find(name);
             if (refButton == null)
             {
-                MelonLogger.Log("PracticeModeMinimizeButton: could not find reference button, skipping");
+                DebugLog.Log("PracticeModeMinimizeButton: could not find reference button, skipping");
                 return;
             }
 

@@ -60,7 +60,7 @@ namespace ExScoringMod
             KeyboardEntry src = FindSourceKeyboard();
             if (src == null)
             {
-                MelonLogger.Log("[SearchKeyboard] No source keyboard found");
+                DebugLog.Log("[SearchKeyboard] No source keyboard found");
                 return;
             }
 

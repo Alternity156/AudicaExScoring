@@ -76,13 +76,13 @@ namespace ExScoringMod
 
             if (IsInSong())
             {
-                MelonLogger.Log("[ExScoring] UserSettingsSync: in a song, skipping profile sync.");
+                DebugLog.Log("[ExScoring] UserSettingsSync: in a song, skipping profile sync.");
                 return;
             }
 
             if (!TryGetLocalGunColors(out string left, out string right))
             {
-                MelonLogger.Log("[ExScoring] UserSettingsSync: PlayerPreferences not ready, skipping profile sync.");
+                DebugLog.Log("[ExScoring] UserSettingsSync: PlayerPreferences not ready, skipping profile sync.");
                 return;
             }
 
@@ -99,11 +99,11 @@ namespace ExScoringMod
 
             if (SameColor(left, knownLeft) && SameColor(right, knownRight))
             {
-                MelonLogger.Log($"[ExScoring] UserSettingsSync: gun colors already up to date ({left}, {right}).");
+                DebugLog.Log($"[ExScoring] UserSettingsSync: gun colors already up to date ({left}, {right}).");
                 return;
             }
 
-            MelonLogger.Log($"[ExScoring] UserSettingsSync: server has ({knownLeft ?? "none"}, {knownRight ?? "none"}), game has ({left}, {right}) - updating.");
+            DebugLog.Log($"[ExScoring] UserSettingsSync: server has ({knownLeft ?? "none"}, {knownRight ?? "none"}), game has ({left}, {right}) - updating.");
             SendGunColors(left, right);
         }
 
@@ -132,7 +132,7 @@ namespace ExScoringMod
             // another mod's temporary colors.
             if (IsInSong())
             {
-                MelonLogger.Log("[ExScoring] UserSettingsSync: song started before gun colors were sent, dropping (next main-menu visit will catch up).");
+                DebugLog.Log("[ExScoring] UserSettingsSync: song started before gun colors were sent, dropping (next main-menu visit will catch up).");
                 yield break;
             }
 
@@ -141,7 +141,7 @@ namespace ExScoringMod
 
             if (SameColor(left, knownLeft) && SameColor(right, knownRight)) yield break;
 
-            MelonLogger.Log($"[ExScoring] UserSettingsSync: gun colors changed to ({left}, {right}) - updating.");
+            DebugLog.Log($"[ExScoring] UserSettingsSync: gun colors changed to ({left}, {right}) - updating.");
             SendGunColors(left, right);
         }
 

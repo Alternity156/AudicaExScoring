@@ -429,7 +429,7 @@ namespace ExScoringMod
             else
                 prevScrollCanonical = hasSavedScroll ? savedScrollOffset : 0f;
 
-            MelonLogger.Log($"[VList-DIAG] SetView prevScroll calc: targetScroll={targetScroll?.ToString("0.00") ?? "null"}, " +
+            DebugLog.Log($"[VList-DIAG] SetView prevScroll calc: targetScroll={targetScroll?.ToString("0.00") ?? "null"}, " +
                             $"wasActive={wasActive}, liveScrollCanonical={liveScrollCanonical:0.00}, " +
                             $"hasSavedScroll={hasSavedScroll}, savedScrollOffset={savedScrollOffset:0.00}, " +
                             $"=> prevScrollCanonical={prevScrollCanonical:0.00}, newWrapBuffer={wrapBuffer}");
@@ -461,13 +461,13 @@ namespace ExScoringMod
             lastIntendedPhysicalScroll = clampedPhysical;
             scrollDirtiedByInput = false;
 
-            MelonLogger.Log($"[VList] SetView: {view.Count} rows (physical={PhysicalRowCount}, wrapBuffer={wrapBuffer}), " +
+            DebugLog.Log($"[VList] SetView: {view.Count} rows (physical={PhysicalRowCount}, wrapBuffer={wrapBuffer}), " +
                             $"scroll={clampedPhysical:0.0}/{maxScroll:0.0}, displayCount={scroller.displayCount:0.0}");
 
             Sync();
 
             swSetView.Stop();
-            MelonLogger.Log($"[VList-PERF] SetView TOTAL {swSetView.Elapsed.TotalMilliseconds:0.0} ms ({view.Count} rows)");
+            DebugLog.Log($"[VList-PERF] SetView TOTAL {swSetView.Elapsed.TotalMilliseconds:0.0} ms ({view.Count} rows)");
         }
 
         /// <summary>
@@ -626,7 +626,7 @@ namespace ExScoringMod
         {
             int idx0 = IndexOf(songID);
             if (!active) return;
-            if (idx0 < 0) { MelonLogger.Log($"[VList] ScrollToAndSelect: '{songID}' not in current view."); return; }
+            if (idx0 < 0) { DebugLog.Log($"[VList] ScrollToAndSelect: '{songID}' not in current view."); return; }
             int mySeq = ++selectSeq;
             MelonCoroutines.Start(ScrollToAndSelectCo(songID, idx0 + wrapBuffer, preserveIfVisible, generation, mySeq));
         }
@@ -669,7 +669,7 @@ namespace ExScoringMod
                 if (item != null) break;
             }
 
-            if (item == null) { MelonLogger.Log($"[VList] ScrollToAndSelect: '{songID}' did not bind after {maxFrames} frames."); yield break; }
+            if (item == null) { DebugLog.Log($"[VList] ScrollToAndSelect: '{songID}' did not bind after {maxFrames} frames."); yield break; }
             if (gen != generation || seq != selectSeq) yield break;
 
             SelectBoundItem(songID, item);
@@ -762,7 +762,7 @@ namespace ExScoringMod
         public static void LogStateBeforeRebuild()
         {
             var ss = songSelect ?? UnityEngine.Object.FindObjectOfType<SongSelect>();
-            if (ss == null) { MelonLogger.Log("[VList-DIAG] no SongSelect"); return; }
+            if (ss == null) { DebugLog.Log("[VList-DIAG] no SongSelect"); return; }
 
             int btnCount = -1, btnNulls = 0;
             try
@@ -774,7 +774,7 @@ namespace ExScoringMod
                     for (int i = 0; i < b.Count; i++) if (b[i] == null) btnNulls++;
                 }
             }
-            catch (Exception e) { MelonLogger.Log("[VList-DIAG] mSongButtons threw: " + e.Message); }
+            catch (Exception e) { DebugLog.Log("[VList-DIAG] mSongButtons threw: " + e.Message); }
 
             int rows = -1;
             try { if (ss.scroller != null && ss.scroller.mRows != null) rows = ss.scroller.mRows.Count; }
@@ -792,7 +792,7 @@ namespace ExScoringMod
             }
             catch { }
 
-            MelonLogger.Log($"[VList-DIAG] before rebuild: mSongButtons={btnCount} (nulls={btnNulls}), " +
+            DebugLog.Log($"[VList-DIAG] before rebuild: mSongButtons={btnCount} (nulls={btnNulls}), " +
                             $"mRows={rows}, active={active}, songPool={songPool.Count}, headerPool={headerPool.Count}, " +
                             $"scrollIdx={scrollIdx:0.00}, mIndex={mIdx:0.00}, mDestIdx={mDestIdx:0.00}, wrapBuffer={wrapBuffer}");
         }
@@ -818,7 +818,7 @@ namespace ExScoringMod
                     float physical = scrollDirtiedByInput ? scroller.GetScrollIndex() : lastIntendedPhysicalScroll;
                     savedScrollOffset = physical - wrapBuffer;
                     hasSavedScroll = true;
-                    MelonLogger.Log($"[VList-DIAG] Teardown captured: scrollIdx={scroller.GetScrollIndex():0.00}, " +
+                    DebugLog.Log($"[VList-DIAG] Teardown captured: scrollIdx={scroller.GetScrollIndex():0.00}, " +
                                     $"dirtiedByInput={scrollDirtiedByInput}, lastIntended={lastIntendedPhysicalScroll:0.00}, " +
                                     $"using={physical:0.00}, wrapBuffer={wrapBuffer}, savedScrollOffset={savedScrollOffset:0.00}");
                 }
@@ -843,7 +843,7 @@ namespace ExScoringMod
                         if (songPool[i] != null && songPool[i].ssi != null)
                             songSelect.mSongButtons.Remove(songPool[i].ssi);
                 }
-                catch (Exception e) { MelonLogger.Log("[VList] Teardown mSongButtons purge failed: " + e.Message); }
+                catch (Exception e) { DebugLog.Log("[VList] Teardown mSongButtons purge failed: " + e.Message); }
             }
 
             // Reset the live scroll position for the game's imminent empty rebuild (scroll was
@@ -878,7 +878,7 @@ namespace ExScoringMod
                 int slot = AcquireSongSlot();
                 if (slot < 0)
                 {
-                    if (!poolWarming) MelonLogger.Log($"[VList] Song pool exhausted at row {physicalIndex}.");
+                    if (!poolWarming) DebugLog.Log($"[VList] Song pool exhausted at row {physicalIndex}.");
                     return; // ALWAYS bail when there's no slot — never fall through to songPool[slot]
                 }
                 var pi = songPool[slot];
@@ -912,7 +912,7 @@ namespace ExScoringMod
                     if (songSelect != null && songSelect.mSongButtons != null && pi.ssi != null)
                         songSelect.mSongButtons.Remove(pi.ssi);
                 }
-                catch (Exception e) { MelonLogger.Log("[VList] mSongButtons.Remove failed: " + e.Message); }
+                catch (Exception e) { DebugLog.Log("[VList] mSongButtons.Remove failed: " + e.Message); }
 
                 if (pi.ssi != null && pi.ssi.button != null)
                 {
@@ -935,7 +935,7 @@ namespace ExScoringMod
                 int slot = AcquireHeaderSlot();
                 if (slot < 0)
                 {
-                    if (!poolWarming) MelonLogger.Log($"[VList] Header pool exhausted at row {physicalIndex}.");
+                    if (!poolWarming) DebugLog.Log($"[VList] Header pool exhausted at row {physicalIndex}.");
                     return; // ALWAYS bail when there's no slot — never fall through to headerPool[slot]
                 }
                 var hi = headerPool[slot];
@@ -944,7 +944,7 @@ namespace ExScoringMod
                 {
                     headerPool[slot] = CreateHeaderPoolItem(songSelect.songSelectItemPrefab.gameObject, slot);
                     hi = headerPool[slot];
-                    MelonLogger.Log($"[VList] Revived destroyed header pool slot {slot}.");
+                    DebugLog.Log($"[VList] Revived destroyed header pool slot {slot}.");
                 }
 
                 hi.go.transform.SetParent(ph.transform, false);
@@ -1131,7 +1131,7 @@ namespace ExScoringMod
             }
 
             sw.Stop();
-            MelonLogger.Log($"[VList-PERF] BuildPlaceholders: {total} rows " +
+            DebugLog.Log($"[VList-PERF] BuildPlaceholders: {total} rows " +
                             $"(reused={reused}, created={created}, poolFree={placeholderPool.Count}) " +
                             $"in {sw.Elapsed.TotalMilliseconds:0.0} ms");
         }
@@ -1146,7 +1146,7 @@ namespace ExScoringMod
                 var go = placeholderPool[last];
                 placeholderPool.RemoveAt(last);
                 if (Alive(go)) { reused++; return go; }
-                MelonLogger.Log("[VList] Pooled placeholder was destroyed; creating a replacement.");
+                DebugLog.Log("[VList] Pooled placeholder was destroyed; creating a replacement.");
             }
 
             created++;
@@ -1164,7 +1164,7 @@ namespace ExScoringMod
                 bool prev = scroller.destroyChildren;
                 scroller.destroyChildren = false;
                 try { scroller.ClearRows(); }
-                catch (Exception e) { MelonLogger.Log("[VList] ClearRows failed: " + e); }
+                catch (Exception e) { DebugLog.Log("[VList] ClearRows failed: " + e); }
                 scroller.destroyChildren = prev;
             }
 
@@ -1182,7 +1182,7 @@ namespace ExScoringMod
             placeholders.Clear();
 
             sw.Stop();
-            MelonLogger.Log($"[VList-PERF] ClearPlaceholders: returned {returned} to pool " +
+            DebugLog.Log($"[VList-PERF] ClearPlaceholders: returned {returned} to pool " +
                             $"(poolFree={placeholderPool.Count}) in {sw.Elapsed.TotalMilliseconds:0.0} ms");
         }
 
@@ -1235,7 +1235,7 @@ namespace ExScoringMod
                 warming = false;
             }
 
-            MelonLogger.Log($"[VList-PERF] WarmPlaceholderPool: pre-created {created} over {frames} frame(s), " +
+            DebugLog.Log($"[VList-PERF] WarmPlaceholderPool: pre-created {created} over {frames} frame(s), " +
                             $"{workMs:0.0} ms total work (poolFree={placeholderPool.Count}, target={warmTarget})");
         }
 
@@ -1288,7 +1288,7 @@ namespace ExScoringMod
                 poolWarming = false; // never let a thrown frame strand the warm flag
             }
 
-            MelonLogger.Log($"[VList-PERF] EnsurePools(async): created {created} over {frames} frame(s), " +
+            DebugLog.Log($"[VList-PERF] EnsurePools(async): created {created} over {frames} frame(s), " +
                             $"{workMs:0.0} ms work (song={songPool.Count}, header={headerPool.Count}, target={poolTarget})");
         }
 
@@ -1318,7 +1318,7 @@ namespace ExScoringMod
         {
             var prefabGO = songSelect.songSelectItemPrefab.gameObject;
             songPool[slot] = CreateSongPoolItem(prefabGO, slot);
-            MelonLogger.Log($"[VList] Revived destroyed song pool slot {slot}.");
+            DebugLog.Log($"[VList] Revived destroyed song pool slot {slot}.");
         }
 
         private static HeaderPoolItem CreateHeaderPoolItem(GameObject prefabGO, int index)
@@ -1514,12 +1514,12 @@ namespace ExScoringMod
         private static bool EnsureRefs()
         {
             if (songSelect == null) songSelect = UnityEngine.Object.FindObjectOfType<SongSelect>();
-            if (songSelect == null) { MelonLogger.Log("[VList] No SongSelect — be on the song page."); return false; }
+            if (songSelect == null) { DebugLog.Log("[VList] No SongSelect — be on the song page."); return false; }
             scroller = songSelect.scroller;
-            if (scroller == null) { MelonLogger.Log("[VList] No scroller."); return false; }
+            if (scroller == null) { DebugLog.Log("[VList] No scroller."); return false; }
             scrollParent = scroller.scrollParent;
-            if (scrollParent == null) { MelonLogger.Log("[VList] No scrollParent."); return false; }
-            if (songSelect.songSelectItemPrefab == null) { MelonLogger.Log("[VList] No songSelectItemPrefab."); return false; }
+            if (scrollParent == null) { DebugLog.Log("[VList] No scrollParent."); return false; }
+            if (songSelect.songSelectItemPrefab == null) { DebugLog.Log("[VList] No songSelectItemPrefab."); return false; }
             EnsureHiddenHolder();
             return true;
         }
@@ -1619,9 +1619,9 @@ namespace ExScoringMod
         {
             if (__exception == null) return null; // success path: the postfix handled the rebuild
 
-            MelonLogger.Log("[VList] Swallowed ShowSongList exception: " + __exception.Message);
+            DebugLog.Log("[VList] Swallowed ShowSongList exception: " + __exception.Message);
             try { FolderRowManager.Rebuild(__instance); }
-            catch (Exception e) { MelonLogger.Log("[VList] post-exception rebuild failed: " + e); }
+            catch (Exception e) { DebugLog.Log("[VList] post-exception rebuild failed: " + e); }
             return null; // suppress
         }
     }

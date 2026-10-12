@@ -28,7 +28,7 @@ namespace ExScoringMod
                 backButtonLabel.alpha = .25f;
             }
             if (showPopup) PlaylistUtil.Popup("Downloading..");
-            MelonLogger.Log("Downloading " + filename);
+            DebugLog.Log("Downloading " + filename);
             MelonCoroutines.Start(SongDownloader.DoSongWebSearch(filename, OnWebSearchDone, DifficultyFilter.All, false, 1, false));
         }
 
@@ -44,7 +44,7 @@ namespace ExScoringMod
             }
             if (showPopup) PlaylistUtil.Popup("Downloading..");
             ActiveSearchers = filenames.Count;
-            MelonLogger.Log("Files: " + filenames.Count);
+            DebugLog.Log("Files: " + filenames.Count);
             foreach (string filename in filenames)
             {
                 MelonCoroutines.Start(SongDownloader.DoSongWebSearch(filename, OnWebSearchDone, DifficultyFilter.All, false, 1, false));
@@ -107,7 +107,7 @@ namespace ExScoringMod
                 {
                     CompleteDownloadMissing();
                 }
-                MelonLogger.Log("search returned no matches.");
+                DebugLog.Log("search returned no matches.");
                 return;
             }
             if (result.song_count == 1)
@@ -118,7 +118,7 @@ namespace ExScoringMod
             }
             else
             {
-                MelonLogger.Log("Multiple or no matches found.");
+                DebugLog.Log("Multiple or no matches found.");
                 if (ActiveDownloads <= 0 && ActiveSearchers <= 0)
                 {
                     CompleteDownloadMissing();
@@ -131,7 +131,7 @@ namespace ExScoringMod
             ActiveDownloads -= 1;
             if (!success)
             {
-                MelonLogger.Log("[WARNING] Download of " + search + " failed");
+                DebugLog.Log("[WARNING] Download of " + search + " failed");
                 if (ActiveDownloads > 0) return;
                 if (IsDownloadingMissing)
                 {

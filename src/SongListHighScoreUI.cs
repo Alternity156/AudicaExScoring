@@ -57,7 +57,7 @@ namespace ExScoringMod
                 }
             }
 
-            MelonLogger.Log($"[ExScoring] RefreshAllVisibleSongRowScores: {boundCount}/{viewCount} row(s) bound and refreshed.");
+            DebugLog.Log($"[ExScoring] RefreshAllVisibleSongRowScores: {boundCount}/{viewCount} row(s) bound and refreshed.");
         }
 
         // The EX layout nudges highScoreLabel over to make room for the longer judgement-score
@@ -294,7 +294,7 @@ namespace ExScoringMod
         {
             if (stars == null)
             {
-                MelonLogger.Log("[ExScoring][Diag] HideNativeStarArrays: stars is NULL");
+                DebugLog.Log("[ExScoring][Diag] HideNativeStarArrays: stars is NULL");
                 return;
             }
 

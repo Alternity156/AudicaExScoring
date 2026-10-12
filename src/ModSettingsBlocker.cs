@@ -40,7 +40,7 @@ namespace ExScoringMod
             Type ui = FindType("UI");
             if (ui == null)
             {
-                MelonLogger.Log("[ModSettingsBlocker] Mod Settings UI type not found; nothing to patch.");
+                DebugLog.Log("[ModSettingsBlocker] Mod Settings UI type not found; nothing to patch.");
                 return;
             }
 
@@ -50,7 +50,7 @@ namespace ExScoringMod
 
             if (target == null)
             {
-                MelonLogger.Log("[ModSettingsBlocker] UI.AddCategories not found; nothing to patch.");
+                DebugLog.Log("[ModSettingsBlocker] UI.AddCategories not found; nothing to patch.");
                 return;
             }
 
@@ -63,11 +63,11 @@ namespace ExScoringMod
                     .GetMethod(nameof(Postfix), BindingFlags.Static | BindingFlags.NonPublic));
 
                 harmony.Patch(target, prefix, postfix);
-                MelonLogger.Log("[ModSettingsBlocker] ExScoring category hidden from Mod Settings.");
+                DebugLog.Log("[ModSettingsBlocker] ExScoring category hidden from Mod Settings.");
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[ModSettingsBlocker] Failed to patch UI.AddCategories: {e.Message}");
+                DebugLog.Log($"[ModSettingsBlocker] Failed to patch UI.AddCategories: {e.Message}");
             }
         }
 

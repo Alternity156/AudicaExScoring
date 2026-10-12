@@ -261,7 +261,7 @@ namespace ExScoringMod
                 }
             }
 
-            MelonLogger.Log("Difficulty export complete: difficultyCalculatorOutput.txt");
+            DebugLog.Log("Difficulty export complete: difficultyCalculatorOutput.txt");
         }
 
         /// <summary>
@@ -270,11 +270,11 @@ namespace ExScoringMod
         public static void LogCurrentSongDifficulty()
         {
             var calc = new DifficultyCalculator(SongDataHolder.I.songData);
-            MelonLogger.Log($"\n{calc.songID}");
-            if (calc.expert != null) MelonLogger.Log($"Expert: {calc.expert.difficultyRating}");
-            if (calc.advanced != null) MelonLogger.Log($"Advanced: {calc.advanced.difficultyRating}");
-            if (calc.standard != null) MelonLogger.Log($"Standard: {calc.standard.difficultyRating}");
-            if (calc.beginner != null) MelonLogger.Log($"Beginner: {calc.beginner.difficultyRating}");
+            DebugLog.Log($"\n{calc.songID}");
+            if (calc.expert != null) DebugLog.Log($"Expert: {calc.expert.difficultyRating}");
+            if (calc.advanced != null) DebugLog.Log($"Advanced: {calc.advanced.difficultyRating}");
+            if (calc.standard != null) DebugLog.Log($"Standard: {calc.standard.difficultyRating}");
+            if (calc.beginner != null) DebugLog.Log($"Beginner: {calc.beginner.difficultyRating}");
         }
     }
 }

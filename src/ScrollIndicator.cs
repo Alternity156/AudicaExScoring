@@ -160,7 +160,7 @@ namespace ExScoringMod
             thumbWrap = CreateThumb("ScrollIndicatorThumbWrap");
             thumbMainW = thumbMainH = thumbWrapW = thumbWrapH = -1f; // force first mesh build
 
-            MelonLogger.Log("[ScrollIndicator] Built.");
+            DebugLog.Log("[ScrollIndicator] Built.");
             return true;
         }
 

@@ -32,7 +32,7 @@ namespace ExScoringMod
             GameObject left = GameObject.Find("menu/ShellPage_Main/page/ShellPanel_Left");
             if (left == null)
             {
-                MelonLogger.Log("ReleaseNotesPanel: ShellPanel_Left not found");
+                DebugLog.Log("ReleaseNotesPanel: ShellPanel_Left not found");
                 return;
             }
 
@@ -42,7 +42,7 @@ namespace ExScoringMod
             if (howToPlay != null)
                 howToPlay.gameObject.SetActive(false);
             else
-                MelonLogger.Log("ReleaseNotesPanel: HowToPlay not found");
+                DebugLog.Log("ReleaseNotesPanel: HowToPlay not found");
 
             Transform howToPlayTitle = leftT.Find(HowToPlayTitleName);
             if (howToPlayTitle != null)
@@ -58,25 +58,25 @@ namespace ExScoringMod
                 }
                 else
                 {
-                    MelonLogger.Log("ReleaseNotesPanel: HowToPlay_Title has no TextMeshPro");
+                    DebugLog.Log("ReleaseNotesPanel: HowToPlay_Title has no TextMeshPro");
                 }
             }
             else
             {
-                MelonLogger.Log("ReleaseNotesPanel: HowToPlay_Title not found");
+                DebugLog.Log("ReleaseNotesPanel: HowToPlay_Title not found");
             }
 
             Transform releaseNotes = leftT.Find(ReleaseNotesName);
             if (releaseNotes == null)
             {
-                MelonLogger.Log("ReleaseNotesPanel: ReleaseNotes not found");
+                DebugLog.Log("ReleaseNotesPanel: ReleaseNotes not found");
                 return;
             }
 
             Transform content = leftT.Find(ContentPath);
             if (content == null)
             {
-                MelonLogger.Log("ReleaseNotesPanel: Content not found");
+                DebugLog.Log("ReleaseNotesPanel: Content not found");
                 releaseNotes.gameObject.SetActive(true);
                 return;
             }
@@ -85,7 +85,7 @@ namespace ExScoringMod
             if (logo != null)
                 logo.gameObject.SetActive(false);
             else
-                MelonLogger.Log("ReleaseNotesPanel: logo_tm not found");
+                DebugLog.Log("ReleaseNotesPanel: logo_tm not found");
 
             // Text content itself is handled by ReleaseNotesOnEnablePatch in Hooks.cs, which
             // skips the original OnEnable (no fetch, no "loading..." placeholder) and sets our
@@ -94,7 +94,7 @@ namespace ExScoringMod
             if (text != null)
                 text.localPosition = TextLocalPosition;
             else
-                MelonLogger.Log("ReleaseNotesPanel: text not found");
+                DebugLog.Log("ReleaseNotesPanel: text not found");
 
             ApiKeyHelpButtons.Setup(leftT);
 

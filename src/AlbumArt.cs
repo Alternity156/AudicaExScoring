@@ -652,7 +652,7 @@ namespace ExScoringMod
             rawImage.texture = defaultTexture;
             canvasObject.SetActive(defaultTexture != null);
 
-            MelonLogger.Log("[AlbumArt] Canvas created");
+            DebugLog.Log("[AlbumArt] Canvas created");
         }
 
         /// <summary>
@@ -664,7 +664,7 @@ namespace ExScoringMod
         {
             if (canvasObject == null || rawImage == null)
             {
-                MelonLogger.Log("[AlbumArt] UpdateAlbumArt called but canvas not ready");
+                DebugLog.Log("[AlbumArt] UpdateAlbumArt called but canvas not ready");
                 return;
             }
 
@@ -684,11 +684,11 @@ namespace ExScoringMod
                     currentTexture = tex;
                     rawImage.texture = currentTexture;
                     canvasObject.SetActive(true);
-                    MelonLogger.Log($"[AlbumArt] Displaying album art for '{songID}'");
+                    DebugLog.Log($"[AlbumArt] Displaying album art for '{songID}'");
                     return;
                 }
 
-                MelonLogger.Log($"[AlbumArt] Failed to decode image data for '{songID}', using default");
+                DebugLog.Log($"[AlbumArt] Failed to decode image data for '{songID}', using default");
                 GameObject.Destroy(tex);
             }
 
@@ -740,7 +740,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[AlbumArt] Error reading SongDataLoader data: {e.Message}");
+                DebugLog.Log($"[AlbumArt] Error reading SongDataLoader data: {e.Message}");
                 return null;
             }
         }
@@ -775,7 +775,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[AlbumArt] Failed to load default texture: {e.Message}");
+                DebugLog.Log($"[AlbumArt] Failed to load default texture: {e.Message}");
                 return null;
             }
         }

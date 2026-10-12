@@ -49,7 +49,7 @@ namespace ExScoringMod
             Type msgType = FindType("TwitchConnectorMod.ParsedTwitchMessage");
             if (tcmType == null || ircType == null || msgType == null)
             {
-                MelonLogger.Log("[SongRequestInterceptor] TwitchConnectorMod not found; interception disabled.");
+                DebugLog.Log("[SongRequestInterceptor] TwitchConnectorMod not found; interception disabled.");
                 return;
             }
 
@@ -61,7 +61,7 @@ namespace ExScoringMod
             SubscribeToChat(tcmType, ircType);
             PatchSendMessage(tcmType);
 
-            MelonLogger.Log("[SongRequestInterceptor] Phase 2 active (suppress + search + store + parity messaging).");
+            DebugLog.Log("[SongRequestInterceptor] Phase 2 active (suppress + search + store + parity messaging).");
         }
 
         // ── -id seam (chat event) ─────────────────────────────────────────────────
@@ -75,7 +75,7 @@ namespace ExScoringMod
                     BindingFlags.Public | BindingFlags.Static);
                 if (parsedMessageField == null || handlerDelegateType == null || addHandler == null)
                 {
-                    MelonLogger.Log("[SongRequestInterceptor] Could not resolve TwitchConnectorMod chat API; -id seam off.");
+                    DebugLog.Log("[SongRequestInterceptor] Could not resolve TwitchConnectorMod chat API; -id seam off.");
                     return;
                 }
 
@@ -86,7 +86,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[SongRequestInterceptor] Chat subscribe failed: {e.Message}");
+                DebugLog.Log($"[SongRequestInterceptor] Chat subscribe failed: {e.Message}");
             }
         }
 
@@ -111,14 +111,14 @@ namespace ExScoringMod
                     if (!SongRequestIntegration.RequestsEnabled && bc != "1"
                         && !(mod == "1" && SongRequestIntegration.LetModsIgnoreQueueStatus))
                     {
-                        MelonLogger.Log($"[SongRequestInterceptor] -id request ignored (queue disabled): {q.MaudicaId}");
+                        DebugLog.Log($"[SongRequestInterceptor] -id request ignored (queue disabled): {q.MaudicaId}");
                         return;
                     }
 
                     string requestedBy = parsedUserIdField != null
                         ? (parsedUserIdField.GetValue(eventArgs) as string ?? "") : "";
                     pendingIdContext[q.MaudicaId] = requestedBy;
-                    MelonLogger.Log($"[SongRequestInterceptor] -id request caught: {q.MaudicaId} → looking up.");
+                    DebugLog.Log($"[SongRequestInterceptor] -id request caught: {q.MaudicaId} → looking up.");
                     MelonCoroutines.Start(SongDownloader.DoMaudicaIDSearch(q.MaudicaId, OnIdSearchResult));
                     return;
                 }
@@ -126,7 +126,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[SongRequestInterceptor] OnChatMessage failed: {e.Message}");
+                DebugLog.Log($"[SongRequestInterceptor] OnChatMessage failed: {e.Message}");
             }
         }
 
@@ -139,7 +139,7 @@ namespace ExScoringMod
                     BindingFlags.Public | BindingFlags.Static, null, new[] { typeof(string) }, null);
                 if (target == null)
                 {
-                    MelonLogger.Log("[SongRequestInterceptor] TwitchConnectorMod.SendMessage not found; suppression off.");
+                    DebugLog.Log("[SongRequestInterceptor] TwitchConnectorMod.SendMessage not found; suppression off.");
                     return;
                 }
                 MethodInfo prefix = typeof(SongRequestInterceptor)
@@ -148,7 +148,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[SongRequestInterceptor] Failed to patch SendMessage: {e.Message}");
+                DebugLog.Log($"[SongRequestInterceptor] Failed to patch SendMessage: {e.Message}");
             }
         }
 
@@ -170,7 +170,7 @@ namespace ExScoringMod
             }
 
             string query = m.Groups[1].Value;
-            MelonLogger.Log($"[SongRequestInterceptor] Suppressing SongRequest \"not found\" for \"{query}\"; web-searching.");
+            DebugLog.Log($"[SongRequestInterceptor] Suppressing SongRequest \"not found\" for \"{query}\"; web-searching.");
             MelonCoroutines.Start(HandleTitleMiss(query));
             return false; // suppress SongRequest's premature "not found"
         }
@@ -233,7 +233,7 @@ namespace ExScoringMod
         {
             if (best == null || string.IsNullOrEmpty(best.song_id))
             {
-                MelonLogger.Log($"[SongRequestInterceptor] No match for \"{notFoundQuery}\" → not found.");
+                DebugLog.Log($"[SongRequestInterceptor] No match for \"{notFoundQuery}\" → not found.");
                 EmitNotFound(notFoundQuery);
                 return;
             }
@@ -241,7 +241,7 @@ namespace ExScoringMod
             SongList.SongData local = FindLocalSong(best);
             if (local != null)
             {
-                MelonLogger.Log($"[SongRequestInterceptor] Request already local: {best.title} - {best.artist} → available queue.");
+                DebugLog.Log($"[SongRequestInterceptor] Request already local: {best.title} - {best.artist} → available queue.");
                 SongRequestIntegration.AddAvailableRequest(local, requestedBy, DateTime.Now);
                 return;
             }
@@ -266,7 +266,7 @@ namespace ExScoringMod
             SongRequestStore.Add(entry);
             SongRequestIntegration.PrimeDownloadNameCache(best.song_id);
             SongRequestIntegration.EmitNewSongQueueItem(best.title, best.artist, best.author);
-            MelonLogger.Log($"[SongRequestInterceptor] Queued missing request: {best.song_id} | {best.title} - {best.artist}");
+            DebugLog.Log($"[SongRequestInterceptor] Queued missing request: {best.song_id} | {best.title} - {best.artist}");
         }
 
         private static void EmitNotFound(string query)
@@ -347,7 +347,7 @@ namespace ExScoringMod
                     if (titleExact && artistOk && mapperOk) return s;
                 }
             }
-            catch (Exception e) { MelonLogger.Log($"[SongRequestInterceptor] FindLocalSong failed: {e.Message}"); }
+            catch (Exception e) { DebugLog.Log($"[SongRequestInterceptor] FindLocalSong failed: {e.Message}"); }
             return null;
         }
 

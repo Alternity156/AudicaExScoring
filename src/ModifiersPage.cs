@@ -33,13 +33,13 @@ namespace ExScoringMod
             if (pageObj != null && shellPage != null) return true;
 
             GameObject root = GameObject.Find(RootPath);
-            if (root == null) { MelonLogger.Log("[ModifiersPage] root not found: " + RootPath); return false; }
+            if (root == null) { DebugLog.Log("[ModifiersPage] root not found: " + RootPath); return false; }
 
             shellPage = root.GetComponent<ShellPage>();
-            if (shellPage == null) { MelonLogger.Log("[ModifiersPage] ShellPage component not found on " + RootPath); return false; }
+            if (shellPage == null) { DebugLog.Log("[ModifiersPage] ShellPage component not found on " + RootPath); return false; }
 
             pageObj = GameObject.Find(PagePath);
-            if (pageObj == null) { MelonLogger.Log("[ModifiersPage] page not found: " + PagePath); return false; }
+            if (pageObj == null) { DebugLog.Log("[ModifiersPage] page not found: " + PagePath); return false; }
 
             Transform bp = pageObj.transform.Find("backParent");
             backParent = bp != null ? bp.gameObject : null;
@@ -51,7 +51,7 @@ namespace ExScoringMod
                 originalLocalRotation = pageObj.transform.localRotation;
                 originalLocalScale = pageObj.transform.localScale;
                 cached = true;
-                MelonLogger.Log("[ModifiersPage] cached original transform");
+                DebugLog.Log("[ModifiersPage] cached original transform");
             }
 
             return true;
@@ -80,7 +80,7 @@ namespace ExScoringMod
             shellPage.mTransitioning = false;
 
             pageObj.SetActive(true);
-            MelonLogger.Log("[ModifiersPage] shown");
+            DebugLog.Log("[ModifiersPage] shown");
         }
 
         public static void Hide()
@@ -99,7 +99,7 @@ namespace ExScoringMod
             pageObj.transform.localScale = originalLocalScale;
             if (backParent != null) backParent.SetActive(true);
 
-            MelonLogger.Log("[ModifiersPage] hidden");
+            DebugLog.Log("[ModifiersPage] hidden");
         }
     }
 }

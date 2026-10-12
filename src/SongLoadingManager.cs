@@ -73,7 +73,7 @@ namespace ExScoringMod
             if ((!searching || disabled || MenuState.GetState() != MenuState.State.MainPage) &&
                 !PlaylistDownloadManager.IsDownloadingMissing) return;
 
-            MelonLogger.Log("SongLoadingManager: Disabling buttons");
+            DebugLog.Log("SongLoadingManager: Disabling buttons");
             disabled = true;
 
             if (soloButton == null)

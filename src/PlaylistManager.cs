@@ -119,7 +119,7 @@ namespace ExScoringMod
         {
             if (!playlists.ContainsKey(playlistName))
             {
-                MelonLogger.Log("Playlist " + playlistName + " couldn't be found.");
+                DebugLog.Log("Playlist " + playlistName + " couldn't be found.");
                 return;
             }
             playlistToEdit = playlists[playlistName];
@@ -129,7 +129,7 @@ namespace ExScoringMod
         {
             if (!playlists.ContainsKey(playlistName))
             {
-                MelonLogger.Log("Playlist " + playlistName + " couldn't be found.");
+                DebugLog.Log("Playlist " + playlistName + " couldn't be found.");
                 return;
             }
             selectedPlaylist = playlists[playlistName];
@@ -139,7 +139,7 @@ namespace ExScoringMod
         {
             if (!playlists.ContainsKey(playlistName))
             {
-                MelonLogger.Log("Playlist " + playlistName + " couldn't be found.");
+                DebugLog.Log("Playlist " + playlistName + " couldn't be found.");
                 return;
             }
             PlaylistUtil.Popup(songName + " added to " + playlistName);
@@ -151,7 +151,7 @@ namespace ExScoringMod
         {
             if (playlistToEdit is null)
             {
-                MelonLogger.Log("No playlist to edit selected");
+                DebugLog.Log("No playlist to edit selected");
                 return;
             }
             playlists[playlistToEdit.name].RemoveSong(songName);
@@ -162,7 +162,7 @@ namespace ExScoringMod
         {
             if (!playlists.ContainsKey(playlistName))
             {
-                MelonLogger.Log("Playlist " + playlistName + " couldn't be found.");
+                DebugLog.Log("Playlist " + playlistName + " couldn't be found.");
                 return;
             }
             PlaylistUtil.Popup(songStem + " removed from " + playlistName);
@@ -174,7 +174,7 @@ namespace ExScoringMod
         {
             if (playlistToEdit is null)
             {
-                MelonLogger.Log("No playlist to edit selected");
+                DebugLog.Log("No playlist to edit selected");
                 return;
             }
             PlaylistUtil.Popup(playlistToEdit.name + " deleted");

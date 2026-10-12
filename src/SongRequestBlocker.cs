@@ -40,7 +40,7 @@ namespace ExScoringMod
             Type requestUI = FindType("AudicaModding.RequestUI");
             if (requestUI == null)
             {
-                MelonLogger.Log("[SongRequestBlocker] RequestUI type not found; UI suppression skipped.");
+                DebugLog.Log("[SongRequestBlocker] RequestUI type not found; UI suppression skipped.");
                 return;
             }
 
@@ -53,9 +53,9 @@ namespace ExScoringMod
             any |= Patch(harmony, requestUI, "DisableFilter", Type.EmptyTypes, skip);
 
             if (any)
-                MelonLogger.Log("[SongRequestBlocker] SongRequest song-list UI suppressed.");
+                DebugLog.Log("[SongRequestBlocker] SongRequest song-list UI suppressed.");
             else
-                MelonLogger.Log("[SongRequestBlocker] No RequestUI methods patched — UI may still appear.");
+                DebugLog.Log("[SongRequestBlocker] No RequestUI methods patched — UI may still appear.");
         }
 
         // A bool-returning prefix that returns false skips the original (void) method body.
@@ -71,7 +71,7 @@ namespace ExScoringMod
 
                 if (mi == null)
                 {
-                    MelonLogger.Log($"[SongRequestBlocker] {type.Name}.{method} not found; skipped.");
+                    DebugLog.Log($"[SongRequestBlocker] {type.Name}.{method} not found; skipped.");
                     return false;
                 }
 
@@ -80,7 +80,7 @@ namespace ExScoringMod
             }
             catch (Exception e)
             {
-                MelonLogger.Log($"[SongRequestBlocker] Failed to patch {type.Name}.{method}: {e.Message}");
+                DebugLog.Log($"[SongRequestBlocker] Failed to patch {type.Name}.{method}: {e.Message}");
                 return false;
             }
         }

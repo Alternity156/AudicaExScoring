@@ -470,7 +470,7 @@ namespace ExScoringMod
             ClearLeaderboardRowGradeVisual(slot);
             if (parent == null)
             {
-                MelonLogger.Log($"[ExScoring][Diag] CreateOrUpdateLeaderboardRowGradeVisual: parent is NULL (slot={slot})");
+                DebugLog.Log($"[ExScoring][Diag] CreateOrUpdateLeaderboardRowGradeVisual: parent is NULL (slot={slot})");
                 return;
             }
 

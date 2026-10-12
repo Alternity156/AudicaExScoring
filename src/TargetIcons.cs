@@ -276,12 +276,12 @@ namespace ExScoringMod
                     if (!alreadyRegistered)
                     {
                         defaultAsset.fallbackSpriteAssets.Add(targetIconsSpriteAsset);
-                        MelonLogger.Log("TargetIcons sprite asset registered as fallback");
+                        DebugLog.Log("TargetIcons sprite asset registered as fallback");
                     }
                 }
 
                 targetIconsInitialized = true;
-                MelonLogger.Log($"TargetIcons initialized: {iconCount} icons in {atlasWidth}x{atlasHeight} atlas");
+                DebugLog.Log($"TargetIcons initialized: {iconCount} icons in {atlasWidth}x{atlasHeight} atlas");
             }
             catch (Exception ex)
             {

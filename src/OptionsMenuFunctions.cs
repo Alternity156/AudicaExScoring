@@ -80,6 +80,7 @@ namespace ExScoringMod
         public static float searchKeyboardPosZ;
         public static float searchKeyboardTilt;
         public static bool enableScoreUpload;
+        public static bool debugLogs;
 
         public static void GetExScorePopupSize()
         {
@@ -295,6 +296,17 @@ namespace ExScoringMod
             Config.UpdateEnableScoreUpload(value);
         }
 
+        public static void GetDebugLogs()
+        {
+            debugLogs = Config.DebugLogs;
+        }
+
+        public static void SetDebugLogs(bool value)
+        {
+            debugLogs = value;
+            Config.UpdateDebugLogs(value);
+        }
+
         /// <summary>Whether an API key is currently set — drives the checkmark on the API Key row.</summary>
         public static bool HasApiKey()
         {
@@ -311,12 +323,12 @@ namespace ExScoringMod
             string clipboard = GUIUtility.systemCopyBuffer;
             if (string.IsNullOrWhiteSpace(clipboard))
             {
-                MelonLogger.Log("[ExScoring] Paste API key: clipboard is empty, ignoring");
+                DebugLog.Log("[ExScoring] Paste API key: clipboard is empty, ignoring");
                 return;
             }
 
             Config.UpdateApiKey(clipboard.Trim());
-            MelonLogger.Log("[ExScoring] API key updated from clipboard");
+            DebugLog.Log("[ExScoring] API key updated from clipboard");
 
             // Only worth checking if Enable Score Upload has never been explicitly set before
             // (by the user's own toggle or by this same auto-enable) - once it has, a manual
@@ -329,7 +341,7 @@ namespace ExScoringMod
                 if (Config.ScoreUploadUserConfigured) return; // could have been set while the request was in flight
 
                 SetEnableScoreUpload(true);
-                MelonLogger.Log("[ExScoring] API key verified - automatically enabled score upload");
+                DebugLog.Log("[ExScoring] API key verified - automatically enabled score upload");
             });
         }
 

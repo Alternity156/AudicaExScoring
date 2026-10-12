@@ -39,13 +39,13 @@ namespace ExScoringMod
             if (cloneRoot == null) return;
 
             GameObject menuRoot = GameObject.Find("menu");
-            if (menuRoot == null) { MelonLogger.Log("[Options] RestoreDefaultPlacement: 'menu' root not found"); return; }
+            if (menuRoot == null) { DebugLog.Log("[Options] RestoreDefaultPlacement: 'menu' root not found"); return; }
 
             Transform songPage = menuRoot.transform.Find("ShellPage_Song/page");
             Transform launchCenter = menuRoot.transform.Find(LaunchCenterPath);
             if (songPage == null || launchCenter == null)
             {
-                MelonLogger.Log($"[Options] RestoreDefaultPlacement: refs missing (songPage={(songPage != null)}, launchCenter={(launchCenter != null)})");
+                DebugLog.Log($"[Options] RestoreDefaultPlacement: refs missing (songPage={(songPage != null)}, launchCenter={(launchCenter != null)})");
                 return;
             }
 
@@ -65,11 +65,11 @@ namespace ExScoringMod
             if (cloneRoot != null && Menu != null) return true;
 
             GameObject menuRoot = GameObject.Find("menu");
-            if (menuRoot == null) { MelonLogger.Log("[Options] 'menu' root not found"); return false; }
+            if (menuRoot == null) { DebugLog.Log("[Options] 'menu' root not found"); return false; }
 
             Transform src = menuRoot.transform.Find(SettingsCenterPath);
-            if (src == null) { MelonLogger.Log("[Options] settings source not found: " + SettingsCenterPath); return false; }
-            MelonLogger.Log("[Options] settings source found");
+            if (src == null) { DebugLog.Log("[Options] settings source not found: " + SettingsCenterPath); return false; }
+            DebugLog.Log("[Options] settings source found");
 
             cloneRoot = GameObject.Instantiate(src.gameObject);
             cloneRoot.name = "ExScoringOptionsPanel";
@@ -78,7 +78,7 @@ namespace ExScoringMod
             Menu = cloneRoot.GetComponentInChildren<OptionsMenu>(true);
             if (Menu == null)
             {
-                MelonLogger.Log("[Options] OptionsMenu component not found on clone");
+                DebugLog.Log("[Options] OptionsMenu component not found on clone");
                 GameObject.Destroy(cloneRoot); cloneRoot = null; return false;
             }
 
@@ -98,11 +98,11 @@ namespace ExScoringMod
                     ps.y != 0 ? ls.y / ps.y : ls.y,
                     ps.z != 0 ? ls.z / ps.z : ls.z);
 
-                MelonLogger.Log($"[Options] clone under song page, placed at world {launchCenter.position}");
+                DebugLog.Log($"[Options] clone under song page, placed at world {launchCenter.position}");
             }
             else
             {
-                MelonLogger.Log($"[Options] placement refs missing (songPage={(songPage != null)}, launchCenter={(launchCenter != null)})");
+                DebugLog.Log($"[Options] placement refs missing (songPage={(songPage != null)}, launchCenter={(launchCenter != null)})");
             }
 
             // Detach from the "menu" hierarchy entirely (preserving current world position/rotation/
@@ -116,7 +116,7 @@ namespace ExScoringMod
             GameObject.DontDestroyOnLoad(cloneRoot);
 
             cloneRoot.SetActive(false);
-            MelonLogger.Log("[Options] clone created");
+            DebugLog.Log("[Options] clone created");
             return true;
         }
 
@@ -142,10 +142,10 @@ namespace ExScoringMod
             if (historyCloneRoot != null) return true;
 
             GameObject menuRoot = GameObject.Find("menu");
-            if (menuRoot == null) { MelonLogger.Log("[Options] EnsureHistoryClone: 'menu' root not found"); return false; }
+            if (menuRoot == null) { DebugLog.Log("[Options] EnsureHistoryClone: 'menu' root not found"); return false; }
 
             Transform src = menuRoot.transform.Find(SettingsCenterPath);
-            if (src == null) { MelonLogger.Log("[Options] EnsureHistoryClone: settings source not found"); return false; }
+            if (src == null) { DebugLog.Log("[Options] EnsureHistoryClone: settings source not found"); return false; }
 
             historyCloneRoot = GameObject.Instantiate(src.gameObject);
             historyCloneRoot.name = "ExScoringHistoryPanel";
@@ -154,7 +154,7 @@ namespace ExScoringMod
             GameObject.DontDestroyOnLoad(historyCloneRoot);
             historyCloneRoot.SetActive(false);
 
-            MelonLogger.Log("[Options] history clone created");
+            DebugLog.Log("[Options] history clone created");
             return true;
         }
 
@@ -230,10 +230,10 @@ namespace ExScoringMod
             if (leaderboardStatsCloneRoot != null) return true;
 
             GameObject menuRoot = GameObject.Find("menu");
-            if (menuRoot == null) { MelonLogger.Log("[Options] EnsureLeaderboardStatsClone: 'menu' root not found"); return false; }
+            if (menuRoot == null) { DebugLog.Log("[Options] EnsureLeaderboardStatsClone: 'menu' root not found"); return false; }
 
             Transform src = menuRoot.transform.Find(SettingsCenterPath);
-            if (src == null) { MelonLogger.Log("[Options] EnsureLeaderboardStatsClone: settings source not found"); return false; }
+            if (src == null) { DebugLog.Log("[Options] EnsureLeaderboardStatsClone: settings source not found"); return false; }
 
             leaderboardStatsCloneRoot = GameObject.Instantiate(src.gameObject);
             leaderboardStatsCloneRoot.name = "ExScoringLeaderboardStatsPanel";
@@ -242,7 +242,7 @@ namespace ExScoringMod
             GameObject.DontDestroyOnLoad(leaderboardStatsCloneRoot);
             leaderboardStatsCloneRoot.SetActive(false);
 
-            MelonLogger.Log("[Options] leaderboard stats clone created");
+            DebugLog.Log("[Options] leaderboard stats clone created");
             return true;
         }
 
