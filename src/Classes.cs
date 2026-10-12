@@ -125,9 +125,11 @@ namespace ExScoringMod
 
             /// <summary>
             /// Platform the entry's best run was played on (ApiContract.md v2.9, Section 4): one of
-            /// "Steam"/"Oculus"/"Viveport"/"Playstation"/"Unknown". "Unknown" for any run submitted
-            /// before the mod sent this field, or wherever the server couldn't detect it. See
-            /// ApplyPlatformIcon in ExLeaderboardDisplay.cs for how this maps to a row icon.
+            /// "Steam"/"Oculus"/"Viveport"/"Playstation"/"Unknown". Since v2.24, when the best run's own
+            /// platform is "Unknown" (submitted before the mod sent this field), the server returns
+            /// the player's current platform instead, so this only reads "Unknown" when the player has
+            /// no run with a known platform at all. See ApplyPlatformIcon in ExLeaderboardDisplay.cs
+            /// for how this maps to a row icon.
             /// </summary>
             public string platform;
         }
@@ -143,8 +145,9 @@ namespace ExScoringMod
 
         /// <summary>
         /// Entry shape for GET /api/leaderboard/total (ApiContract.md section 4c, v2.23) — the
-        /// main-menu Total leaderboard, scoped per song-list per difficulty. No grade/fullCombo
+        /// main-menu Total leaderboard, scoped per song-list per difficulty. No grade/fullCombo/runId
         /// concept here (it aggregates many songs, not a single run), unlike LeaderboardApiEntry.
+        /// platform is per player rather than per run (see the field below).
         ///
         /// averagePercent is the ranking value: the player's best judgementPercent averaged over
         /// every song in the list, unplayed songs counting as 0%. Nullable so a server that doesn't
@@ -159,6 +162,15 @@ namespace ExScoringMod
             public float totalScore;
             public int songsPlayed;
             public bool isRequester;
+
+            /// <summary>
+            /// The player's current platform (ApiContract.md v2.24, Sections 4/4c): the platform of
+            /// their most recent run with a known platform, across every song and difficulty — not
+            /// tied to any run in this list. Same "Steam"/"Oculus"/"Viveport"/"Playstation"/"Unknown"
+            /// values as LeaderboardApiEntry.platform. null when talking to a server older than
+            /// v2.24, which ApplyPlatformIcon treats like Unknown (icon hidden).
+            /// </summary>
+            public string platform;
         }
 
         public class TotalLeaderboardApiResponse

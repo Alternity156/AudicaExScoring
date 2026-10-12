@@ -533,9 +533,11 @@ namespace ExScoringMod
         /// player's averagePercent across the list (ApiContract.md section 4c, v2.23 — unplayed songs
         /// count as 0%), in the same "0.00%" format as a per-song row; the raw totalScore is never
         /// shown. If the server doesn't send averagePercent, the column shows "-" rather than a
-        /// misleading 0.00%. TotalLeaderboardApiEntry has no grade/fullCombo/platform/runId — an
-        /// aggregate across a song-list isn't tied to any single run — so this hides the star/grade visual and platform icon rather than
-        /// populating them from data that doesn't exist, and deliberately clears any hitbox mapping
+        /// misleading 0.00%. The platform icon comes from the entry's per-player platform (v2.24 —
+        /// the player's latest known platform, see TotalLeaderboardApiEntry.platform).
+        /// TotalLeaderboardApiEntry has no grade/fullCombo/runId — an aggregate across a song-list
+        /// isn't tied to any single run — so this hides the star/grade visual rather than
+        /// populating it from data that doesn't exist, and deliberately clears any hitbox mapping
         /// instead of creating one (ClearLeaderboardHitboxRun, not EnsureLeaderboardHitbox): there's
         /// no single run behind an aggregate total score to fetch via GET /api/runs/:runId, so this
         /// row shouldn't open the leaderboard-stats panel the way a per-song row does.
@@ -557,10 +559,10 @@ namespace ExScoringMod
 
             if (row.percentile != null) row.percentile.gameObject.SetActive(false);
 
-            // No platform on a Total leaderboard entry (ApiContract.md section 4c) — passing null
-            // hits ApplyPlatformIcon's default case and disables the icon, same as an unrecognized/
-            // missing platform on a per-song row.
-            ApplyPlatformIcon(row.platform, null);
+            // The player's current platform (ApiContract.md v2.24, section 4c) — their latest known
+            // platform, not tied to a run in this list. "Unknown", or null from a pre-v2.24 server,
+            // hits ApplyPlatformIcon's default case and hides the icon, same as on a per-song row.
+            ApplyPlatformIcon(row.platform, entry.platform);
 
             HideLeaderboardRowStars(row.starDisplay);
             ClearLeaderboardRowGradeVisual(slot);
