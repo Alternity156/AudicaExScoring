@@ -142,12 +142,14 @@ namespace ExScoringMod
 
         /// <summary>
         /// Fetches the AudicaEx online leaderboard for a song+difficulty (GET /api/leaderboard —
-        /// see ApiContract.md section 4). `view` is "top" (public, default paging) or "self"
+        /// see ApiContract.md section 4). `view` is "top" (public, default paging), "self"
         /// (requires an API key; server ignores offset and returns a window centered on the
-        /// requester's rank). An `Authorization` header is sent whenever an API key is configured,
-        /// regardless of view, since the contract says a valid key also unlocks `requesterRank` on
-        /// the Top view. Always calls onComplete exactly once: with the parsed response on success,
-        /// or null on any failure (network error, HTTP error, an unparsable body, or the view=self/
+        /// requester's rank) or "friends" (requires an API key; server ignores limit/offset and
+        /// returns the requester plus every friend with a run, re-ranked within the group). An
+        /// `Authorization` header is sent whenever an API key is configured, regardless of view,
+        /// since the contract says a valid key also unlocks `requesterRank` on the Top view. Always
+        /// calls onComplete exactly once: with the parsed response on success, or null on any
+        /// failure (network error, HTTP error, an unparsable body, or the view=self/view=friends
         /// missing-key case below). Every failure path is logged first, so a null result can always
         /// be traced back to a specific cause via MelonLogger/UnityExplorer.
         /// </summary>
@@ -160,12 +162,12 @@ namespace ExScoringMod
                 return;
             }
 
-            if (view == "self" && string.IsNullOrEmpty(Config.ApiKey))
+            if ((view == "self" || view == "friends") && string.IsNullOrEmpty(Config.ApiKey))
             {
-                // Shouldn't be reachable in practice — the Self button is gated on having a key
-                // (see UpdateSelfButtonAvailability in ExLeaderboardDisplay.cs) — but guard here too
-                // rather than firing a request the server will just reject.
-                DebugLog.Log("[ExScoring] FetchLeaderboard: view=self requested but no API key is set, aborting.");
+                // Shouldn't be reachable in practice — the Friends button is only shown with a key
+                // and GetExLeaderboardView falls back to "top" without one (ExLeaderboardDisplay.cs)
+                // — but guard here too rather than firing a request the server will just reject.
+                DebugLog.Log($"[ExScoring] FetchLeaderboard: view={view} requested but no API key is set, aborting.");
                 onComplete?.Invoke(null);
                 return;
             }
@@ -221,8 +223,10 @@ namespace ExScoringMod
         /// Fetches the AudicaEx Total leaderboard for a song-list+difficulty (GET /api/leaderboard/total
         /// — see ApiContract.md section 4c). Mirrors FetchLeaderboard above (same view/auth/staleness
         /// conventions), scoped to `listId` instead of a single `songId`. `view` is "top" (public,
-        /// default paging) or "self" (requires an API key, server ignores offset). Always calls
-        /// onComplete exactly once: with the parsed response on success, or null on any failure.
+        /// default paging), "self" (requires an API key, server ignores offset) or "friends"
+        /// (requires an API key, server returns the whole friend group ranked by averagePercent).
+        /// Always calls onComplete exactly once: with the parsed response on success, or null on any
+        /// failure.
         /// </summary>
         public static void FetchTotalLeaderboard(string listId, string difficulty, int limit, string view, Action<TotalLeaderboardApiResponse> onComplete)
         {
@@ -233,9 +237,9 @@ namespace ExScoringMod
                 return;
             }
 
-            if (view == "self" && string.IsNullOrEmpty(Config.ApiKey))
+            if ((view == "self" || view == "friends") && string.IsNullOrEmpty(Config.ApiKey))
             {
-                DebugLog.Log("[ExScoring] FetchTotalLeaderboard: view=self requested but no API key is set, aborting.");
+                DebugLog.Log($"[ExScoring] FetchTotalLeaderboard: view={view} requested but no API key is set, aborting.");
                 onComplete?.Invoke(null);
                 return;
             }
