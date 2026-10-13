@@ -634,5 +634,187 @@ namespace ExScoringMod
                 request.Dispose();
             }
         }
+
+        /// <summary>
+        /// Pulls the server's `error` string out of an error response body ({"error": "..."}), for
+        /// showing on screen. Falls back to the HTTP status / transport error when the body isn't
+        /// that shape (empty, HTML from a proxy, etc.). Never throws.
+        /// </summary>
+        private static string ExtractApiError(UnityWebRequest request)
+        {
+            string body = request.downloadHandler != null ? request.downloadHandler.text : null;
+            if (!string.IsNullOrEmpty(body))
+            {
+                try
+                {
+                    Dictionary<string, object> parsed = JsonConvert.DeserializeObject<Dictionary<string, object>>(body);
+                    if (parsed != null && parsed.TryGetValue("error", out object err) && err != null)
+                    {
+                        string text = err.ToString();
+                        if (!string.IsNullOrEmpty(text)) return text;
+                    }
+                }
+                catch
+                {
+                    // Not JSON — fall through to the status-based message.
+                }
+            }
+
+            if (request.isNetworkError) return string.IsNullOrEmpty(request.error) ? "Network error" : request.error;
+            return $"HTTP {request.responseCode}";
+        }
+
+        /// <summary>
+        /// Fetches a score comparison between the requester and another player (GET
+        /// /api/users/me/compare/:userId — ApiContract.md Section 15). `listId` and `difficulty`
+        /// (v2.30 filters) narrow the rows to that song-list's songs at that difficulty — the mod
+        /// passes whatever its Total leaderboard was fetched with, so the comparison covers exactly
+        /// that Total's songs. Either can be null/empty to leave that filter off. Requires an API key.
+        /// Always calls onComplete exactly once: (response, null) on success, or (null, errorMessage)
+        /// on any failure — errorMessage is the server's `error` string when it sent one, otherwise a
+        /// short status description, suitable for showing on the compare page. Every failure path is
+        /// logged first.
+        /// </summary>
+        public static void FetchCompare(string userId, string listId, string difficulty, Action<CompareApiResponse, string> onComplete)
+        {
+            if (string.IsNullOrEmpty(Config.ApiKey))
+            {
+                DebugLog.Log("[ExScoring] FetchCompare: no API key set, aborting.");
+                onComplete?.Invoke(null, "No API key");
+                return;
+            }
+
+            if (string.IsNullOrEmpty(userId))
+            {
+                DebugLog.Log("[ExScoring] FetchCompare: userId is null/empty, aborting.");
+                onComplete?.Invoke(null, "Unknown player");
+                return;
+            }
+
+            DebugLog.Log($"[ExScoring] FetchCompare: starting userId={userId} listId={listId} difficulty={difficulty}");
+            MelonCoroutines.Start(FetchCompareCoroutine(userId, listId, difficulty, onComplete));
+        }
+
+        private static IEnumerator FetchCompareCoroutine(string userId, string listId, string difficulty, Action<CompareApiResponse, string> onComplete)
+        {
+            List<string> query = new List<string>();
+            if (!string.IsNullOrEmpty(listId)) query.Add("listId=" + Uri.EscapeDataString(listId));
+            if (!string.IsNullOrEmpty(difficulty)) query.Add("difficulty=" + Uri.EscapeDataString(difficulty));
+
+            string url = $"{ApiBaseUrl}/api/users/me/compare/{Uri.EscapeDataString(userId)}";
+            if (query.Count > 0) url += "?" + string.Join("&", query);
+
+            DebugLog.Log($"[ExScoring] FetchCompare: GET {url}");
+
+            UnityWebRequest request = UnityWebRequest.Get(url);
+            try
+            {
+                request.SetRequestHeader("Authorization", "ApiKey " + Config.ApiKey);
+
+                yield return request.SendWebRequest();
+
+                if (request.isNetworkError || request.isHttpError)
+                {
+                    string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
+                    DebugLog.Log($"[ExScoring] FetchCompare failed ({request.responseCode}): {request.error} | userId={userId} listId={listId} difficulty={difficulty} | Body: {errorBody}");
+                    onComplete?.Invoke(null, ExtractApiError(request));
+                    yield break;
+                }
+
+                try
+                {
+                    CompareApiResponse response = JsonConvert.DeserializeObject<CompareApiResponse>(request.downloadHandler.text);
+                    DebugLog.Log($"[ExScoring] FetchCompare succeeded: userId={userId} rows={response?.rows?.Length ?? 0} them={response?.them?.nickname} isWatched={response?.them?.isWatched?.ToString() ?? "null"}");
+                    onComplete?.Invoke(response, null);
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.Log($"[ExScoring] FetchCompare: failed to parse response ({request.downloadHandler.text}): {ex}");
+                    onComplete?.Invoke(null, "Invalid server response");
+                }
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Adds a player to the requester's friends/watch list by userId (POST /api/friends with
+        /// { userId } — ApiContract.md Section 7.3, v2.25). Idempotent server-side: adding someone
+        /// already on the list returns 200 with the existing entry. Requires an API key. Always calls
+        /// onComplete exactly once: with the parsed response on success, or null on any failure
+        /// (every failure path is logged first).
+        /// </summary>
+        public static void AddFriendByUserId(string userId, Action<FriendAddResponse> onComplete)
+        {
+            if (string.IsNullOrEmpty(Config.ApiKey))
+            {
+                DebugLog.Log("[ExScoring] AddFriendByUserId: no API key set, aborting.");
+                onComplete?.Invoke(null);
+                return;
+            }
+
+            if (string.IsNullOrEmpty(userId))
+            {
+                DebugLog.Log("[ExScoring] AddFriendByUserId: userId is null/empty, aborting.");
+                onComplete?.Invoke(null);
+                return;
+            }
+
+            try
+            {
+                string json = JsonConvert.SerializeObject(new FriendAddRequest { userId = userId });
+                DebugLog.Log($"[ExScoring] AddFriendByUserId: starting, body={json}");
+                MelonCoroutines.Start(AddFriendByUserIdCoroutine(Encoding.UTF8.GetBytes(json), userId, onComplete));
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Log($"[ExScoring] AddFriendByUserId: failed to build request: {ex}");
+                onComplete?.Invoke(null);
+            }
+        }
+
+        private static IEnumerator AddFriendByUserIdCoroutine(byte[] body, string userId, Action<FriendAddResponse> onComplete)
+        {
+            string url = $"{ApiBaseUrl}/api/friends";
+
+            UnityWebRequest request = new UnityWebRequest(url, "POST");
+            try
+            {
+                request.uploadHandler = new UploadHandlerRaw(body);
+                request.downloadHandler = new DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type", "application/json");
+                request.SetRequestHeader("Authorization", "ApiKey " + Config.ApiKey);
+
+                yield return request.SendWebRequest();
+
+                if (request.isNetworkError || request.isHttpError)
+                {
+                    string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
+                    DebugLog.Log($"[ExScoring] AddFriendByUserId failed ({request.responseCode}): {request.error} | userId={userId} | Body: {errorBody}");
+                    onComplete?.Invoke(null);
+                    yield break;
+                }
+
+                try
+                {
+                    FriendAddResponse response = JsonConvert.DeserializeObject<FriendAddResponse>(request.downloadHandler.text);
+                    DebugLog.Log($"[ExScoring] AddFriendByUserId succeeded: userId={response?.userId} nickname={response?.nickname}");
+                    onComplete?.Invoke(response ?? new FriendAddResponse { userId = userId });
+                }
+                catch (Exception ex)
+                {
+                    // The request itself succeeded (2xx), so the friend is on the list even if the
+                    // body didn't parse — report success rather than a misleading failure.
+                    DebugLog.Log($"[ExScoring] AddFriendByUserId: succeeded but failed to parse response ({request.downloadHandler.text}): {ex}");
+                    onComplete?.Invoke(new FriendAddResponse { userId = userId });
+                }
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
     }
 }

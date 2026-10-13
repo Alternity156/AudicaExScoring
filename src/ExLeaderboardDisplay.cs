@@ -264,7 +264,7 @@ namespace ExScoringMod
                 if (response == null)
                 {
                     DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} failed (see ApiClient log above), blanking rows.");
-                    BlankAllLeaderboardRows(display);
+                    BlankAllLeaderboardRows(display, true);
                     return;
                 }
 
@@ -277,6 +277,10 @@ namespace ExScoringMod
 
                 if (view == ViewFriendsParam)
                     SortFriendsEntries(response);
+
+                // The compare buttons on these rows compare over exactly this list+difficulty
+                // (ApiContract.md v2.30, Section 15 filters) — see ExScoreComparison.cs.
+                RememberCompareScope(TotalLeaderboardListId, difficulty);
 
                 DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} ({view}) applying {response.entries?.Length ?? 0} row(s), requesterRank={response.requesterRank?.ToString() ?? "null"}.");
                 PopulateTotalLeaderboardRows(display, response);
@@ -459,22 +463,26 @@ namespace ExScoringMod
         /// OnDataReceived/UpdateScores runs — which we never reach when EX scoring is on, so nothing
         /// otherwise tells them to flip back. Call this once rows are in their final state (populated
         /// or blanked), success or failure, so the panel never gets stuck spinning.
+        /// `totalSet` picks which row set is on screen: rowsTotal for the main-menu Total
+        /// leaderboard, rowsStandard for every per-song leaderboard.
         /// </summary>
-        private static void ShowLeaderboardPanelContent(LeaderboardDisplay display)
+        private static void ShowLeaderboardPanelContent(LeaderboardDisplay display, bool totalSet = false)
         {
             if (display == null) return;
 
-            // EX data is always written into rowsStandard, but the panel has four row sets
-            // (standard/friends/total/totalFriends), each under its own parent, and native switches
-            // which one is shown when its own data arrives (e.g. the Main page's Total leaderboard
-            // shows rowsTotal). Without this, EX rows written after native has loaded once land in
-            // a hidden set while the stale native rows stay on screen. Native picks its own set
-            // again the next time its data arrives, so nothing needs undoing when leaving EX.
-            if (display.rowsStandardParent != null) display.rowsStandardParent.SetActive(true);
+            // The panel has four row sets (standard/friends/total/totalFriends), each under its own
+            // parent, and native switches which one is shown when its own data arrives. EX writes
+            // per-song data into rowsStandard and Total data into rowsTotal — the only set whose rows
+            // carry a CompareButton (confirmed via UnityExplorer: compareButton is NULL on every
+            // rowsStandard/rowsFriends row), which ExScoreComparison.cs needs. Without this, EX rows
+            // written after native has loaded once land in a hidden set while the stale native rows
+            // stay on screen. Native picks its own set again the next time its data arrives, so
+            // nothing needs undoing when leaving EX.
+            if (display.rowsStandardParent != null) display.rowsStandardParent.SetActive(!totalSet);
             if (display.rowsFriendsParent != null) display.rowsFriendsParent.SetActive(false);
-            if (display.rowsTotalParent != null) display.rowsTotalParent.SetActive(false);
+            if (display.rowsTotalParent != null) display.rowsTotalParent.SetActive(totalSet);
             if (display.rowsTotalFriendsParent != null) display.rowsTotalFriendsParent.SetActive(false);
-            DebugLog.Log("[ExScoring][Diag] ShowLeaderboardPanelContent: rowsStandard set shown, other row sets hidden.");
+            DebugLog.Log($"[ExScoring][Diag] ShowLeaderboardPanelContent: {(totalSet ? "rowsTotal" : "rowsStandard")} set shown, other row sets hidden.");
 
             if (display.spinner != null)
             {
@@ -531,7 +539,9 @@ namespace ExScoringMod
             else
                 DebugLog.Log($"[ExScoring][Diag] ApplyLeaderboardEntryToRow: starDisplay NULL for row slot={slot}, cannot place grade visual.");
 
+            // Compare is only offered on the Total leaderboard, like native (ExScoreComparison.cs).
             if (row.compareButton != null) row.compareButton.SetActive(false);
+            ClearCompareTarget(slot);
 
             ApplyRequesterHighlight(row, entry.isRequester);
 
@@ -548,6 +558,10 @@ namespace ExScoringMod
         /// Total-leaderboard counterpart to PopulateLeaderboardRows — same front-to-back fill/blank
         /// behavior, but reading TotalLeaderboardApiEntry (ApiContract.md section 4c) instead of a
         /// per-song LeaderboardApiEntry, so rows go through ApplyTotalLeaderboardEntryToRow.
+        /// Writes into display.rowsTotal (native's own Total row set), not rowsStandard: only the
+        /// Total rows have a CompareButton, which the EX comparison needs (ExScoreComparison.cs).
+        /// Every view (Top, Friends, Self) uses rowsTotal — rowsTotalFriends has the same button, so
+        /// one set is enough.
         /// </summary>
         private static void PopulateTotalLeaderboardRows(LeaderboardDisplay display, TotalLeaderboardApiResponse response)
         {
@@ -557,10 +571,10 @@ namespace ExScoringMod
                 return;
             }
 
-            Il2CppReferenceArray<LeaderboardRow> rows = display.rowsStandard;
+            Il2CppReferenceArray<LeaderboardRow> rows = display.rowsTotal;
             if (rows == null)
             {
-                DebugLog.Log("[ExScoring] PopulateTotalLeaderboardRows: rowsStandard is NULL, aborting.");
+                DebugLog.Log("[ExScoring] PopulateTotalLeaderboardRows: rowsTotal is NULL, aborting.");
                 return;
             }
 
@@ -585,7 +599,7 @@ namespace ExScoringMod
                     ClearLeaderboardRow(row);
             }
 
-            ShowLeaderboardPanelContent(display);
+            ShowLeaderboardPanelContent(display, true);
         }
 
         /// <summary>
@@ -627,7 +641,9 @@ namespace ExScoringMod
             HideLeaderboardRowStars(row.starDisplay);
             ClearLeaderboardRowGradeVisual(slot);
 
-            if (row.compareButton != null) row.compareButton.SetActive(false);
+            // Compare button: shown for other players when an API key is set and the server sent a
+            // userId (ApiContract.md v2.30) — see ExScoreComparison.cs.
+            ApplyCompareButton(row, entry);
 
             ApplyRequesterHighlight(row, entry.isRequester);
 
@@ -703,6 +719,7 @@ namespace ExScoringMod
             ApplyRequesterHighlight(row, false);
             ClearLeaderboardRowGradeVisual(row.gameObject.GetInstanceID());
             ClearLeaderboardHitboxRun(row.gameObject.GetInstanceID());
+            ClearCompareTarget(row.gameObject.GetInstanceID());
         }
 
         /// <summary>
@@ -736,14 +753,18 @@ namespace ExScoringMod
             text.color = highlighted ? RequesterHighlightColor : defaultColor;
         }
 
-        private static void BlankAllLeaderboardRows(LeaderboardDisplay display)
+        /// <summary>
+        /// Hides every row of one set and shows that (now empty) set. `totalSet` true blanks
+        /// rowsTotal (main-menu Total leaderboard), false blanks rowsStandard (per-song).
+        /// </summary>
+        private static void BlankAllLeaderboardRows(LeaderboardDisplay display, bool totalSet = false)
         {
             if (display == null) return;
 
-            Il2CppReferenceArray<LeaderboardRow> rows = display.rowsStandard;
+            Il2CppReferenceArray<LeaderboardRow> rows = totalSet ? display.rowsTotal : display.rowsStandard;
             if (rows == null)
             {
-                DebugLog.Log("[ExScoring][Diag] BlankAllLeaderboardRows: rowsStandard is NULL.");
+                DebugLog.Log($"[ExScoring][Diag] BlankAllLeaderboardRows: {(totalSet ? "rowsTotal" : "rowsStandard")} is NULL.");
                 return;
             }
 
@@ -752,7 +773,7 @@ namespace ExScoringMod
                 if (rows[i] != null) ClearLeaderboardRow(rows[i]);
             }
 
-            ShowLeaderboardPanelContent(display);
+            ShowLeaderboardPanelContent(display, totalSet);
         }
 
         /// <summary>
@@ -814,8 +835,16 @@ namespace ExScoringMod
         {
             if (display == null) return;
 
-            Il2CppReferenceArray<LeaderboardRow> rows = display.rowsStandard;
-            if (rows == null) return;
+            // Both sets EX writes into: rowsStandard (per-song) and rowsTotal (main-menu Total).
+            int restoredRows = RestoreLeaderboardRowSet(display.rowsStandard)
+                + RestoreLeaderboardRowSet(display.rowsTotal);
+
+            DebugLog.Log($"[ExScoring][Diag] RestoreLeaderboardRows: restored {restoredRows} row(s).");
+        }
+
+        private static int RestoreLeaderboardRowSet(Il2CppReferenceArray<LeaderboardRow> rows)
+        {
+            if (rows == null) return 0;
 
             int restoredRows = 0;
             for (int i = 0; i < rows.Length; i++)
@@ -844,10 +873,11 @@ namespace ExScoringMod
                 ApplyRequesterHighlight(row, false);
 
                 ClearLeaderboardRowGradeVisual(row.gameObject.GetInstanceID());
+                ClearCompareTarget(row.gameObject.GetInstanceID());
                 restoredRows++;
             }
 
-            DebugLog.Log($"[ExScoring][Diag] RestoreLeaderboardRows: restored {restoredRows} row(s).");
+            return restoredRows;
         }
 
         private static int SetImageArrayEnabled(Il2CppReferenceArray<Image> images, bool enabled, string label)

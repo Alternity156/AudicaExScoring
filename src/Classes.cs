@@ -171,6 +171,13 @@ namespace ExScoringMod
             /// v2.24, which ApplyPlatformIcon treats like Unknown (icon hidden).
             /// </summary>
             public string platform;
+
+            /// <summary>
+            /// The entry's player UUID (ApiContract.md v2.30, Section 4c). Used to open a Section 15
+            /// comparison from this row's compare button (ExScoreComparison.cs). null when talking to
+            /// a server older than v2.30 — the compare button then stays hidden.
+            /// </summary>
+            public string userId;
         }
 
         public class TotalLeaderboardApiResponse
@@ -408,6 +415,78 @@ namespace ExScoringMod
         public class UserSettingsData
         {
             public GunColorsData gunColors;
+        }
+
+        /// <summary>
+        /// One side (me/them) of GET /api/users/me/compare/:userId (ApiContract.md Section 15).
+        /// isWatched (v2.30) is only sent on `them`: true if that player is already on the requester's
+        /// friends/watch list. Nullable so a pre-v2.30 server reads as "unknown" — treated as false
+        /// (Add Friend shown; adding an existing friend is idempotent anyway).
+        /// </summary>
+        public class CompareUser
+        {
+            public string userId;
+            public string nickname;
+            public bool? isWatched;
+        }
+
+        /// <summary>
+        /// A player's best run on one compare row (Section 15) — null on the row when that player has
+        /// no run on that song+difficulty.
+        /// </summary>
+        public class CompareRunRef
+        {
+            public string runId;
+            public float judgementPercent;
+            public RunSubmitGrade grade;
+        }
+
+        /// <summary>
+        /// One (songId, difficulty) row of a Section 15 comparison. difference is
+        /// mine.judgementPercent - theirs.judgementPercent in percentage points (rounded to 2
+        /// decimals by the server), null unless both sides exist.
+        /// </summary>
+        public class CompareRow
+        {
+            public string songId;
+            public string songTitle;
+            public string songArtist;
+            public string difficulty;
+            public CompareRunRef mine;
+            public CompareRunRef theirs;
+            public float? difference;
+        }
+
+        /// <summary>
+        /// Response shape for GET /api/users/me/compare/:userId?listId=&amp;difficulty= (ApiContract.md
+        /// Section 15, filters added v2.30). Rows come already ordered by the server (requester-only,
+        /// ahead, ties, behind, other-only) and are shown in that order — see ExScoreComparison.cs.
+        /// </summary>
+        public class CompareApiResponse
+        {
+            public CompareUser me;
+            public CompareUser them;
+            public CompareRow[] rows;
+        }
+
+        /// <summary>
+        /// Request body for POST /api/friends in its { userId } form (ApiContract.md Section 7.3,
+        /// v2.25). Used by the compare page's Add Friend button.
+        /// </summary>
+        public class FriendAddRequest
+        {
+            public string userId;
+        }
+
+        /// <summary>
+        /// Response shape for POST /api/friends (Section 7.3). Adding someone already on the list is
+        /// idempotent and returns the existing entry, so a 200 always means "they're on the list now".
+        /// </summary>
+        public class FriendAddResponse
+        {
+            public string userId;
+            public string nickname;
+            public long addedAt;
         }
     }
 }
