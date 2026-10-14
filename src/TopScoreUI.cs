@@ -119,13 +119,17 @@ namespace ExScoringMod
 
         private static IEnumerator PopulateTopScoreCoroutine(string songId, KataConfig.Difficulty difficulty, SongInfoTopScoreItem item)
         {
+            // Leaderboard-only scores (e.g. after a clean install) count too. Normally already
+            // fetched by the song list before this panel can open; otherwise waits (bounded).
+            yield return WaitForOnlineBestScores();
+
             yield return LoadHistoryForSong(songId, difficulty.ToString(), results =>
             {
-                ApplyTopScoreToItem(item, difficulty, results);
+                ApplyTopScoreToItem(item, songId, difficulty, results);
             });
         }
 
-        private static void ApplyTopScoreToItem(SongInfoTopScoreItem item, KataConfig.Difficulty difficulty, List<RecalculatedRun> results)
+        private static void ApplyTopScoreToItem(SongInfoTopScoreItem item, string songId, KataConfig.Difficulty difficulty, List<RecalculatedRun> results)
         {
             if (item == null) return;
 
@@ -134,27 +138,41 @@ namespace ExScoringMod
             RecalculatedRun best = null;
             for (int i = 0; i < results.Count; i++)
             {
-                if (best == null || results[i].judgementPercent > best.judgementPercent)
+                if (best == null || IsBetterExScore(results[i].judgementPercent, results[i].failed, best.judgementPercent, best.failed))
                     best = results[i];
             }
 
-            if (best == null)
+            bool hasBest = best != null;
+            float bestPercent = hasBest ? best.judgementPercent : 0f;
+            bool bestFailed = hasBest && best.failed;
+
+            // The player's uploaded best wins if it beats every local run (or there are none).
+            if (TryGetOnlineBest(songId, difficulty.ToString(), out OnlineBestScore online)
+                && (!hasBest || IsBetterExScore(online.judgementPercent, online.failed, bestPercent, bestFailed)))
+            {
+                hasBest = true;
+                bestPercent = online.judgementPercent;
+                bestFailed = online.failed;
+            }
+
+            if (!hasBest)
             {
                 item.gameObject.SetActive(false);
                 ClearTopScoreGradeVisual(difficulty);
                 return;
             }
 
-            SetTopScoreItem(item, best, difficulty);
+            SetTopScoreItem(item, bestPercent, bestFailed, difficulty);
             item.gameObject.SetActive(true);
         }
 
         // Placeholder formatting — score/percent text is easy to retune once we see it in-game,
-        // same as PlayHistoryUI's SetHistoryItem.
-        private static void SetTopScoreItem(SongInfoTopScoreItem item, RecalculatedRun run, KataConfig.Difficulty difficulty)
+        // same as PlayHistoryUI's SetHistoryItem. Takes plain values rather than a RecalculatedRun
+        // since the best may come from the leaderboard (no local run behind it).
+        private static void SetTopScoreItem(SongInfoTopScoreItem item, float judgementPercent, bool failed, KataConfig.Difficulty difficulty)
         {
             if (item.difficulty != null)
-                item.difficulty.text = run.difficulty;
+                item.difficulty.text = difficulty.ToString();
 
             // EX shows the percent only — the raw judgement score label stays hidden.
             // RestoreNativeTopScoreItem turns it back on when returning to native scoring.
@@ -164,10 +182,10 @@ namespace ExScoringMod
             if (item.percent != null)
             {
                 item.percent.gameObject.SetActive(true);
-                item.percent.text = $"{run.judgementPercent:0.00}%";
+                item.percent.text = $"{judgementPercent:0.00}%";
             }
 
-            Grade grade = GetGrade(run.judgementPercent, run.failed);
+            Grade grade = GetGrade(judgementPercent, failed);
 
             if (item.stars != null)
             {

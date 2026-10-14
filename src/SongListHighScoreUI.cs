@@ -31,6 +31,210 @@ namespace ExScoringMod
 
         private static string ExRowCacheKey(string songId, KataConfig.Difficulty difficulty) => songId + "|" + difficulty;
 
+        // ══════════════════════════════════════════════════════════════════
+        //  Online (leaderboard-only) best scores
+        // ══════════════════════════════════════════════════════════════════
+        //
+        // The song list, the High/Low grade folders (FolderRowManager.cs), the Song Info top-score
+        // rows (TopScoreUI.cs) and the in-game high score (InGameUI.cs) all read "best run" from
+        // local run files. After a clean install those are gone, even though every uploaded run is
+        // still on the AudicaEx server. So once per launch (and again if the API key changes) the
+        // player's whole uploaded history is fetched in ONE request (GET /api/users/me/runs, no
+        // filters — ApiContract.md Section 5), reduced to the best run per song+difficulty, and
+        // merged with the local result everywhere: the better of the two wins (IsBetterExScore).
+        //
+        // Freshly played runs don't need a refetch: they're saved locally right away, and the merge
+        // always takes the better of local vs. online.
+
+        public class OnlineBestScore
+        {
+            public float judgementPercent;
+            public bool failed;
+        }
+
+        // songId|difficulty (same key format as exRowScoreCache) -> best uploaded run.
+        private static readonly Dictionary<string, OnlineBestScore> onlineBestScores = new Dictionary<string, OnlineBestScore>();
+
+        // API key the current onlineBestScores (or the in-flight fetch) belongs to. null = never
+        // fetched, or the last attempt failed and may be retried after OnlineBestRetryDelaySeconds.
+        private static string onlineBestFetchedForKey;
+        private static bool onlineBestFetchInFlight;
+        private static bool onlineBestReady; // a fetch for onlineBestFetchedForKey has finished (success or failure)
+        private static int onlineBestRequestVersion; // drops a stale response after an API key change
+        private static float onlineBestRetryAfter; // realtimeSinceStartup before which a failed fetch isn't retried
+
+        private const float OnlineBestRetryDelaySeconds = 60f;
+        private const float OnlineBestWaitTimeoutSeconds = 15f;
+
+        /// <summary>
+        /// Starts the once-per-launch fetch of the player's uploaded best scores if it hasn't run yet
+        /// for the current API key. Cheap to call often (every row bind calls it): it returns right
+        /// away once a fetch has started or finished. With no API key, any previously fetched
+        /// scores are dropped and nothing is requested.
+        /// </summary>
+        public static void EnsureOnlineBestScores()
+        {
+            string apiKey = Config.ApiKey;
+
+            if (string.IsNullOrEmpty(apiKey))
+            {
+                if (onlineBestFetchedForKey != null || onlineBestScores.Count > 0)
+                {
+                    onlineBestScores.Clear();
+                    onlineBestFetchedForKey = null;
+                    onlineBestFetchInFlight = false;
+                    onlineBestReady = false;
+                    onlineBestRequestVersion++;
+                }
+                return;
+            }
+
+            if (onlineBestFetchedForKey == apiKey) return; // already fetched / fetching for this key
+
+            if (onlineBestFetchedForKey == null && Time.realtimeSinceStartup < onlineBestRetryAfter)
+                return; // last attempt failed recently — don't hammer the server from every row bind
+
+            bool keyChanged = onlineBestFetchedForKey != null;
+
+            onlineBestFetchedForKey = apiKey;
+            onlineBestFetchInFlight = true;
+            onlineBestReady = false;
+            onlineBestScores.Clear();
+            int version = ++onlineBestRequestVersion;
+
+            if (keyChanged)
+            {
+                // Scores from the previous account may already be merged into the caches below —
+                // drop them so everything is rebuilt from local files + the new account's scores.
+                ClearMergedBestScoreCaches();
+            }
+
+            FetchMyRuns(response => OnMyRunsFetched(response, version));
+        }
+
+        /// <summary>True once there's nothing more to wait for: no API key, or the fetch for the
+        /// current key has finished (successfully or not).</summary>
+        public static bool OnlineBestScoresSettled =>
+            string.IsNullOrEmpty(Config.ApiKey)
+            || (onlineBestFetchedForKey == Config.ApiKey && onlineBestReady)
+            || (onlineBestFetchedForKey == null && !onlineBestFetchInFlight); // failed, waiting to retry
+
+        /// <summary>
+        /// Coroutine that waits (up to a timeout) for the online best scores to be fetched, starting
+        /// the fetch if needed. Used where re-applying after a late arrival is awkward (the grade
+        /// folders and the Song Info top-score rows), so they're built once with both sources.
+        /// </summary>
+        public static IEnumerator WaitForOnlineBestScores()
+        {
+            EnsureOnlineBestScores();
+
+            float deadline = Time.realtimeSinceStartup + OnlineBestWaitTimeoutSeconds;
+            while (!OnlineBestScoresSettled && Time.realtimeSinceStartup < deadline)
+                yield return null;
+        }
+
+        /// <summary>Best uploaded run for this song+difficulty, if the server has one.</summary>
+        public static bool TryGetOnlineBest(string songId, string difficulty, out OnlineBestScore best)
+        {
+            best = null;
+            if (string.IsNullOrEmpty(songId) || string.IsNullOrEmpty(difficulty)) return false;
+            return onlineBestScores.TryGetValue(songId + "|" + difficulty, out best);
+        }
+
+        /// <summary>
+        /// Whether score A beats score B, using the same "best run" rule as everywhere else: higher
+        /// judgement percent wins, and on an exact tie a passed run beats a failed one.
+        /// </summary>
+        public static bool IsBetterExScore(float percentA, bool failedA, float percentB, bool failedB)
+        {
+            if (percentA != percentB) return percentA > percentB;
+            return !failedA && failedB;
+        }
+
+        private static void OnMyRunsFetched(MyRunsApiResponse response, int version)
+        {
+            if (version != onlineBestRequestVersion) return; // API key changed while this was in flight
+
+            onlineBestFetchInFlight = false;
+
+            if (response == null || response.runs == null)
+            {
+                // Allow a retry later (e.g. the game started offline) instead of giving up for the
+                // whole launch, but not right away.
+                onlineBestFetchedForKey = null;
+                onlineBestReady = false;
+                onlineBestRetryAfter = Time.realtimeSinceStartup + OnlineBestRetryDelaySeconds;
+                DebugLog.Log($"[ExScoring] Online best scores: fetch failed, will retry in {OnlineBestRetryDelaySeconds:0}s at the earliest.");
+                return;
+            }
+
+            onlineBestScores.Clear();
+            for (int i = 0; i < response.runs.Length; i++)
+            {
+                MyRunsApiEntry run = response.runs[i];
+                if (run == null || string.IsNullOrEmpty(run.songId) || string.IsNullOrEmpty(run.difficulty)) continue;
+
+                string key = run.songId + "|" + run.difficulty;
+                if (onlineBestScores.TryGetValue(key, out OnlineBestScore existing)
+                    && !IsBetterExScore(run.judgementPercent, run.failed, existing.judgementPercent, existing.failed))
+                    continue;
+
+                onlineBestScores[key] = new OnlineBestScore { judgementPercent = run.judgementPercent, failed = run.failed };
+            }
+
+            onlineBestReady = true;
+            DebugLog.Log($"[ExScoring] Online best scores: {onlineBestScores.Count} song+difficulty best(s) from {response.runs.Length} uploaded run(s).");
+
+            ApplyOnlineBestScoresToCaches();
+        }
+
+        /// <summary>
+        /// Folds freshly arrived online bests into everything that already cached a local-only
+        /// result, then refreshes what's on screen. Keys never looked up yet are left alone — their
+        /// first lookup merges both sources itself (LoadRowScoreCoroutine).
+        /// </summary>
+        private static void ApplyOnlineBestScoresToCaches()
+        {
+            int upgraded = 0;
+
+            foreach (var kvp in onlineBestScores)
+            {
+                string key = kvp.Key;
+                OnlineBestScore online = kvp.Value;
+
+                if (exRowScoreCache.TryGetValue(key, out CachedExRowScore cached))
+                {
+                    if (IsBetterExScore(online.judgementPercent, online.failed, cached.judgementPercent, cached.failed))
+                    {
+                        cached.judgementPercent = online.judgementPercent;
+                        cached.failed = online.failed;
+                        upgraded++;
+                    }
+                }
+                else if (exRowScoreEmpty.Remove(key))
+                {
+                    exRowScoreCache[key] = new CachedExRowScore { judgementPercent = online.judgementPercent, failed = online.failed };
+                    upgraded++;
+                }
+            }
+
+            DebugLog.Log($"[ExScoring] Online best scores: {upgraded} cached song-list result(s) upgraded.");
+
+            FolderRowManager.ApplyOnlineBestScores();
+
+            if (Config.ExType && VirtualSongList.IsActive)
+                RefreshAllVisibleSongRowScores();
+        }
+
+        /// <summary>Drops every cached best result (song list + grade folders) so they're rebuilt
+        /// from scratch — used when the API key changes mid-session.</summary>
+        private static void ClearMergedBestScoreCaches()
+        {
+            exRowScoreCache.Clear();
+            exRowScoreEmpty.Clear();
+            FolderRowManager.ClearGradeCache();
+        }
+
         /// <summary>
         /// Forces every currently on-screen song-list row to redo its high-score/percent/stars
         /// display immediately, by calling UpdateHighScoreInfo() directly on whatever's bound.
@@ -114,6 +318,9 @@ namespace ExScoringMod
 
                 if (__instance == null || __instance.mSongData == null) return false;
 
+                // Once-per-launch fetch of leaderboard-only bests (no-op after the first call).
+                EnsureOnlineBestScores();
+
                 string songId = __instance.mSongData.songID;
                 KataConfig.Difficulty difficulty = KataConfig.I.GetDifficulty();
                 string key = ExRowCacheKey(songId, difficulty);
@@ -179,15 +386,38 @@ namespace ExScoringMod
             // Totals only, computed entirely on the background loader thread (RunDataRecalculator.cs)
             // — this coroutine's first step is just an enqueue, so however many rows bind in the
             // same frame when a folder opens, none of them read or score anything on the main thread.
-            yield return LoadBestRunSummaryForSong(songId, difficulty.ToString(), best =>
+            //
+            // The local result is then merged with the player's uploaded best (if the online
+            // fetch has already landed): the better of the two is cached. If the online fetch lands
+            // later instead, ApplyOnlineBestScoresToCaches upgrades this entry then.
+            string difficultyName = difficulty.ToString();
+            yield return LoadBestRunSummaryForSong(songId, difficultyName, best =>
             {
+                CachedExRowScore result = null;
+
                 if (best != null)
                 {
-                    exRowScoreCache[key] = new CachedExRowScore
+                    result = new CachedExRowScore
                     {
                         judgementPercent = best.judgementPercent,
                         failed = best.failed
                     };
+                }
+
+                if (TryGetOnlineBest(songId, difficultyName, out OnlineBestScore online)
+                    && (result == null || IsBetterExScore(online.judgementPercent, online.failed, result.judgementPercent, result.failed)))
+                {
+                    result = new CachedExRowScore
+                    {
+                        judgementPercent = online.judgementPercent,
+                        failed = online.failed
+                    };
+                }
+
+                if (result != null)
+                {
+                    exRowScoreCache[key] = result;
+                    exRowScoreEmpty.Remove(key);
                 }
                 else
                 {

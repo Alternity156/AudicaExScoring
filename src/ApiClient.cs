@@ -351,6 +351,88 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// Fetches the requester's whole uploaded run history (GET /api/users/me/runs with no
+        /// songId/difficulty filter — see ApiContract.md Section 5). Requires an API key. Returns
+        /// every non-deleted run, not just bests, without exCues (no ?detail=true). Backs the
+        /// once-per-launch "leaderboard-only best scores" merge in SongListHighScoreUI.cs, so a
+        /// clean install with no local run files still shows its uploaded scores. Always calls
+        /// onComplete exactly once: with the parsed response on success, or null on any failure
+        /// (no API key, network error, HTTP error, or an unparsable body) — every failure path is
+        /// logged first.
+        /// </summary>
+        public static void FetchMyRuns(Action<MyRunsApiResponse> onComplete)
+        {
+            if (string.IsNullOrEmpty(Config.ApiKey))
+            {
+                DebugLog.Log("[ExScoring] FetchMyRuns: no API key is set, aborting.");
+                onComplete?.Invoke(null);
+                return;
+            }
+
+            DebugLog.Log("[ExScoring] FetchMyRuns: starting (full history).");
+            MelonCoroutines.Start(FetchMyRunsCoroutine(onComplete));
+        }
+
+        private static IEnumerator FetchMyRunsCoroutine(Action<MyRunsApiResponse> onComplete)
+        {
+            string url = $"{ApiBaseUrl}/api/users/me/runs";
+
+            DebugLog.Log($"[ExScoring] FetchMyRuns: GET {url}");
+
+            UnityWebRequest request = UnityWebRequest.Get(url);
+            try
+            {
+                request.SetRequestHeader("Authorization", "ApiKey " + Config.ApiKey);
+
+                yield return request.SendWebRequest();
+
+                if (request.isNetworkError || request.isHttpError)
+                {
+                    string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
+                    DebugLog.Log($"[ExScoring] FetchMyRuns failed ({request.responseCode}): {request.error} | Body: {errorBody}");
+                    onComplete?.Invoke(null);
+                    yield break;
+                }
+
+                string body = request.downloadHandler.text;
+                string preview = body != null && body.Length > 500 ? body.Substring(0, 500) + "..." : body;
+
+                MyRunsApiResponse response = null;
+                try
+                {
+                    response = JsonConvert.DeserializeObject<MyRunsApiResponse>(body);
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.Log($"[ExScoring] FetchMyRuns: failed to parse response ({preview}): {ex}");
+                    response = null;
+                }
+
+                if (response == null)
+                {
+                    onComplete?.Invoke(null);
+                    yield break;
+                }
+
+                if (response.runs == null)
+                {
+                    // Most likely the server's array isn't named "runs" — log the start of the
+                    // body so the actual shape is visible without dumping a whole history.
+                    DebugLog.Log($"[ExScoring] FetchMyRuns: response has no runs array ({body?.Length ?? 0} chars): {preview}");
+                    onComplete?.Invoke(null);
+                    yield break;
+                }
+
+                DebugLog.Log($"[ExScoring] FetchMyRuns succeeded: runs={response.runs.Length} ({body.Length} chars)");
+                onComplete?.Invoke(response);
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
+
+        /// <summary>
         /// Builds the static chart-shape payload for POST /api/songs/:songId/map (see ApiContract.md
         /// Section 9) and kicks off the upload. Called off RunSubmitResponse.mapDataNeeded after a
         /// successful run submission — the server has already told us it has no map data yet for

@@ -1022,6 +1022,75 @@ namespace ExScoringMod
             gradeCache.Remove(GradeKey(songId, difficulty));
         }
 
+        /// <summary>Forget every cached grade (the API key changed, so the online half of the
+        /// merge belongs to a different account now).</summary>
+        public static void ClearGradeCache()
+        {
+            gradeCache.Clear();
+        }
+
+        /// <summary>
+        /// Local best grade merged with the player's uploaded (leaderboard) best, whichever is
+        /// better. `localBest` is null when there's no local run. Grades run best (Quad = 0) to
+        /// worst, so the lower int wins.
+        /// </summary>
+        private static int MergedGrade(string songId, string difficulty, ExScoring.RunSummary localBest)
+        {
+            int grade = localBest == null
+                ? GradeUnplayed
+                : (int)ExScoring.GetGrade(localBest.judgementPercent, localBest.failed);
+
+            if (ExScoring.TryGetOnlineBest(songId, difficulty, out ExScoring.OnlineBestScore online))
+            {
+                int onlineGrade = (int)ExScoring.GetGrade(online.judgementPercent, online.failed);
+                if (grade == GradeUnplayed || onlineGrade < grade) grade = onlineGrade;
+            }
+
+            return grade;
+        }
+
+        /// <summary>
+        /// Called when the online best scores arrive (SongListHighScoreUI.cs). Normally the grade
+        /// load already waited for them, so this changes nothing — it only matters when they land
+        /// after a grade load gave up waiting (slow/failed request, retried later). Upgrades cached
+        /// grades in place and rebuilds the grade view if it's what's on screen.
+        /// </summary>
+        public static void ApplyOnlineBestScores()
+        {
+            if (gradeCache.Count == 0) return;
+
+            bool changed = false;
+            var keys = new List<string>(gradeCache.Keys);
+
+            foreach (string key in keys)
+            {
+                int sep = key.LastIndexOf('|');
+                if (sep <= 0) continue;
+
+                string songId = key.Substring(0, sep);
+                string difficulty = key.Substring(sep + 1);
+
+                if (!ExScoring.TryGetOnlineBest(songId, difficulty, out ExScoring.OnlineBestScore online)) continue;
+
+                int onlineGrade = (int)ExScoring.GetGrade(online.judgementPercent, online.failed);
+                int current = gradeCache[key];
+                if (current == GradeUnplayed || onlineGrade < current)
+                {
+                    gradeCache[key] = onlineGrade;
+                    changed = true;
+                }
+            }
+
+            if (!changed) return;
+
+            DebugLog.Log("[FolderRowManager] Grade cache upgraded from online best scores.");
+
+            if (gradeLoadRunning) return; // the running load re-applies the view itself when it finishes
+            if (!VirtualSongList.IsActive || level != NavLevel.Root || !IsStarSort || !UseGradeView) return;
+
+            Apply();
+        }
+
         /// <summary>
         /// True when every visible song has a cached grade for the selected difficulty. Otherwise
         /// kicks off (or keeps waiting on) the background load and returns false; the load re-applies
@@ -1057,6 +1126,11 @@ namespace ExScoringMod
             // files for this difficulty are settled here without queueing anything.
             yield return ExScoring.WaitForRunFileIndex();
 
+            // Leaderboard-only scores (e.g. after a clean install) count too — wait for the
+            // once-per-launch online fetch (bounded) so the buckets are built once with both sources
+            // instead of reshuffling when it lands. The view is already showing "Loading grades...".
+            yield return ExScoring.WaitForOnlineBestScores();
+
             gradeLoadPending = 0;
             int queued = 0;
             for (int i = 0; i < songIds.Count; i++)
@@ -1064,7 +1138,7 @@ namespace ExScoringMod
                 string id = songIds[i];
                 if (!ExScoring.HasRunFiles(id, difficulty))
                 {
-                    gradeCache[GradeKey(id, difficulty)] = GradeUnplayed;
+                    gradeCache[GradeKey(id, difficulty)] = MergedGrade(id, difficulty, null); // online best, or Unplayed
                     continue;
                 }
 
@@ -1108,9 +1182,7 @@ namespace ExScoringMod
         {
             yield return ExScoring.LoadBestRunSummaryForSong(songId, difficulty, best =>
             {
-                gradeCache[GradeKey(songId, difficulty)] = best == null
-                    ? GradeUnplayed
-                    : (int)ExScoring.GetGrade(best.judgementPercent, best.failed);
+                gradeCache[GradeKey(songId, difficulty)] = MergedGrade(songId, difficulty, best);
             });
 
             gradeLoadPending--;

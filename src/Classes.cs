@@ -488,5 +488,32 @@ namespace ExScoringMod
             public string nickname;
             public long addedAt;
         }
+
+        /// <summary>
+        /// One run from GET /api/users/me/runs (ApiContract.md Section 5, default non-detail
+        /// fields). Only the fields the song list / grade folders / top-score rows need are read —
+        /// Json.NET ignores the rest of the server's shape.
+        /// </summary>
+        public class MyRunsApiEntry
+        {
+            public string runId;
+            public string songId;
+            public string difficulty;
+            public long unixTimestamp;
+            public float judgementPercent;
+            public bool failed;
+        }
+
+        /// <summary>
+        /// Response shape for GET /api/users/me/runs with no filters (Section 5): the player's whole
+        /// uploaded history, most recent first. Used once per launch to merge leaderboard-only best
+        /// scores into the song list (see OnlineBestScores in SongListHighScoreUI.cs).
+        /// </summary>
+        public class MyRunsApiResponse
+        {
+            public string songId;
+            public string difficulty;
+            public MyRunsApiEntry[] runs;
+        }
     }
 }
