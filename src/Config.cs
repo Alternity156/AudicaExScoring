@@ -92,6 +92,13 @@ namespace ExScoringMod
         // EnableScoreUpload again, so a manual disable always sticks.
         public static bool ScoreUploadUserConfigured;
 
+        // Bookkeeping only, not a real setting (empty description, same pattern as
+        // LastSongCount) - the listId (ApiContract.md section 4b) last picked on the main-menu
+        // Total leaderboard's song-list slider, remembered across launches. Empty until the player
+        // picks one; ExLeaderboardDisplay.cs falls back to the server's lowest sortOrder list
+        // whenever this is empty or names a list the server no longer has.
+        public static string TotalLeaderboardListId;
+
         public static string debugHeader = "[Header]Debug";
         public static bool DebugLogs;
 
@@ -178,6 +185,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterString(Category, nameof(ApiKey), "", "API key for the online leaderboard (paste from the website)");
             MelonPrefs.RegisterBool(Category, nameof(EnableScoreUpload), false, "Automatically uploads runs to the online leaderboard after each song");
             MelonPrefs.RegisterBool(Category, nameof(ScoreUploadUserConfigured), false, "");
+            MelonPrefs.RegisterString(Category, nameof(TotalLeaderboardListId), "", "");
 
             MelonPrefs.RegisterString(Category, nameof(debugHeader), "", "[Header]Debug");
             MelonPrefs.RegisterBool(Category, nameof(DebugLogs), false, "Writes the mod's debug logs to the MelonLoader console/log file");
@@ -244,6 +252,7 @@ namespace ExScoringMod
             ApiKey = MelonPrefs.GetString(Category, nameof(ApiKey));
             EnableScoreUpload = MelonPrefs.GetBool(Category, nameof(EnableScoreUpload));
             ScoreUploadUserConfigured = MelonPrefs.GetBool(Category, nameof(ScoreUploadUserConfigured));
+            TotalLeaderboardListId = MelonPrefs.GetString(Category, nameof(TotalLeaderboardListId));
 
             DebugLogs = MelonPrefs.GetBool(Category, nameof(DebugLogs));
         }
@@ -410,6 +419,14 @@ namespace ExScoringMod
             value = value ?? "";
             MelonPrefs.SetString(Category, nameof(ApiKey), value);
             ApiKey = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateTotalLeaderboardListId(string value)
+        {
+            value = value ?? "";
+            MelonPrefs.SetString(Category, nameof(TotalLeaderboardListId), value);
+            TotalLeaderboardListId = value;
             MelonPrefs.SaveConfig();
         }
 

@@ -191,6 +191,26 @@ namespace ExScoringMod
             public int? requesterRank;
         }
 
+        /// <summary>
+        /// One server-managed song list (GET /api/song-lists — ApiContract.md section 4b.1). listId
+        /// is the stable slug every Total leaderboard request is scoped by; name is what the
+        /// main-menu Total leaderboard's song-list slider shows; sortOrder decides slider order (and
+        /// the default list, lowest first — the server has no isDefault flag).
+        /// </summary>
+        public class SongListApiEntry
+        {
+            public string listId;
+            public string name;
+            public int songCount;
+            public int sortOrder;
+            public long updatedAt;
+        }
+
+        public class SongListsApiResponse
+        {
+            public SongListApiEntry[] lists;
+        }
+
         public class UnprocessedTargetHitPos
         {
             public int index;

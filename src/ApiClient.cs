@@ -219,6 +219,88 @@ namespace ExScoringMod
             }
         }
 
+        // Session cache for GET /api/song-lists (ApiContract.md section 4b.1), sorted by sortOrder.
+        // null until the first successful fetch; a failed fetch leaves it null so the next request
+        // tries again. Lists change rarely (admin-only edits on the website), so once per launch is
+        // enough — a restart picks up any change.
+        private static List<SongListApiEntry> cachedSongLists;
+        private static bool songListsFetchInFlight;
+        private static readonly List<Action<List<SongListApiEntry>>> songListsWaiters = new List<Action<List<SongListApiEntry>>>();
+
+        /// <summary>
+        /// Gets every server-managed song list (GET /api/song-lists — ApiContract.md section 4b.1),
+        /// sorted by sortOrder then name. Public endpoint, no auth. Served from the session cache
+        /// after the first success; concurrent callers during a fetch all share that one request.
+        /// Always calls onComplete exactly once: with the list (possibly empty) on success, or null
+        /// on failure.
+        /// </summary>
+        public static void FetchSongLists(Action<List<SongListApiEntry>> onComplete)
+        {
+            if (cachedSongLists != null)
+            {
+                onComplete?.Invoke(cachedSongLists);
+                return;
+            }
+
+            if (onComplete != null) songListsWaiters.Add(onComplete);
+            if (songListsFetchInFlight) return;
+
+            songListsFetchInFlight = true;
+            DebugLog.Log("[ExScoring] FetchSongLists: starting");
+            MelonCoroutines.Start(FetchSongListsCoroutine());
+        }
+
+        private static IEnumerator FetchSongListsCoroutine()
+        {
+            string url = $"{ApiBaseUrl}/api/song-lists";
+            DebugLog.Log($"[ExScoring] FetchSongLists: GET {url}");
+
+            List<SongListApiEntry> result = null;
+            UnityWebRequest request = UnityWebRequest.Get(url);
+            try
+            {
+                yield return request.SendWebRequest();
+
+                if (request.isNetworkError || request.isHttpError)
+                {
+                    string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
+                    DebugLog.Log($"[ExScoring] FetchSongLists failed ({request.responseCode}): {request.error} | Body: {errorBody}");
+                }
+                else
+                {
+                    try
+                    {
+                        SongListsApiResponse response = JsonConvert.DeserializeObject<SongListsApiResponse>(request.downloadHandler.text);
+                        result = (response?.lists ?? new SongListApiEntry[0])
+                            .Where(l => l != null && !string.IsNullOrEmpty(l.listId))
+                            .OrderBy(l => l.sortOrder)
+                            .ThenBy(l => l.name ?? l.listId, StringComparer.OrdinalIgnoreCase)
+                            .ToList();
+                        cachedSongLists = result;
+                        DebugLog.Log($"[ExScoring] FetchSongLists succeeded: {result.Count} list(s) [{string.Join(", ", result.Select(l => l.listId))}]");
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog.Log($"[ExScoring] FetchSongLists: failed to parse response ({request.downloadHandler.text}): {ex}");
+                        result = null;
+                    }
+                }
+            }
+            finally
+            {
+                request.Dispose();
+                songListsFetchInFlight = false;
+            }
+
+            var waiters = songListsWaiters.ToArray();
+            songListsWaiters.Clear();
+            foreach (var waiter in waiters)
+            {
+                try { waiter(result); }
+                catch (Exception ex) { DebugLog.Log($"[ExScoring] FetchSongLists: callback threw: {ex}"); }
+            }
+        }
+
         /// <summary>
         /// Fetches the AudicaEx Total leaderboard for a song-list+difficulty (GET /api/leaderboard/total
         /// — see ApiContract.md section 4c). Mirrors FetchLeaderboard above (same view/auth/staleness

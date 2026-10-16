@@ -4,6 +4,7 @@ using System.Linq;
 using Harmony;
 using MelonLoader;
 using UnhollowerBaseLib;
+using UnhollowerRuntimeLib;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -29,10 +30,31 @@ namespace ExScoringMod
         private const string AllTimeLeadersID = "all_time_leaders";
 
         // ApiContract.md section 4b: Total leaderboards are scoped per server-managed song-list, not
-        // a single implicit "the OST". Hardcoded to "ost" for now since there's no in-game
-        // list-switcher UI yet — revisit if/when one exists (GET /api/song-lists would enumerate the
-        // options).
-        private const string TotalLeaderboardListId = "ost";
+        // a single implicit "the OST". The list is picked with the song-list slider that replaces
+        // the native "with extras" toggle on the main-menu Total leaderboard (see the Song-list
+        // slider section below). "ost" is only the last-resort fallback for when GET /api/song-lists
+        // failed and the player has never picked a list.
+        private const string FallbackTotalLeaderboardListId = "ost";
+
+        // Resolved listId for the Total leaderboard once GET /api/song-lists has answered: the saved
+        // Config.TotalLeaderboardListId if the server still has that list, otherwise the list with
+        // the lowest sortOrder (the server has no isDefault flag — ApiContract.md 4b.1). Empty until
+        // the lists have loaded at least once.
+        private static string selectedTotalListId = "";
+
+        /// <summary>
+        /// The listId every Total leaderboard request (and ExScoreComparison.cs's compare fallback)
+        /// uses: the resolved selection if the lists have loaded, else the saved choice, else "ost".
+        /// </summary>
+        private static string TotalLeaderboardListId
+        {
+            get
+            {
+                if (!string.IsNullOrEmpty(selectedTotalListId)) return selectedTotalListId;
+                if (!string.IsNullOrEmpty(Config.TotalLeaderboardListId)) return Config.TotalLeaderboardListId;
+                return FallbackTotalLeaderboardListId;
+            }
+        }
 
         // ApiContract.md section 4/4c `view` values the mod uses.
         private const string ViewTopParam = "top";
@@ -241,13 +263,43 @@ namespace ExScoringMod
         /// </summary>
         private static void FetchAndPopulateTotalLeaderboard(LeaderboardDisplay display, string view)
         {
+            int requestVersion = ++leaderboardRequestVersion;
+
+            // The song lists have to be known before the Total fetch, since they decide which listId
+            // it's scoped to. FetchSongLists answers from its session cache after the first success,
+            // so this only actually waits on the network once per launch. A failed list fetch still
+            // goes ahead with the saved/fallback listId rather than leaving the panel blank.
+            FetchSongLists(lists =>
+            {
+                if (requestVersion != leaderboardRequestVersion)
+                {
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} dropped while loading song lists (stale — current is #{leaderboardRequestVersion}).");
+                    return;
+                }
+
+                if (!Config.ExType)
+                {
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} dropped while loading song lists (scoring type changed).");
+                    return;
+                }
+
+                ApplySongLists(lists);
+                EnsureSongListSlider(display);
+                FetchAndPopulateTotalLeaderboardForList(display, view, requestVersion);
+            });
+        }
+
+        private static void FetchAndPopulateTotalLeaderboardForList(LeaderboardDisplay display, string view, int requestVersion)
+        {
+            // Captured once so the request, its logs and the compare scope all agree even if the
+            // selection changes mid-fetch (a change also bumps the version, discarding this one).
+            string listId = TotalLeaderboardListId;
             string difficulty = KataConfig.I.GetDifficulty().ToString();
             int rowLimit = LeaderboardDisplay.kNumRows;
 
-            int requestVersion = ++leaderboardRequestVersion;
-            DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} starting listId={TotalLeaderboardListId} difficulty={difficulty} rowLimit={rowLimit} view={view}");
+            DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} starting listId={listId} difficulty={difficulty} rowLimit={rowLimit} view={view}");
 
-            FetchTotalLeaderboard(TotalLeaderboardListId, difficulty, rowLimit, view, response =>
+            FetchTotalLeaderboard(listId, difficulty, rowLimit, view, response =>
             {
                 if (requestVersion != leaderboardRequestVersion)
                 {
@@ -270,7 +322,7 @@ namespace ExScoringMod
 
                 if (IsEmptySelfResponse(view, response.entries?.Length ?? 0))
                 {
-                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} (self) returned no entries (not ranked on {TotalLeaderboardListId} {difficulty}), showing Top instead.");
+                    DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} (self) returned no entries (not ranked on {listId} {difficulty}), showing Top instead.");
                     FetchAndPopulateTotalLeaderboard(display, ViewTopParam);
                     return;
                 }
@@ -280,7 +332,7 @@ namespace ExScoringMod
 
                 // The compare buttons on these rows compare over exactly this list+difficulty
                 // (ApiContract.md v2.30, Section 15 filters) — see ExScoreComparison.cs.
-                RememberCompareScope(TotalLeaderboardListId, difficulty);
+                RememberCompareScope(listId, difficulty);
 
                 DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} ({view}) applying {response.entries?.Length ?? 0} row(s), requesterRank={response.requesterRank?.ToString() ?? "null"}.");
                 PopulateTotalLeaderboardRows(display, response);
@@ -399,6 +451,10 @@ namespace ExScoringMod
             if (display.selfButton != null) display.selfButton.gameObject.SetActive(authViewsAvailable);
             if (display.extrasButton != null) display.extrasButton.gameObject.SetActive(false);
 
+            // The Total leaderboard gets the song-list slider in the extras toggle's place. Per-song
+            // panels have no list to pick, so they get nothing.
+            if (display.totalLeaderboards) EnsureSongListSlider(display);
+
             DebugLog.Log($"[ExScoring][Diag] HideNativeLeaderboardButtons: extras hidden, friends/self {(authViewsAvailable ? "shown" : "hidden (no API key)")}.");
         }
 
@@ -410,8 +466,259 @@ namespace ExScoringMod
             if (display.selfButton != null) display.selfButton.gameObject.SetActive(true);
             if (display.extrasButton != null) display.extrasButton.gameObject.SetActive(true);
 
+            HideSongListSlider(display);
+
             DebugLog.Log("[ExScoring][Diag] RestoreNativeLeaderboardButtons: friends/self/extras restored.");
         }
+
+        // ── Song-list slider (main-menu Total leaderboard) ────────────────────────────────────
+        // Replaces the native "with extras" toggle on the Total leaderboard while EX scoring is on.
+        // It's the game's own options-menu slider (OptionsMenu.sliderPrefab), instantiated under
+        // the extras button's parent and driven directly through its public delegates — no
+        // OptionsMenu instance needed. Its increment/decrement GunButtons are already wired to
+        // Increment()/Decrement() in the prefab, which call AdjustAction(+1/-1).
+        //
+        // Native Update() (confirmed via Ghidra) rewrites label.text every frame as
+        // identifier + language padding + a fixed separator + GetDisplayAction(value), so the
+        // separator can't be removed through identifier alone. OptionsMenuSliderUpdatePatch below
+        // overwrites the label with just the list name, for this slider only. Update() also runs
+        // resetToDefaultButton.SetActive(ResetToDefaultAction != null) every frame, which is why
+        // ResetToDefaultAction is left null rather than set to a no-op.
+
+        private const string SongListSliderName = "ExScoring_SongListSlider";
+
+        // Local transform under the extras button's parent (tuned live in UnityExplorer). Rotation
+        // is still copied from the extras button.
+        private static readonly Vector3 SongListSliderLocalPosition = new Vector3(2f, 3.41f, 0f);
+        private static readonly Vector3 SongListSliderLocalScale = new Vector3(0.25f, 0.25f, 0.25f);
+
+        // Song lists from the last successful GET /api/song-lists, in sortOrder. null until loaded
+        // (or if every fetch so far failed).
+        private static List<SongListApiEntry> totalSongLists;
+
+        private static OptionsMenuSlider songListSlider;
+        private static int songListSliderOwnerId;
+
+        /// <summary>
+        /// Stores the fetched lists and resolves which one the Total leaderboard shows: the saved
+        /// choice if the server still has it, otherwise the lowest sortOrder list. Doesn't overwrite
+        /// the saved choice — only the player picking a list on the slider does that — so a list
+        /// that's temporarily missing server-side comes back on its own. null (fetch failed) keeps
+        /// whatever was resolved before.
+        /// </summary>
+        private static void ApplySongLists(List<SongListApiEntry> lists)
+        {
+            if (lists == null)
+            {
+                DebugLog.Log($"[ExScoring] ApplySongLists: song lists unavailable, keeping listId={TotalLeaderboardListId}.");
+                return;
+            }
+
+            totalSongLists = lists;
+
+            if (lists.Count == 0)
+            {
+                selectedTotalListId = "";
+                DebugLog.Log($"[ExScoring] ApplySongLists: server returned no lists, using listId={TotalLeaderboardListId}.");
+                return;
+            }
+
+            string saved = Config.TotalLeaderboardListId;
+            bool savedExists = !string.IsNullOrEmpty(saved) && lists.Any(l => l.listId == saved);
+            selectedTotalListId = savedExists ? saved : lists[0].listId;
+
+            DebugLog.Log($"[ExScoring] ApplySongLists: {lists.Count} list(s), selected listId={selectedTotalListId} (saved='{saved}', {(savedExists ? "found" : "not found, using lowest sortOrder")}).");
+        }
+
+        private static int GetSelectedSongListIndex()
+        {
+            if (totalSongLists == null || totalSongLists.Count == 0) return 0;
+            string current = TotalLeaderboardListId;
+            int index = totalSongLists.FindIndex(l => l.listId == current);
+            return index < 0 ? 0 : index;
+        }
+
+        private static string GetSelectedSongListDisplayName()
+        {
+            string current = TotalLeaderboardListId;
+            if (totalSongLists != null)
+            {
+                SongListApiEntry entry = totalSongLists.FirstOrDefault(l => l.listId == current);
+                if (entry != null && !string.IsNullOrEmpty(entry.name)) return entry.name;
+            }
+            return current;
+        }
+
+        /// <summary>
+        /// Slider AdjustAction: steps the selection by one list in the direction shot (wrapping at
+        /// both ends), saves it, and refetches the Total leaderboard on the panel's current tab.
+        /// No-op with fewer than two lists.
+        /// </summary>
+        private static void OnSongListSliderAdjusted(float amount)
+        {
+            if (totalSongLists == null || totalSongLists.Count < 2)
+            {
+                DebugLog.Log("[ExScoring] SongListSlider: fewer than two lists available, nothing to cycle.");
+                return;
+            }
+
+            int dir = amount > 0f ? 1 : (amount < 0f ? -1 : 0);
+            if (dir == 0) return;
+
+            int count = totalSongLists.Count;
+            int next = ((GetSelectedSongListIndex() + dir) % count + count) % count;
+            string listId = totalSongLists[next].listId;
+
+            selectedTotalListId = listId;
+            Config.UpdateTotalLeaderboardListId(listId);
+            DebugLog.Log($"[ExScoring] SongListSlider: selected listId={listId} ({totalSongLists[next].name}).");
+
+            LeaderboardDisplay owner = FindSongListSliderOwner();
+            if (owner != null)
+                RefreshExTotalLeaderboard(owner);
+            else
+                DebugLog.Log("[ExScoring] SongListSlider: owning LeaderboardDisplay not found, skipping refresh.");
+        }
+
+        private static LeaderboardDisplay FindSongListSliderOwner()
+        {
+            var displays = UnityEngine.Object.FindObjectsOfType<LeaderboardDisplay>();
+            if (displays == null) return null;
+            for (int i = 0; i < displays.Length; i++)
+            {
+                LeaderboardDisplay d = displays[i];
+                if (d != null && d.GetInstanceID() == songListSliderOwnerId) return d;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Makes sure the song-list slider exists on this Total leaderboard panel and is shown.
+        /// Idempotent. Recreates the slider if it was destroyed with an old panel (scene change) or
+        /// belongs to a different panel instance. Does nothing for per-song panels, or when EX
+        /// scoring is off.
+        /// </summary>
+        private static void EnsureSongListSlider(LeaderboardDisplay display)
+        {
+            if (display == null || !display.totalLeaderboards || !Config.ExType) return;
+
+            int displayId = display.GetInstanceID();
+            if (songListSlider != null && songListSliderOwnerId == displayId)
+            {
+                songListSlider.gameObject.SetActive(true);
+                return;
+            }
+
+            if (display.extrasButton == null)
+            {
+                DebugLog.Log("[ExScoring] EnsureSongListSlider: extrasButton is NULL, cannot place the slider.");
+                return;
+            }
+
+            Transform extras = display.extrasButton.transform;
+            Transform parent = extras.parent;
+
+            // Leftover from a previous creation on this same panel whose static reference was lost
+            // — remove it rather than stacking a second slider on top.
+            if (parent != null)
+            {
+                Transform stale = parent.Find(SongListSliderName);
+                if (stale != null) GameObject.Destroy(stale.gameObject);
+            }
+
+            OptionsMenuSlider prefab = FindOptionsSliderPrefab();
+            if (prefab == null)
+            {
+                DebugLog.Log("[ExScoring] EnsureSongListSlider: OptionsMenu.sliderPrefab not found, cannot create the slider.");
+                return;
+            }
+
+            GameObject go = GameObject.Instantiate(prefab.gameObject, parent);
+            go.name = SongListSliderName;
+            go.transform.localPosition = SongListSliderLocalPosition;
+            go.transform.localRotation = extras.localRotation;
+            go.transform.localScale = SongListSliderLocalScale;
+
+            OptionsMenuSlider slider = go.GetComponent<OptionsMenuSlider>();
+            if (slider == null)
+            {
+                DebugLog.Log("[ExScoring] EnsureSongListSlider: instantiated prefab has no OptionsMenuSlider, destroying it.");
+                GameObject.Destroy(go);
+                return;
+            }
+
+            // identifier/GetDisplayAction still need to be valid — native Update() runs before the
+            // postfix and dereferences GetValueAction — but the postfix replaces the text it builds.
+            slider.identifier = "";
+            slider.numberFormat = "0";
+            slider.AdjustAction = new Action<float>(OnSongListSliderAdjusted);
+            slider.GetValueAction = new Func<float>(() => GetSelectedSongListIndex());
+            slider.GetDisplayAction = new Func<float, string>(_ => GetSelectedSongListDisplayName());
+            slider.ResetToDefaultAction = null; // keeps native Update() from re-showing the reset button
+
+            if (slider.resetToDefaultButton != null) slider.resetToDefaultButton.SetActive(false);
+            // No hover-help box — the list name is self-explanatory. Same approach as
+            // SongSearchField.cs: deactivate the OptionsHoverHelp object (never the slider itself,
+            // in case the component ever sits on the root).
+            if (slider.help != null)
+            {
+                slider.help.forceDisable = true;
+                if (slider.help.gameObject != go) slider.help.gameObject.SetActive(false);
+            }
+
+            go.SetActive(true);
+
+            songListSlider = slider;
+            songListSliderOwnerId = displayId;
+
+            DebugLog.Log($"[ExScoring] EnsureSongListSlider: created under '{(parent != null ? parent.name : "<root>")}' at {go.transform.localPosition}, listId={TotalLeaderboardListId}.");
+        }
+
+        /// <summary>
+        /// Runs after native OptionsMenuSlider.Update(), which has just set label.text to
+        /// "identifier + separator + display". For the song-list slider only, replaces that with
+        /// just the list name. Every other slider (Options menu etc.) is left untouched.
+        /// </summary>
+        [HarmonyPatch(typeof(OptionsMenuSlider), "Update")]
+        public static class OptionsMenuSliderUpdatePatch
+        {
+            public static void Postfix(OptionsMenuSlider __instance)
+            {
+                if (songListSlider == null || __instance == null) return;
+                if (__instance.Pointer != songListSlider.Pointer) return;
+                if (__instance.label == null) return;
+
+                string name = GetSelectedSongListDisplayName();
+                if (__instance.label.text != name) __instance.label.text = name;
+            }
+        }
+
+        private static void HideSongListSlider(LeaderboardDisplay display)
+        {
+            if (display == null || songListSlider == null) return;
+            if (songListSliderOwnerId != display.GetInstanceID()) return;
+
+            songListSlider.gameObject.SetActive(false);
+            DebugLog.Log("[ExScoring][Diag] HideSongListSlider: song-list slider hidden.");
+        }
+
+        /// <summary>
+        /// The options menu's slider prefab, taken from any OptionsMenu instance — including
+        /// inactive ones, which is why this goes through Resources.FindObjectsOfTypeAll rather than
+        /// FindObjectOfType (the settings page usually isn't open on the main menu).
+        /// </summary>
+        private static OptionsMenuSlider FindOptionsSliderPrefab()
+        {
+            // Non-generic overload + TryCast — the generic one isn't available under unhollower
+            // (same pattern as SongSearchField.cs / SearchKeyboard.cs).
+            foreach (var o in Resources.FindObjectsOfTypeAll(Il2CppType.Of<OptionsMenu>()))
+            {
+                OptionsMenu menu = o.TryCast<OptionsMenu>();
+                if (menu != null && menu.sliderPrefab != null) return menu.sliderPrefab;
+            }
+            return null;
+        }
+        // ── End song-list slider ──────────────────────────────────────────────────────────────
 
         /// <summary>
         /// Populates display.rowsStandard from an AudicaEx leaderboard response: entries fill rows
