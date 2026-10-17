@@ -482,6 +482,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetMaxRunDataSizeMB();
                 OptionsMenuFunctions.GetSaveFailedRunData();
                 OptionsMenuFunctions.GetSongCacheEnabled();
+                OptionsMenuFunctions.GetLatestMaudicaPageSize();
 
                 var dataHeader = OptionsMenuClone.CreateHeader(0, "Run Data");
                 OptionsMenuClone.AddRow(dataHeader);
@@ -520,6 +521,16 @@ namespace ExScoringMod
                     () => SongCache.ClearAndRebuild(),
                     "Wipes the on-disk song cache. Every song will be freshly scanned on the next song list load");
                 OptionsMenuClone.AddRow(songCacheToggle, deleteCacheButton);
+
+                var latestMaudicaHeader = OptionsMenuClone.CreateHeader(0, "Latest Maudica");
+                OptionsMenuClone.AddRow(latestMaudicaHeader);
+
+                var latestMaudicaPageSizeSlider = OptionsMenuClone.CreateSlider(0, "Songs Per Page",
+                    () => OptionsMenuFunctions.latestMaudicaPageSize,
+                    v => { OptionsMenuFunctions.latestMaudicaPageSize = v; OptionsMenuFunctions.SetLatestMaudicaPageSize(v); },
+                    14f, 100f, 1f, 30f, "N0",
+                    "How many songs the Latest Maudica folder loads at a time, including each Load more songs. Takes effect the next time the folder refreshes");
+                OptionsMenuClone.AddRow(latestMaudicaPageSizeSlider);
             }),
 
             new OptionsCategory("opt_leaderboard", "Leaderboard", () =>

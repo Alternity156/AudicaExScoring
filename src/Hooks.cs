@@ -54,6 +54,10 @@ namespace ExScoringMod
             {
                 suppressShellPageAnimations = false;
 
+                // Playing anything (a song, or a marathon) makes the Latest Maudica folder
+                // fetch fresh the next time it's opened.
+                LatestMaudica.MarkSongPlayed();
+
                 // In marathon setup, Play starts the marathon instead of the selected song.
                 if (MarathonSetup.TryStartFromPlay())
                     return false;

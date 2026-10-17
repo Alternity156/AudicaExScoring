@@ -14,6 +14,7 @@ namespace ExScoringMod
     public static class SongDownloader
     {
         internal static string apiUrl = "https://maudica.com/api/maps?per_page=14";
+        internal static string apiBaseUrl = "https://maudica.com/api/maps?per_page=";
         internal static string downloadUrlFormat = "https://maudica.com/maps/{0}/download";
         internal static string previewUrlFormat = "https://maudica.com/maps/{0}/preview";
         internal static bool needRefresh = false;
@@ -25,10 +26,12 @@ namespace ExScoringMod
 
         /// <summary>
         /// Coroutine that searches for songs using the maudica.com web API.
+        /// An empty search returns the whole catalog, newest upload first (maudica's default order).
+        /// <paramref name="pageSize"/> sets per_page for the paged (non-total) path; 14 by default.
         /// </summary>
         public static IEnumerator DoSongWebSearch(string search, Action<string, APISongList> onSearchComplete,
                                                    DifficultyFilter difficulty, bool sortByDownloads = false,
-                                                   int page = 1, bool total = false)
+                                                   int page = 1, bool total = false, int pageSize = 14)
         {
             if (total)
             {
@@ -60,26 +63,57 @@ namespace ExScoringMod
             }
             else
             {
+                if (pageSize < 1) pageSize = 14;
+
                 string webSearchParam = search == null || search == "" ? "" : "&search=" + WebUtility.UrlEncode(search);
                 string webPage = page == 1 ? "" : "&page=" + page.ToString();
                 string webDifficulty = difficulty == DifficultyFilter.All ? "" : "&difficulties%5B%5D=" + DifficultyToNewAPIValue(difficulty);
                 string webDownloads = sortByDownloads ? "&sort=downloads" : "";
-                string concatURL = apiUrl + webSearchParam + webDifficulty + webPage + webDownloads;
+                string concatURL = apiBaseUrl + pageSize.ToString() + webSearchParam + webDifficulty + webPage + webDownloads;
 
                 WWW www = new WWW(concatURL);
                 yield return www;
+
+                // A network error or unexpected response hands the caller null (instead of throwing
+                // inside the coroutine and never calling back), so callers can show an error state.
+                APISongList result = ParseSearchPage(www, page, pageSize);
+                onSearchComplete(search, result);
+            }
+            yield return null;
+        }
+
+        /// <summary>
+        /// Turns one page of the maudica map listing into an APISongList, or null if the request
+        /// failed or the response couldn't be read.
+        /// </summary>
+        private static APISongList ParseSearchPage(WWW www, int page, int pageSize)
+        {
+            try
+            {
+                if (!string.IsNullOrEmpty(www.error))
+                {
+                    MelonLogger.Log($"[SongDownloader] maudica search failed: {www.error}");
+                    return null;
+                }
+
                 NewAPISongList list = JSON.Load(www.text).Make<NewAPISongList>();
+                if (list == null || list.maps == null)
+                    return null;
 
                 APISongList result = new APISongList();
                 result.song_count = list.count;
                 result.page = page;
-                result.pagesize = 14;
+                result.pagesize = pageSize;
                 result.total_pages = (int)Math.Ceiling(result.song_count / (double)result.pagesize);
                 result.songs = new Song[list.maps.Length];
                 ConvertAPIList(list, result, 0);
-                onSearchComplete(search, result);
+                return result;
             }
-            yield return null;
+            catch (Exception e)
+            {
+                MelonLogger.Log($"[SongDownloader] maudica search response could not be read: {e.Message}");
+                return null;
+            }
         }
 
         /// <summary>

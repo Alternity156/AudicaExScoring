@@ -68,6 +68,7 @@ namespace ExScoringMod
         public static int randomSongScope;
         public static float maxRunsPerSong;
         public static float maxRunDataSizeMB;
+        public static float latestMaudicaPageSize;
         public static bool enableRunDataSaving;
         public static bool songCacheEnabled;
         public static bool showStatsOnFail;
@@ -250,6 +251,17 @@ namespace ExScoringMod
         {
             maxRunDataSizeMB = value;
             Config.UpdateMaxRunDataSizeMB(value);
+        }
+
+        public static void GetLatestMaudicaPageSize()
+        {
+            latestMaudicaPageSize = Config.LatestMaudicaPageSize;
+        }
+
+        public static void SetLatestMaudicaPageSize(float value)
+        {
+            latestMaudicaPageSize = value;
+            Config.UpdateLatestMaudicaPageSize((int)value);
         }
 
         public static void GetEnableRunDataSaving()

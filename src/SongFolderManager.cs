@@ -17,6 +17,7 @@ namespace ExScoringMod
         public const string FolderAudicaDLC = "Audica DLC";
         public const string FolderCustom = "Unsorted";
         public const string FolderSongRequests = "Song Requests";
+        public const string FolderLatestMaudica = "Latest Maudica";
 
         /// <summary>Maps songID -> folder name.</summary>
         public static Dictionary<string, string> songFolderMap = new Dictionary<string, string>();
@@ -34,7 +35,11 @@ namespace ExScoringMod
         /// </summary>
         public static Dictionary<string, List<string>> extraSongFolders = new Dictionary<string, List<string>>();
 
-        /// <summary>Ordered list of folder names that have at least one loaded song.</summary>
+        /// <summary>
+        /// Ordered list of folder names shown in the Default view: folders with at least one
+        /// loaded song, plus the virtual folders (Favorites, Song Requests, Latest Maudica,
+        /// search results).
+        /// </summary>
         public static List<string> availableFolders = new List<string>();
 
         /// <summary>
@@ -178,15 +183,18 @@ namespace ExScoringMod
                 }
             }
 
-            // Favorites (virtual) → Audica → Audica DLC → Unsorted → custom subfolders
+            // Favorites (virtual) → Song Requests (virtual) → Latest Maudica (virtual, web)
+            // → Audica → Audica DLC → Unsorted → custom subfolders
             availableFolders.Add(FolderFavorites);
             if (SongRequestIntegration.IsPresent)
                 availableFolders.Add(FolderSongRequests);
+            availableFolders.Add(FolderLatestMaudica);
             if (hasAudica) availableFolders.Add(FolderAudica);
             if (hasAudicaDLC) availableFolders.Add(FolderAudicaDLC);
             if (hasCustom) availableFolders.Add(FolderCustom);
             foreach (string name in customFolders.Keys)
-                availableFolders.Add(name);
+                if (!availableFolders.Contains(name)) // a pack folder can't shadow a virtual folder's name
+                    availableFolders.Add(name);
 
             // Keep the search-results folder pinned at the top across rebuilds
             if (searchFolderName != null && !availableFolders.Contains(searchFolderName))

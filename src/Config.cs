@@ -69,6 +69,7 @@ namespace ExScoringMod
         public static float MaxRunDataSizeMB;
         public static bool SaveFailedRunData;
         public static bool SongCacheEnabled;
+        public static int LatestMaudicaPageSize;
 
         public static string scoringHeader = "[Header]Scoring";
         public static float ExScorePopupSize;
@@ -169,6 +170,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterFloat(Category, nameof(MaxRunDataSizeMB), 100f, "Sets the max total disk space (MB) run data files can use [10,2000,10,100] {G}");
             MelonPrefs.RegisterBool(Category, nameof(SaveFailedRunData), false, "Also saves run data for failed songs (requires Save Run Data)");
             MelonPrefs.RegisterBool(Category, nameof(SongCacheEnabled), true, "Caches song scan results on disk to speed up future boots. Disable to always scan songs live and skip reading/writing the cache");
+            MelonPrefs.RegisterInt(Category, nameof(LatestMaudicaPageSize), 30, "How many songs the Latest Maudica folder loads per page [14,100,1,30] {G}");
 
             MelonPrefs.RegisterString(Category, nameof(scoringHeader), "", "[Header]Scoring");
             MelonPrefs.RegisterFloat(Category, nameof(ExScorePopupSize), 100f, "Sets the EX score popup size [10,100,5,100] {P}");
@@ -241,6 +243,7 @@ namespace ExScoringMod
             ShowStatsOnFail = MelonPrefs.GetBool(Category, nameof(ShowStatsOnFail));
             SaveFailedRunData = MelonPrefs.GetBool(Category, nameof(SaveFailedRunData));
             SongCacheEnabled = MelonPrefs.GetBool(Category, nameof(SongCacheEnabled));
+            LatestMaudicaPageSize = ClampLatestMaudicaPageSize(MelonPrefs.GetInt(Category, nameof(LatestMaudicaPageSize)));
             ExScorePopupSize = MelonPrefs.GetFloat(Category, nameof(ExScorePopupSize));
             ExScorePopupOpacity = MelonPrefs.GetFloat(Category, nameof(ExScorePopupOpacity));
             ExScorePopupAbbreviated = MelonPrefs.GetBool(Category, nameof(ExScorePopupAbbreviated));
@@ -398,6 +401,22 @@ namespace ExScoringMod
             MelonPrefs.SetFloat(Category, nameof(MaxRunDataSizeMB), value);
             MaxRunDataSizeMB = value;
             MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateLatestMaudicaPageSize(int value)
+        {
+            value = ClampLatestMaudicaPageSize(value);
+            MelonPrefs.SetInt(Category, nameof(LatestMaudicaPageSize), value);
+            LatestMaudicaPageSize = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        /// <summary>Keeps the Latest Maudica page size in the supported 14–100 range.</summary>
+        private static int ClampLatestMaudicaPageSize(int value)
+        {
+            if (value < 14) return 14;
+            if (value > 100) return 100;
+            return value;
         }
 
         public static void UpdateEnableRunDataSaving(bool value)

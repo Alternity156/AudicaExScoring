@@ -97,6 +97,12 @@ namespace ExScoringMod
 
             ClearStarCache(); // scores may have changed since last entry; recompute lazily on demand
             WireHandler();
+
+            // Latest Maudica left open (e.g. coming back from a song): load it if it never loaded,
+            // but keep an already-loaded list as-is so the played song stays selected in place.
+            if (SongFolderManager.openFolder == SongFolderManager.FolderLatestMaudica)
+                LatestMaudica.EnsureLoaded();
+
             Apply();
 
             // Tier 2: warm the placeholder pool toward the largest view we might show, in the
@@ -131,6 +137,10 @@ namespace ExScoringMod
 
             bool opening = SongFolderManager.openFolder != folderName;
             SongFolderManager.openFolder = opening ? folderName : null;
+
+            // Latest Maudica fetches on open (first open, or fresh after a song was played).
+            if (opening && folderName == SongFolderManager.FolderLatestMaudica)
+                LatestMaudica.OnFolderOpened();
 
             DebugLog.Log($"[FolderRowManager] Toggle '{folderName}' -> open={SongFolderManager.openFolder ?? "none"}");
 
@@ -523,6 +533,7 @@ namespace ExScoringMod
                 case SongFolderManager.FolderAudicaDLC:
                 case SongFolderManager.FolderCustom:      // "Unsorted"
                 case SongFolderManager.FolderSongRequests:
+                case SongFolderManager.FolderLatestMaudica:
                     return PlaylistNav.PlaylistRowColor;
                 default:
                     // Search-results folder (dynamic name) also gets the new color.
@@ -579,6 +590,11 @@ namespace ExScoringMod
                         : null; // null → header falls back to the default "{count} songs"
                     rows.Add(ViewRow.Header(folder, total, sub, FolderColorFor(folder)));
                 }
+                else if (folder == SongFolderManager.FolderLatestMaudica)
+                {
+                    rows.Add(ViewRow.Header(folder, LatestMaudica.results.Count, LatestMaudicaHeaderSubLabel(),
+                             FolderColorFor(folder)));
+                }
                 else
                 {
                     int count =
@@ -594,6 +610,8 @@ namespace ExScoringMod
                         AppendSongRequestRows(rows);
                     else if (folder == SongFolderManager.searchFolderName)
                         AppendSearchRows(rows);
+                    else if (folder == SongFolderManager.FolderLatestMaudica)
+                        AppendLatestMaudicaRows(rows);
                     else
                         foreach (string id in GetFolderSongs(folder))
                             rows.Add(ViewRow.SongRow(id));
@@ -663,6 +681,9 @@ namespace ExScoringMod
 
             if (folder == SongFolderManager.FolderSongRequests)
                 return GetSongRequestSongIDs();
+
+            if (folder == SongFolderManager.FolderLatestMaudica)
+                return GetLatestMaudicaSongIDs();
 
             if (folder == SongFolderManager.searchFolderName && SongSearch.searchResult != null)
             {
@@ -1833,7 +1854,7 @@ namespace ExScoringMod
         }
 
         /// <summary>Find a local song matching a stored request's metadata (mirrors the interceptor's match).</summary>
-        private static SongList.SongData FindLocalRequestSong(string title, string artist, string mapper, string songId)
+        internal static SongList.SongData FindLocalRequestSong(string title, string artist, string mapper, string songId)
         {
             try
             {
@@ -2116,6 +2137,168 @@ namespace ExScoringMod
             yield return null;
             yield return null;
             SongSearch.Search();
+            RefreshList();
+        }
+
+        // ── Latest Maudica folder (maudica catalog, newest upload first) ──────────
+        private static readonly HashSet<string> latestDownloading = new HashSet<string>();
+        private static readonly Dictionary<string, int> latestLastPct = new Dictionary<string, int>();
+        private static readonly HashSet<string> latestFailed = new HashSet<string>();
+
+        /// <summary>Second line of the Latest Maudica header, reflecting load state.</summary>
+        private static string LatestMaudicaHeaderSubLabel()
+        {
+            if (!LatestMaudica.Loaded)
+            {
+                if (LatestMaudica.Loading) return "Loading...";
+                if (LatestMaudica.Error) return "Couldn't reach Maudica";
+                return "Shoot to load";
+            }
+            if (LatestMaudica.Refreshing) return "Refreshing...";
+            if (LatestMaudica.Error && LatestMaudica.ErrorWasRefresh) return "Couldn't refresh - showing earlier list";
+            return $"Newest first - {LatestMaudica.TotalOnMaudica} on Maudica";
+        }
+
+        /// <summary>Installed songs in the loaded Latest Maudica list, in display order, deduped.
+        /// Used for open-folder auto-select.</summary>
+        private static List<string> GetLatestMaudicaSongIDs()
+        {
+            var ids = new List<string>();
+            var seen = new HashSet<string>();
+            foreach (var s in LatestMaudica.results)
+            {
+                string local = LatestMaudica.LocalSongIdFor(s);
+                if (local != null && seen.Add(local))
+                    ids.Add(local);
+            }
+            return ids;
+        }
+
+        /// <summary>
+        /// Rows for the open Latest Maudica folder, in maudica order (newest first): installed
+        /// songs as normal playable rows, the rest as downloadable rows, then "Load more songs"
+        /// at the bottom while more pages remain.
+        /// </summary>
+        private static void AppendLatestMaudicaRows(List<ViewRow> rows)
+        {
+            if (!LatestMaudica.Loaded)
+            {
+                if (LatestMaudica.Loading)
+                    rows.Add(ViewRow.ActionRow("Loading...", SR_LoadMoreColor, null, null, "latest_status"));
+                else if (LatestMaudica.Error)
+                    rows.Add(ViewRow.ActionRow("Couldn't reach Maudica", SR_LoadMoreColor, OnRetryLatest,
+                             "Shoot to retry", "latest_status"));
+                return;
+            }
+
+            var seenLocal = new HashSet<string>();
+            foreach (var s in LatestMaudica.results)
+            {
+                string local = LatestMaudica.LocalSongIdFor(s);
+                if (local != null)
+                {
+                    // Two maudica entries can resolve to the same local song; list it once.
+                    if (seenLocal.Add(local))
+                        rows.Add(ViewRow.SongRow(local));
+                    continue;
+                }
+
+                var row = ViewRow.DownloadableSongRow(s.song_id, s.title, s.artist, s.author, s.download_url,
+                          SR_DownloadableColor, () => OnDownloadLatestSong(s));
+
+                // Keep download state on screen across redraws (another row loading, a page landing).
+                if (latestDownloading.Contains(s.song_id))
+                {
+                    int pct = latestLastPct.TryGetValue(s.song_id, out int p) && p >= 0 ? p : 0;
+                    row.subLabel = $"Downloading... {pct}%";
+                }
+                else if (latestFailed.Contains(s.song_id))
+                {
+                    row.subLabel = "Download failed - shoot to retry";
+                }
+
+                rows.Add(row);
+            }
+
+            if (LatestMaudica.Loading && !LatestMaudica.Refreshing)
+                rows.Add(ViewRow.ActionRow("Loading...", SR_LoadMoreColor, null, null, "latest_loadmore"));
+            else if (LatestMaudica.Error && LatestMaudica.ErrorWasRefresh)
+                rows.Add(ViewRow.ActionRow("Refresh", SR_LoadMoreColor, OnRetryLatest,
+                         "Couldn't refresh - shoot to retry", "latest_loadmore"));
+            else if (LatestMaudica.Error)
+                rows.Add(ViewRow.ActionRow("Load more songs", SR_LoadMoreColor, OnRetryLatest,
+                         "Couldn't load - shoot to retry", "latest_loadmore"));
+            else if (LatestMaudica.HasMorePages)
+                rows.Add(ViewRow.ActionRow("Load more songs", SR_LoadMoreColor, OnLoadMoreLatest,
+                         $"{LatestMaudica.results.Count} of {LatestMaudica.TotalOnMaudica} loaded", "latest_loadmore"));
+        }
+
+        private static void OnLoadMoreLatest()
+        {
+            if (LatestMaudica.Loading) return;
+            LatestMaudica.LoadMore();
+            RefreshList(); // show "Loading..." now; the fetch callback refreshes again
+        }
+
+        private static void OnRetryLatest()
+        {
+            if (LatestMaudica.Loading) return;
+            LatestMaudica.Retry();
+            RefreshList();
+        }
+
+        private static void OnDownloadLatestSong(Song s)
+        {
+            if (s == null) return;
+            string id = s.song_id;
+            if (string.IsNullOrEmpty(id)) return;
+            if (!latestDownloading.Add(id)) return; // already downloading
+
+            latestFailed.Remove(id);
+            latestLastPct[id] = -1;
+            VirtualSongList.UpdateActionRowText(id, s.title, "Downloading... 0%");
+            MelonCoroutines.Start(SongDownloader.DownloadSong(
+                id, s.download_url,
+                (sid, ok) => OnLatestDownloadComplete(s, ok),
+                (sid, pct) => OnLatestDownloadProgress(s, pct)));
+        }
+
+        private static void OnLatestDownloadProgress(Song s, float pct)
+        {
+            string id = s.song_id;
+            int p = (int)(pct * 100f);
+            if (p < 0) p = 0;
+            if (p > 100) p = 100;
+            if (latestLastPct.TryGetValue(id, out int last) && last == p) return;
+            latestLastPct[id] = p;
+            VirtualSongList.UpdateActionRowText(id, s.title, $"Downloading... {p}%");
+        }
+
+        private static void OnLatestDownloadComplete(Song s, bool success)
+        {
+            string id = s.song_id;
+            latestDownloading.Remove(id);
+            latestLastPct.Remove(id);
+
+            if (!success)
+            {
+                latestFailed.Add(id);
+                VirtualSongList.UpdateActionRowText(id, s.title, "Download failed - shoot to retry");
+                return;
+            }
+
+            ExScoring.ReloadSongList(false);
+            MelonCoroutines.Start(RefreshLatestAfterReload());
+        }
+
+        private static IEnumerator RefreshLatestAfterReload()
+        {
+            // Let ReloadSongList's async post-process settle, then re-match locals so the new
+            // song turns into a normal (playable) row in place.
+            yield return null;
+            yield return null;
+            yield return null;
+            LatestMaudica.InvalidateLocalMatches();
             RefreshList();
         }
     }
