@@ -68,6 +68,9 @@ namespace ExScoringMod
                 return;
             }
 
+            // The marathon menu lives on the launch panel, so leave the Song Settings page first.
+            PerSongOptionsPage.CloseIfOpen();
+
             if (!EnsureCenter())
             {
                 PlaylistUtil.Popup("Launch panel not ready");
@@ -81,6 +84,7 @@ namespace ExScoringMod
             Active = true;
 
             AddPlaylistButton.Hide();                            // no Add/Remove button during marathon
+            PerSongOptionsPage.HideButton();                     // nor Song Settings (it's per song)
             VirtualSongList.SetSelectedAction(MarathonActionId); // move the selection highlight to Marathon
 
             PlaylistUtil.Popup("Pick a difficulty, then Play to start the marathon");
@@ -108,6 +112,7 @@ namespace ExScoringMod
 
             VirtualSongList.SetSelectedAction(null); // restore song selection highlight
             AddPlaylistButton.Show();                // bring back the Add/Remove button (label refreshed)
+            PerSongOptionsPage.ShowButton();         // and the Song Settings button
         }
 
         public static void CancelIfActive()

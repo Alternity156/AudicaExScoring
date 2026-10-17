@@ -970,7 +970,8 @@ namespace ExScoringMod
                     }
                 }
 
-                if (Config.ForceHitSounds)
+                // Per-song override (On/Off) while a song's settings are applied, else Config.
+                if (PerSongSettings.EffectiveForceHitSounds)
                 {
                     SongCues.Cue[] cues = SongCues.I.GetCues();
 

@@ -27,6 +27,14 @@ namespace ExScoringMod
             public static void Prefix()
             {
                 AuthorableBridge.OnInGameRestart();
+
+                // Re-apply per-song settings for the song being restarted. Covers restarts from
+                // the results/failed screens (MenuState may have left Launched, which restored the
+                // globals) and the endless/marathon "next song", which is a restart with a new
+                // song in SongDataHolder. Endless keeps its music faded until the next song is
+                // ready, then un-fades to the per-song level itself (PlaylistEndlessManager).
+                if (!launchedOutsideSongFlow)
+                    PerSongSettings.ApplyForCurrentSong(PlaylistEndlessManager.VolumeFadedOut);
             }
 
             public static void Postfix(
@@ -100,8 +108,22 @@ namespace ExScoringMod
                 if (state == MenuState.State.Launching)
                     CheckSelectionOnLaunch();
 
+                // Per-song settings: applied when a song starts launching (before it loads, so it
+                // doesn't matter whether the game reads a value live or caches it at load), and
+                // the globals restored once we're out of the song. Calibration launches straight
+                // from Settings and keeps the globals.
+                bool wasInSong = menuState == MenuState.State.Launching || menuState == MenuState.State.Launched;
+                bool nowInSong = state == MenuState.State.Launching || state == MenuState.State.Launched;
+                if (state == MenuState.State.Launching && menuState != MenuState.State.SettingsPage)
+                    PerSongSettings.ApplyForCurrentSong();
+                else if (wasInSong && !nowInSong)
+                    PerSongSettings.Restore();
+
                 if (menuState == MenuState.State.SongPage && state != MenuState.State.SongPage)
+                {
                     GlobalOptions.ForceTeardown();
+                    PerSongOptionsPage.ForceTeardown();
+                }
 
                 // Calibration (and any other non-song flow) jumps straight from Settings into
                 // gameplay, skipping SongPage/LaunchPage entirely — flag it so we don't treat this
@@ -535,6 +557,11 @@ namespace ExScoringMod
                 selectedSong = __instance.mSongData.songID;
                 maxPossibleExScore = GetMaxPossibleExScore(selectedSong, KataConfig.I.GetDifficulty());
                 selectedSongData = __instance.mSongData;
+
+                // Selecting a song while the Song Settings page is open returns to the launch
+                // panel (showing the new song). Must run before anything below looks the launch
+                // page up — it's inactive while the page is open, and GameObject.Find can't see it.
+                PerSongOptionsPage.OnSongSelected();
 
                 if (!isAutoSelecting)
                 {

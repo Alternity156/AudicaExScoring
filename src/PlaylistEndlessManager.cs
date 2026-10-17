@@ -20,6 +20,14 @@ namespace ExScoringMod
         private static float volumeFadeTime = 3f;
         private static float originalVolume = PlayerPreferences.I.MusicLevel.mVal;
         private static bool fadeInProgress = false;
+
+        /// <summary>
+        /// True from the end-of-song fade-out until the next marathon song un-fades. The restart
+        /// that loads the next song applies its per-song settings with music deferred while this is
+        /// set, so the music doesn't jump back up during loading. Cleared by PerSongSettings.Restore
+        /// when leaving the song (e.g. after the last song).
+        /// </summary>
+        public static bool VolumeFadedOut = false;
         private static bool previousNoFail = false;
         private static bool pendingReset = false;
         public static bool EndlessActive => PlaylistManager.state == PlaylistManager.PlaylistState.Endless;
@@ -49,6 +57,7 @@ namespace ExScoringMod
                 yield return new WaitForSecondsRealtime(0.2f);
             }
 
+            VolumeFadedOut = false;
             previousNoFail = PlayerPreferences.I.NoFail.mVal;
             PlayerPreferences.I.NoFail.mVal = PlaylistConfig.NoFail;
             pendingReset = true;
@@ -84,7 +93,10 @@ namespace ExScoringMod
                 yield return new WaitForSecondsRealtime(.2f);
             }
             yield return new WaitForSeconds(2f);
-            UpdateVolume(originalVolume);
+            // The next song's per-song music level (its settings were applied by the Restart
+            // above, with music deferred), or the pre-fade level if nothing is applied.
+            UpdateVolume(PerSongSettings.GetEffectiveMusicLevel(originalVolume));
+            VolumeFadedOut = false;
             if (!PlaylistConfig.ResetHealth) ScoreKeeper.I.mHealth = previousSongHealth;
         }
 
@@ -95,6 +107,7 @@ namespace ExScoringMod
 
         private static IEnumerator DoFadeOut()
         {
+            VolumeFadedOut = true;
             originalVolume = PlayerPreferences.I.MusicLevel.mVal;
             float currentVol = originalVolume;
             float time = 0f;

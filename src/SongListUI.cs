@@ -335,6 +335,7 @@ namespace ExScoringMod
             SetupFavoriteButton();
             CreateDeleteButton(ButtonUtils.ButtonLocation.Menu);
             AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.Menu);
+            PerSongOptionsPage.CreateButton();
 
             if (songDataLoaderInstalled)
             {
@@ -393,6 +394,7 @@ namespace ExScoringMod
             UpdateDeleteButtonEnabled();
             UpdateDifficultyButtonsEnabled();
             AddPlaylistButton.CreatePlaylistButton(ButtonUtils.ButtonLocation.Menu);
+            PerSongOptionsPage.CreateButton(); // also refreshes its label for the selected song
 
             // These get re-activated by the game's LaunchPanel.OnEnable (notably on the first song
             // after a fresh launch). They are never part of the redesigned panel, so keep them hidden.
