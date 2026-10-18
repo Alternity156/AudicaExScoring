@@ -799,6 +799,253 @@ namespace ExScoringMod
             }
         }
 
+        // ══════════════════════════════════════════════════════════════════
+        //  Account linking (ApiContract.md Section 16)
+        // ══════════════════════════════════════════════════════════════════
+        //
+        // Neither call sends Authorization: ApiKey — the mod has no key yet. Plain JSON, no gzip.
+        // SECURITY: these responses carry the pollToken (start) and the player's apiKey (approved
+        // poll). Never log their bodies, and never log the pollToken or apiKey themselves — only
+        // status codes and the server's `error` string.
+
+        /// <summary>Response shape for POST /api/mod/link/start (ApiContract.md Section 16.2).</summary>
+        public class LinkStartResponse
+        {
+            public string code;
+            public string pollToken;
+            public int expiresIn;
+            public int pollInterval;
+        }
+
+        /// <summary>Response shape for POST /api/mod/link/poll (ApiContract.md Section 16.3), both 202 and 200.</summary>
+        public class LinkPollResponse
+        {
+            public string status;
+            public int? expiresIn;
+            public string apiKey;
+            public string nickname;
+        }
+
+        public enum LinkStartStatus
+        {
+            Success,
+            RateLimited,
+            Failed
+        }
+
+        public class LinkStartResult
+        {
+            public LinkStartStatus status;
+
+            /// <summary>Only populated when status == Success.</summary>
+            public LinkStartResponse response;
+        }
+
+        public enum LinkPollStatus
+        {
+            /// <summary>202 — not approved yet, keep polling.</summary>
+            Pending,
+            /// <summary>200 — approved; apiKey and nickname are set. The request is now used up.</summary>
+            Approved,
+            /// <summary>410 CODE_EXPIRED.</summary>
+            Expired,
+            /// <summary>403 ACCOUNT_DISABLED.</summary>
+            AccountDisabled,
+            /// <summary>404 INVALID_POLL_TOKEN (unknown or already collected), 400 (mod-side bug), or an unparsable/unexpected reply.</summary>
+            Failed,
+            /// <summary>Transport failure or a 5xx — worth retrying a couple of times before giving up.</summary>
+            NetworkError
+        }
+
+        public class LinkPollResult
+        {
+            public LinkPollStatus status;
+
+            /// <summary>Seconds left on the code, from a 202 reply. Null otherwise.</summary>
+            public int? expiresIn;
+
+            /// <summary>Only set when status == Approved. Never log this.</summary>
+            public string apiKey;
+
+            /// <summary>Only set when status == Approved.</summary>
+            public string nickname;
+        }
+
+        /// <summary>
+        /// Starts an account-link request (POST /api/mod/link/start — ApiContract.md Section 16.2).
+        /// Always calls onComplete exactly once. A 404 (server without Section 16 deployed yet) and
+        /// any other failure come back as Failed; 429 comes back as RateLimited.
+        /// </summary>
+        public static void StartAccountLink(Action<LinkStartResult> onComplete)
+        {
+            DebugLog.Log("[ExScoring] StartAccountLink: starting");
+            MelonCoroutines.Start(StartAccountLinkCoroutine(onComplete));
+        }
+
+        private static IEnumerator StartAccountLinkCoroutine(Action<LinkStartResult> onComplete)
+        {
+            string url = $"{ApiBaseUrl}/api/mod/link/start";
+
+            UnityWebRequest request = new UnityWebRequest(url, "POST");
+            try
+            {
+                request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes("{}"));
+                request.downloadHandler = new DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type", "application/json");
+
+                yield return request.SendWebRequest();
+
+                if (request.isNetworkError)
+                {
+                    DebugLog.Log($"[ExScoring] StartAccountLink failed (network error): {request.error}");
+                    onComplete?.Invoke(new LinkStartResult { status = LinkStartStatus.Failed });
+                    yield break;
+                }
+
+                if (request.responseCode != 200)
+                {
+                    // Error bodies are { "error": "..." } and carry no secrets, so they're safe to log.
+                    DebugLog.Log($"[ExScoring] StartAccountLink failed ({request.responseCode}): {ExtractApiError(request)}");
+                    LinkStartStatus status = request.responseCode == 429 ? LinkStartStatus.RateLimited : LinkStartStatus.Failed;
+                    onComplete?.Invoke(new LinkStartResult { status = status });
+                    yield break;
+                }
+
+                LinkStartResponse response = null;
+                try
+                {
+                    response = JsonConvert.DeserializeObject<LinkStartResponse>(request.downloadHandler.text);
+                }
+                catch (Exception ex)
+                {
+                    // Deliberately not logging the body: it holds the pollToken.
+                    DebugLog.Log($"[ExScoring] StartAccountLink: failed to parse response: {ex.GetType().Name}");
+                }
+
+                if (response == null || string.IsNullOrEmpty(response.code) || string.IsNullOrEmpty(response.pollToken))
+                {
+                    DebugLog.Log("[ExScoring] StartAccountLink: response missing code or pollToken");
+                    onComplete?.Invoke(new LinkStartResult { status = LinkStartStatus.Failed });
+                    yield break;
+                }
+
+                DebugLog.Log($"[ExScoring] StartAccountLink succeeded: expiresIn={response.expiresIn}s, pollInterval={response.pollInterval}s");
+                onComplete?.Invoke(new LinkStartResult { status = LinkStartStatus.Success, response = response });
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Polls an account-link request once (POST /api/mod/link/poll — ApiContract.md Section 16.3).
+        /// Always calls onComplete exactly once. Branches on responseCode, not isHttpError: 202 (pending)
+        /// is a success status, so UnityWebRequest reports it as neither a network nor an HTTP error.
+        /// </summary>
+        public static void PollAccountLink(string pollToken, Action<LinkPollResult> onComplete)
+        {
+            if (string.IsNullOrEmpty(pollToken))
+            {
+                DebugLog.Log("[ExScoring] PollAccountLink: no poll token, aborting.");
+                onComplete?.Invoke(new LinkPollResult { status = LinkPollStatus.Failed });
+                return;
+            }
+
+            byte[] body;
+            try
+            {
+                body = Encoding.UTF8.GetBytes(JsonConvert.SerializeObject(new Dictionary<string, string> { { "pollToken", pollToken } }));
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Log($"[ExScoring] PollAccountLink: failed to build request: {ex.GetType().Name}");
+                onComplete?.Invoke(new LinkPollResult { status = LinkPollStatus.Failed });
+                return;
+            }
+
+            MelonCoroutines.Start(PollAccountLinkCoroutine(body, onComplete));
+        }
+
+        private static IEnumerator PollAccountLinkCoroutine(byte[] body, Action<LinkPollResult> onComplete)
+        {
+            string url = $"{ApiBaseUrl}/api/mod/link/poll";
+
+            UnityWebRequest request = new UnityWebRequest(url, "POST");
+            try
+            {
+                request.uploadHandler = new UploadHandlerRaw(body);
+                request.downloadHandler = new DownloadHandlerBuffer();
+                request.SetRequestHeader("Content-Type", "application/json");
+
+                yield return request.SendWebRequest();
+
+                if (request.isNetworkError)
+                {
+                    DebugLog.Log($"[ExScoring] PollAccountLink failed (network error): {request.error}");
+                    onComplete?.Invoke(new LinkPollResult { status = LinkPollStatus.NetworkError });
+                    yield break;
+                }
+
+                long code = request.responseCode;
+
+                if (code == 202 || code == 200)
+                {
+                    LinkPollResponse response = null;
+                    try
+                    {
+                        response = JsonConvert.DeserializeObject<LinkPollResponse>(request.downloadHandler.text);
+                    }
+                    catch (Exception ex)
+                    {
+                        // Deliberately not logging the body: on 200 it holds the apiKey.
+                        DebugLog.Log($"[ExScoring] PollAccountLink: failed to parse {code} response: {ex.GetType().Name}");
+                    }
+
+                    if (code == 202)
+                    {
+                        onComplete?.Invoke(new LinkPollResult
+                        {
+                            status = LinkPollStatus.Pending,
+                            expiresIn = response?.expiresIn
+                        });
+                        yield break;
+                    }
+
+                    if (response == null || string.IsNullOrEmpty(response.apiKey))
+                    {
+                        DebugLog.Log("[ExScoring] PollAccountLink: approved response missing apiKey");
+                        onComplete?.Invoke(new LinkPollResult { status = LinkPollStatus.Failed });
+                        yield break;
+                    }
+
+                    DebugLog.Log("[ExScoring] PollAccountLink: approved");
+                    onComplete?.Invoke(new LinkPollResult
+                    {
+                        status = LinkPollStatus.Approved,
+                        apiKey = response.apiKey.Trim(),
+                        nickname = response.nickname ?? ""
+                    });
+                    yield break;
+                }
+
+                // Error bodies are { "error": "..." } and carry no secrets, so they're safe to log.
+                DebugLog.Log($"[ExScoring] PollAccountLink failed ({code}): {ExtractApiError(request)}");
+
+                LinkPollStatus status;
+                if (code == 410) status = LinkPollStatus.Expired;
+                else if (code == 403) status = LinkPollStatus.AccountDisabled;
+                else if (code >= 500) status = LinkPollStatus.NetworkError;
+                else status = LinkPollStatus.Failed; // 404 (unknown/collected token), 400 (mod bug), anything else
+
+                onComplete?.Invoke(new LinkPollResult { status = status });
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
+
         /// <summary>
         /// Pulls the server's `error` string out of an error response body ({"error": "..."}), for
         /// showing on screen. Falls back to the HTTP status / transport error when the body isn't

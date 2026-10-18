@@ -201,6 +201,7 @@
     </Reference>
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="src\AccountLink.cs" />
     <Compile Include="src\AimGraph.cs" />
     <Compile Include="src\ApiClient.cs" />
     <Compile Include="src\ApiKeyHelpButton.cs" />

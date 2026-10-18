@@ -545,13 +545,13 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.enableScoreUpload = v; OptionsMenuFunctions.SetEnableScoreUpload(v); },
                     "Automatically uploads runs to the online leaderboard after each song");
 
-                // Not a real bool toggle: the checkmark reflects whether an API key is currently
-                // set, and shooting it pastes/replaces the key from the clipboard.
-                var apiKeyRow = OptionsMenuClone.CreateToggle(1, "API Key (Paste)",
-                    OptionsMenuFunctions.HasApiKey,
-                    v => OptionsMenuFunctions.PasteApiKeyFromClipboard(),
-                    "Checked = an API key is set. Shoot to paste one from your clipboard, replacing any existing key.");
-                OptionsMenuClone.AddRow(enableUploadToggle, apiKeyRow);
+                // "Paste API Key" until the server has confirmed the key, then "Delete API Key".
+                // AudicaExStatus redraws this page (RedrawIfShowing) whenever the key state changes,
+                // so the label follows paste/delete/link results without leaving the page.
+                var apiKeyButton = OptionsMenuClone.CreateButton(1, OptionsMenuFunctions.GetApiKeyButtonLabel(),
+                    () => OptionsMenuFunctions.OnApiKeyButtonShot(),
+                    OptionsMenuFunctions.GetApiKeyButtonHover());
+                OptionsMenuClone.AddRow(enableUploadToggle, apiKeyButton);
             }),
 
             new OptionsCategory("opt_scoring", "Scoring", () =>
@@ -734,6 +734,24 @@ namespace ExScoringMod
 
             // in RestoreIfPending, log entry + which category
             DebugLog.Log($"[Options] RestoreIfPending: catId={restoreCategoryId}");
+        }
+
+        /// <summary>
+        /// Redraws the given category next frame if it's the one currently showing. Next frame, because
+        /// redrawing wipes every row — including a button whose hit event may still be running. Used by
+        /// AudicaExStatus so Options > Leaderboard's Paste/Delete API Key label follows the key state.
+        /// </summary>
+        public static void RedrawIfShowing(string categoryId)
+        {
+            if (!panelShown || activeCategory == null || activeCategory.Id != categoryId) return;
+            MelonCoroutines.Start(RedrawRoutine(categoryId));
+        }
+
+        private static IEnumerator RedrawRoutine(string categoryId)
+        {
+            yield return null;
+            if (!panelShown || activeCategory == null || activeCategory.Id != categoryId) yield break;
+            DrawCategory(activeCategory);
         }
 
         private static void DrawCategory(OptionsCategory cat)

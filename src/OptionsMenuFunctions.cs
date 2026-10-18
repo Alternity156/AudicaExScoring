@@ -319,16 +319,40 @@ namespace ExScoringMod
             Config.UpdateDebugLogs(value);
         }
 
-        /// <summary>Whether an API key is currently set — drives the checkmark on the API Key row.</summary>
+        /// <summary>Whether an API key is currently set (valid or not).</summary>
         public static bool HasApiKey()
         {
             return !string.IsNullOrEmpty(Config.ApiKey);
         }
 
         /// <summary>
+        /// Label for the Options > Leaderboard API key button: "Delete API Key" once the server has
+        /// confirmed the key (AudicaExStatus.IsKeyValid), otherwise "Paste API Key". A key that's set but
+        /// unchecked, rejected, or unreachable shows Paste, since pasting just replaces it.
+        /// </summary>
+        public static string GetApiKeyButtonLabel()
+        {
+            return AudicaExStatus.IsKeyValid ? "Delete API Key" : "Paste API Key";
+        }
+
+        public static string GetApiKeyButtonHover()
+        {
+            return AudicaExStatus.IsKeyValid
+                ? "Removes the saved AudicaEX.org API key from this game. Link or paste it again to reconnect."
+                : "Pastes an API key from your clipboard, replacing any existing key. If pasting doesn't work on your setup, use Link Account on the main menu.";
+        }
+
+        /// <summary>Options > Leaderboard API key button: deletes a valid key, otherwise pastes from the clipboard.</summary>
+        public static void OnApiKeyButtonShot()
+        {
+            if (AudicaExStatus.IsKeyValid) DeleteApiKey();
+            else PasteApiKeyFromClipboard();
+        }
+
+        /// <summary>
         /// Reads the system clipboard and, if it holds non-blank text, saves it as the API key,
-        /// replacing any existing one. Bound to the API Key row's "toggle" action, so the row
-        /// doubles as both a status indicator (checked = key set) and a paste button.
+        /// replacing any existing one. Used by the Main page's "Paste API Key" button and the
+        /// Options > Leaderboard API key button.
         /// </summary>
         public static void PasteApiKeyFromClipboard()
         {
@@ -339,22 +363,46 @@ namespace ExScoringMod
                 return;
             }
 
-            Config.UpdateApiKey(clipboard.Trim());
+            SetApiKey(clipboard.Trim());
             DebugLog.Log("[ExScoring] API key updated from clipboard");
+        }
 
-            // Only worth checking if Enable Score Upload has never been explicitly set before
-            // (by the user's own toggle or by this same auto-enable) - once it has, a manual
-            // disable must stick, so don't even make the verification call.
+        /// <summary>
+        /// Saves a newly entered API key (clipboard paste or account link, ApiContract.md Section 16),
+        /// replacing any existing one. Cancels any account link in progress, then re-checks the key;
+        /// if the server accepts it, Enable Score Upload is auto-enabled unless the player has already
+        /// set it themselves (see AutoEnableScoreUploadIfUnset).
+        /// </summary>
+        public static void SetApiKey(string key)
+        {
+            AccountLink.Cancel();
+            Config.UpdateApiKey(key);
+            AudicaExStatus.OnNewKeyEntered();
+        }
+
+        /// <summary>
+        /// Removes the saved API key. Enable Score Upload is left as it is; uploads simply don't happen
+        /// without a key (ExScoring.SubmitRun).
+        /// </summary>
+        public static void DeleteApiKey()
+        {
+            AccountLink.Cancel();
+            Config.UpdateApiKey("");
+            DebugLog.Log("[ExScoring] API key deleted");
+            AudicaExStatus.RefreshLast();
+        }
+
+        /// <summary>
+        /// Turns Enable Score Upload on after a newly entered key is confirmed valid — but only if it
+        /// has never been explicitly set before (by the player's own toggle or by this same
+        /// auto-enable). Once it has, a manual disable must stick. Called by AudicaExStatus.
+        /// </summary>
+        public static void AutoEnableScoreUploadIfUnset()
+        {
             if (Config.ScoreUploadUserConfigured) return;
 
-            ExScoring.FetchProfile(result =>
-            {
-                if (result.status != ExScoring.ProfileFetchStatus.Success) return;
-                if (Config.ScoreUploadUserConfigured) return; // could have been set while the request was in flight
-
-                SetEnableScoreUpload(true);
-                DebugLog.Log("[ExScoring] API key verified - automatically enabled score upload");
-            });
+            SetEnableScoreUpload(true);
+            DebugLog.Log("[ExScoring] API key verified - automatically enabled score upload");
         }
 
         public static void GetArrowScrollRows()

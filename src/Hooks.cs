@@ -172,6 +172,9 @@ namespace ExScoringMod
                 else
                 {
                     StopWatching();
+                    // Account linking (AccountLink.cs) only lives on the Main page: leaving it stops
+                    // polling and discards any code or not-yet-confirmed key.
+                    AccountLink.Cancel();
                 }
 
                 if (state == MenuState.State.SongPage)
