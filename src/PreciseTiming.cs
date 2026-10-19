@@ -124,6 +124,7 @@ namespace ExScoringMod
         private static readonly HashSet<int> statClockOnlyCues = new HashSet<int>();
         private static readonly HashSet<int> statNativeCues = new HashSet<int>();
         private static readonly Dictionary<int, float> statDiffByCue = new Dictionary<int, float>();
+        private static readonly HashSet<int> statClampedCues = new HashSet<int>();
 
         // Polling diagnostics
         private const double OutlierDiffMs = 12.0;
@@ -144,7 +145,13 @@ namespace ExScoringMod
 
         // ── Public API ──
 
-        /// <summary>Precise timing offset in ms (positive = late) for a cue, if one exists.</summary>
+        /// <summary>
+        /// Precise timing offset in ms (positive = late) for a cue, if one exists. Clamped to the
+        /// Good timing window: this is only ever asked for cues the game counted as hits, and a
+        /// press timestamped outside the window (in practice only during heavy lag, when the game
+        /// registers a press late at the end of a long frame) must never turn a native hit into an
+        /// EX timing Miss.
+        /// </summary>
         public static bool TryGetTimingMs(Cue cue, out float timingMs)
         {
             timingMs = 0f;
@@ -162,7 +169,14 @@ namespace ExScoringMod
             }
 
             double cueMs = AudioDriver.TickSpanToMs(songData, 0f, cue.tick);
-            timingMs = (float)(scoringMs - cueMs);
+            float rawMs = (float)(scoringMs - cueMs);
+            float window = ExScoring.judgementGoodTimingWindowMs;
+            timingMs = Mathf.Clamp(rawMs, -window, window);
+            if (timingMs != rawMs && statClampedCues.Add(cue.index))
+            {
+                DebugLog.Log($"[PreciseTiming] Cue {cue.index} clamped to Good window: precise {rawMs:0.00} ms -> {timingMs:0.00} ms " +
+                             $"(native {ExScoring.GetNativeTimingMsFromCue(cue):0.00} ms).");
+            }
 
             if (pressTimed) statPressTimedCues.Add(cue.index);
             else statClockOnlyCues.Add(cue.index);
@@ -260,6 +274,7 @@ namespace ExScoringMod
             statClockOnlyCues.Clear();
             statNativeCues.Clear();
             statDiffByCue.Clear();
+            statClampedCues.Clear();
 
             lastClockErrorMs = 0;
             statClockErrAbsSumMs = 0;
@@ -310,6 +325,7 @@ namespace ExScoringMod
                 $"avg {(statPresses > 0 ? statPressLeadSumMs / statPresses : 0):0.00} ms before frame), linked to cues {statFireLinks} | " +
                 $"cues: {statPressTimedCues.Count} press-timed, {statClockOnlyCues.Count} clock-only, {nativeOnly} native | " +
                 $"EX timing score: {statScoreRecomputed} recomputed, {statScoreMismatches} kept native (mismatch) | " +
+                $"clamped to Good window: {statClampedCues.Count} | " +
                 $"precise - native: {diffText}");
 
             LogPollingDiagnostics();
