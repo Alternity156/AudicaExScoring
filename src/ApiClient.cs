@@ -435,9 +435,11 @@ namespace ExScoringMod
         /// <summary>
         /// Fetches the requester's whole uploaded run history (GET /api/users/me/runs with no
         /// songId/difficulty filter — see ApiContract.md Section 5). Requires an API key. Returns
-        /// every non-deleted run, not just bests, without exCues (no ?detail=true). Backs the
-        /// once-per-launch "leaderboard-only best scores" merge in SongListHighScoreUI.cs, so a
-        /// clean install with no local run files still shows its uploaded scores. Always calls
+        /// every non-deleted run, not just bests, without exCues (no ?detail=true). The history is
+        /// only complete because no limit/offset is sent: since v2.36 the server skips paging in
+        /// that case (before v2.36 it silently capped this at the 50 most recent runs). Now only
+        /// the fallback for the "leaderboard-only best scores" merge in SongListHighScoreUI.cs,
+        /// used when the server doesn't have FetchMyBests' endpoint yet (404). Always calls
         /// onComplete exactly once: with the parsed response on success, or null on any failure
         /// (no API key, network error, HTTP error, or an unparsable body) — every failure path is
         /// logged first.
@@ -507,6 +509,93 @@ namespace ExScoringMod
 
                 DebugLog.Log($"[ExScoring] FetchMyRuns succeeded: runs={response.runs.Length} ({body.Length} chars)");
                 onComplete?.Invoke(response);
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
+
+        /// <summary>
+        /// Fetches the requester's best uploaded run per song+difficulty (GET /api/users/me/bests —
+        /// see ApiContract.md v2.36, Section 5b). Requires an API key. One small entry per
+        /// song+difficulty, no paging, so its size depends on songs played rather than run count.
+        /// Backs the once-per-launch "leaderboard-only best scores" merge in SongListHighScoreUI.cs,
+        /// so a clean install with no local run files still shows its uploaded scores.
+        ///
+        /// Always calls onComplete exactly once: with the parsed response on success, or null on any
+        /// failure (no API key, network error, HTTP error, or an unparsable body) — every failure
+        /// path is logged first. The second argument is the HTTP status code (0 when no request was
+        /// made or it never got a response), so the caller can tell a 404 (server not updated to
+        /// v2.36 yet → fall back to FetchMyRuns) from any other failure.
+        /// </summary>
+        public static void FetchMyBests(Action<MyBestsApiResponse, long> onComplete)
+        {
+            if (string.IsNullOrEmpty(Config.ApiKey))
+            {
+                DebugLog.Log("[ExScoring] FetchMyBests: no API key is set, aborting.");
+                onComplete?.Invoke(null, 0);
+                return;
+            }
+
+            DebugLog.Log("[ExScoring] FetchMyBests: starting.");
+            MelonCoroutines.Start(FetchMyBestsCoroutine(onComplete));
+        }
+
+        private static IEnumerator FetchMyBestsCoroutine(Action<MyBestsApiResponse, long> onComplete)
+        {
+            string url = $"{ApiBaseUrl}/api/users/me/bests";
+
+            DebugLog.Log($"[ExScoring] FetchMyBests: GET {url}");
+
+            UnityWebRequest request = UnityWebRequest.Get(url);
+            try
+            {
+                request.SetRequestHeader("Authorization", "ApiKey " + Config.ApiKey);
+
+                yield return request.SendWebRequest();
+
+                long statusCode = request.responseCode;
+
+                if (request.isNetworkError || request.isHttpError)
+                {
+                    string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
+                    DebugLog.Log($"[ExScoring] FetchMyBests failed ({statusCode}): {request.error} | Body: {errorBody}");
+                    onComplete?.Invoke(null, statusCode);
+                    yield break;
+                }
+
+                string body = request.downloadHandler.text;
+                string preview = body != null && body.Length > 500 ? body.Substring(0, 500) + "..." : body;
+
+                MyBestsApiResponse response = null;
+                try
+                {
+                    response = JsonConvert.DeserializeObject<MyBestsApiResponse>(body);
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.Log($"[ExScoring] FetchMyBests: failed to parse response ({preview}): {ex}");
+                    response = null;
+                }
+
+                if (response == null)
+                {
+                    onComplete?.Invoke(null, statusCode);
+                    yield break;
+                }
+
+                if (response.bests == null)
+                {
+                    // Most likely the server's array isn't named "bests" — log the start of the
+                    // body so the actual shape is visible.
+                    DebugLog.Log($"[ExScoring] FetchMyBests: response has no bests array ({body?.Length ?? 0} chars): {preview}");
+                    onComplete?.Invoke(null, statusCode);
+                    yield break;
+                }
+
+                DebugLog.Log($"[ExScoring] FetchMyBests succeeded: bests={response.bests.Length} total={response.total} ({body.Length} chars)");
+                onComplete?.Invoke(response, statusCode);
             }
             finally
             {

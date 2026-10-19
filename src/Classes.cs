@@ -532,14 +532,42 @@ namespace ExScoringMod
 
         /// <summary>
         /// Response shape for GET /api/users/me/runs with no filters (Section 5): the player's whole
-        /// uploaded history, most recent first. Used once per launch to merge leaderboard-only best
-        /// scores into the song list (see OnlineBestScores in SongListHighScoreUI.cs).
+        /// uploaded history, most recent first (unpaged since v2.36, because no limit/offset is
+        /// sent). Only used as the fallback for OnlineBestScores (SongListHighScoreUI.cs) when the
+        /// server doesn't have GET /api/users/me/bests yet.
         /// </summary>
         public class MyRunsApiResponse
         {
             public string songId;
             public string difficulty;
             public MyRunsApiEntry[] runs;
+        }
+
+        /// <summary>
+        /// One entry from GET /api/users/me/bests (ApiContract.md v2.36, Section 5b): the player's
+        /// best non-deleted run for one song+difficulty. "Best" is highest judgementPercent, then a
+        /// passed run over a failed one, then the earliest — the same rule as IsBetterExScore.
+        /// </summary>
+        public class MyBestsApiEntry
+        {
+            public string songId;
+            public string difficulty;
+            public string runId;
+            public float judgementPercent;
+            public bool failed;
+            public long unixTimestamp;
+        }
+
+        /// <summary>
+        /// Response shape for GET /api/users/me/bests (Section 5b): one entry per song+difficulty the
+        /// player has uploaded, no paging. total is bests.length (logging only). Used once per launch
+        /// to merge leaderboard-only best scores into the song list (see OnlineBestScores in
+        /// SongListHighScoreUI.cs).
+        /// </summary>
+        public class MyBestsApiResponse
+        {
+            public MyBestsApiEntry[] bests;
+            public int total;
         }
     }
 }

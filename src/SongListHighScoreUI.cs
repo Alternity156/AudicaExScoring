@@ -39,9 +39,15 @@ namespace ExScoringMod
         // rows (TopScoreUI.cs) and the in-game high score (InGameUI.cs) all read "best run" from
         // local run files. After a clean install those are gone, even though every uploaded run is
         // still on the AudicaEx server. So once per launch (and again if the API key changes) the
-        // player's whole uploaded history is fetched in ONE request (GET /api/users/me/runs, no
-        // filters — ApiContract.md Section 5), reduced to the best run per song+difficulty, and
-        // merged with the local result everywhere: the better of the two wins (IsBetterExScore).
+        // player's best uploaded run per song+difficulty is fetched in ONE request
+        // (GET /api/users/me/bests — ApiContract.md v2.36, Section 5b) and merged with the local
+        // result everywhere: the better of the two wins (IsBetterExScore).
+        //
+        // Fallback: if the server doesn't have /me/bests yet (404), the whole uploaded history is
+        // fetched instead (GET /api/users/me/runs, no filters — Section 5) and reduced to the best
+        // run per song+difficulty here. Both paths go through StoreOnlineBest, so they merge the
+        // same way. (Before v2.36 the server capped that history at the 50 most recent runs, which
+        // left random gaps in the song list — that's what /me/bests replaces.)
         //
         // Freshly played runs don't need a refetch: they're saved locally right away, and the merge
         // always takes the better of local vs. online.
@@ -109,7 +115,7 @@ namespace ExScoringMod
                 ClearMergedBestScoreCaches();
             }
 
-            FetchMyRuns(response => OnMyRunsFetched(response, version));
+            FetchMyBests((response, statusCode) => OnMyBestsFetched(response, statusCode, version));
         }
 
         /// <summary>True once there's nothing more to wait for: no API key, or the fetch for the
@@ -151,6 +157,50 @@ namespace ExScoringMod
             return !failedA && failedB;
         }
 
+        /// <summary>
+        /// Main path: GET /api/users/me/bests (Section 5b). Entries are already one per
+        /// song+difficulty, but they still go through StoreOnlineBest so a duplicate key (shouldn't
+        /// happen) can't overwrite a better entry. A 404 means the server predates v2.36, so the
+        /// whole run history is fetched instead under the same request version — the fetch stays
+        /// in flight until that fallback answers.
+        /// </summary>
+        private static void OnMyBestsFetched(MyBestsApiResponse response, long statusCode, int version)
+        {
+            if (version != onlineBestRequestVersion) return; // API key changed while this was in flight
+
+            if (response == null && statusCode == 404)
+            {
+                DebugLog.Log("[ExScoring] Online best scores: /me/bests not found (server older than v2.36), falling back to the full run history.");
+                FetchMyRuns(runsResponse => OnMyRunsFetched(runsResponse, version));
+                return;
+            }
+
+            onlineBestFetchInFlight = false;
+
+            if (response == null || response.bests == null)
+            {
+                OnOnlineBestFetchFailed();
+                return;
+            }
+
+            onlineBestScores.Clear();
+            for (int i = 0; i < response.bests.Length; i++)
+            {
+                MyBestsApiEntry best = response.bests[i];
+                if (best == null) continue;
+                StoreOnlineBest(best.songId, best.difficulty, best.judgementPercent, best.failed);
+            }
+
+            onlineBestReady = true;
+            DebugLog.Log($"[ExScoring] Online best scores: {onlineBestScores.Count} song+difficulty best(s) from /me/bests (server total={response.total}).");
+
+            ApplyOnlineBestScoresToCaches();
+        }
+
+        /// <summary>
+        /// Fallback path: GET /api/users/me/runs with no filters (Section 5), only used when the
+        /// server doesn't have /me/bests yet. Reduced to the best run per song+difficulty here.
+        /// </summary>
         private static void OnMyRunsFetched(MyRunsApiResponse response, int version)
         {
             if (version != onlineBestRequestVersion) return; // API key changed while this was in flight
@@ -159,12 +209,7 @@ namespace ExScoringMod
 
             if (response == null || response.runs == null)
             {
-                // Allow a retry later (e.g. the game started offline) instead of giving up for the
-                // whole launch, but not right away.
-                onlineBestFetchedForKey = null;
-                onlineBestReady = false;
-                onlineBestRetryAfter = Time.realtimeSinceStartup + OnlineBestRetryDelaySeconds;
-                DebugLog.Log($"[ExScoring] Online best scores: fetch failed, will retry in {OnlineBestRetryDelaySeconds:0}s at the earliest.");
+                OnOnlineBestFetchFailed();
                 return;
             }
 
@@ -172,20 +217,40 @@ namespace ExScoringMod
             for (int i = 0; i < response.runs.Length; i++)
             {
                 MyRunsApiEntry run = response.runs[i];
-                if (run == null || string.IsNullOrEmpty(run.songId) || string.IsNullOrEmpty(run.difficulty)) continue;
-
-                string key = run.songId + "|" + run.difficulty;
-                if (onlineBestScores.TryGetValue(key, out OnlineBestScore existing)
-                    && !IsBetterExScore(run.judgementPercent, run.failed, existing.judgementPercent, existing.failed))
-                    continue;
-
-                onlineBestScores[key] = new OnlineBestScore { judgementPercent = run.judgementPercent, failed = run.failed };
+                if (run == null) continue;
+                StoreOnlineBest(run.songId, run.difficulty, run.judgementPercent, run.failed);
             }
 
             onlineBestReady = true;
-            DebugLog.Log($"[ExScoring] Online best scores: {onlineBestScores.Count} song+difficulty best(s) from {response.runs.Length} uploaded run(s).");
+            DebugLog.Log($"[ExScoring] Online best scores (fallback): {onlineBestScores.Count} song+difficulty best(s) from {response.runs.Length} uploaded run(s).");
 
             ApplyOnlineBestScoresToCaches();
+        }
+
+        /// <summary>Keeps the better of this score and any already stored for the same
+        /// song+difficulty (IsBetterExScore). Entries missing a songId or difficulty are skipped.</summary>
+        private static void StoreOnlineBest(string songId, string difficulty, float judgementPercent, bool failed)
+        {
+            if (string.IsNullOrEmpty(songId) || string.IsNullOrEmpty(difficulty)) return;
+
+            string key = songId + "|" + difficulty;
+            if (onlineBestScores.TryGetValue(key, out OnlineBestScore existing)
+                && !IsBetterExScore(judgementPercent, failed, existing.judgementPercent, existing.failed))
+                return;
+
+            onlineBestScores[key] = new OnlineBestScore { judgementPercent = judgementPercent, failed = failed };
+        }
+
+        /// <summary>
+        /// Shared failure handling for both fetch paths: allow a retry later (e.g. the game started
+        /// offline) instead of giving up for the whole launch, but not right away.
+        /// </summary>
+        private static void OnOnlineBestFetchFailed()
+        {
+            onlineBestFetchedForKey = null;
+            onlineBestReady = false;
+            onlineBestRetryAfter = Time.realtimeSinceStartup + OnlineBestRetryDelaySeconds;
+            DebugLog.Log($"[ExScoring] Online best scores: fetch failed, will retry in {OnlineBestRetryDelaySeconds:0}s at the earliest.");
         }
 
         /// <summary>
