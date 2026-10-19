@@ -231,6 +231,7 @@
     <Compile Include="src\OptionsMenuFunctions.cs" />
     <Compile Include="src\PerSongOptionsPage.cs" />
     <Compile Include="src\PerSongSettings.cs" />
+    <Compile Include="src\PreciseTiming.cs" />
     <Compile Include="src\ReleaseNotesPanel.cs" />
     <Compile Include="src\PlayHistoryButton.cs" />
     <Compile Include="src\PlayHistoryUI.cs" />

@@ -20,6 +20,13 @@ namespace ExScoringMod
         private static readonly float TimingGraphWidth = 14f;
         private static readonly float TimingGraphHalfHeight = 1.5f;
 
+        // Debug "Show Native Timing Graph" (results screen only): a second timing graph built from
+        // native's frame-based timing, under its own context key so it never clobbers the main
+        // graph. Placed below the song timeline graph (the lowest one, at Y -20.5) - placeholder
+        // position, tune live in UnityExplorer.
+        private const string NativeTimingGraphContextSuffix = "_native";
+        private static readonly Vector3 NativeTimingGraphLocalPosition = new Vector3(-1.5f, -24.5f, -0.05f);
+
         // Ascending order matters — GetWorstTimingJudgementRangeMs relies on it to stop early.
         private static readonly Judgement[] TimingJudgementTiersAscending =
         {
@@ -217,12 +224,12 @@ namespace ExScoringMod
         /// in UnityExplorer. Returns the created GameObject (also cached under `context` for
         /// DestroyTimingGraph), or null if nothing was built.
         /// </summary>
-        public static GameObject CreateTimingGraph(string context, Transform parent, List<ExCue> exCues)
+        public static GameObject CreateTimingGraph(string context, Transform parent, List<ExCue> exCues, float rangeOverrideMs = -1f)
         {
             DestroyTimingGraph(context);
             if (parent == null || exCues == null) return null;
 
-            float rangeMs = GetWorstTimingJudgementRangeMs(exCues);
+            float rangeMs = rangeOverrideMs > 0f ? rangeOverrideMs : GetWorstTimingJudgementRangeMs(exCues);
             int binCount = Mathf.RoundToInt((rangeMs * 2f) / TimingGraphBinSizeMs) + 1;
 
             GameObject timingGraphObject = new GameObject("TimingGraph (Clone)");
@@ -355,11 +362,63 @@ namespace ExScoringMod
 
         public static void DestroyTimingGraph(string context)
         {
-            if (timingGraphObjects.TryGetValue(context, out GameObject existing) && existing != null)
+            DestroyTimingGraphEntry(context);
+            // The debug native-timing graph lives and dies with its main graph.
+            DestroyTimingGraphEntry(context + NativeTimingGraphContextSuffix);
+        }
+
+        private static void DestroyTimingGraphEntry(string key)
+        {
+            if (timingGraphObjects.TryGetValue(key, out GameObject existing) && existing != null)
             {
                 GameObject.Destroy(existing);
             }
-            timingGraphObjects.Remove(context);
+            timingGraphObjects.Remove(key);
+        }
+
+        /// <summary>
+        /// Copies of the run's cues with timingMs (and its judgement) replaced by native's
+        /// frame-based value, for the debug native-timing graph. Null when no cue carries a native
+        /// value (e.g. a run that wasn't played live this session).
+        /// </summary>
+        private static List<ExCue> BuildNativeTimingCues(List<ExCue> exCues)
+        {
+            if (exCues == null) return null;
+
+            bool any = false;
+            var copies = new List<ExCue>(exCues.Count);
+            foreach (var cue in exCues)
+            {
+                ExCue copy = cue.ShallowCopy();
+                if (cue.nativeTimingMs.HasValue)
+                {
+                    any = true;
+                    copy.timingMs = cue.nativeTimingMs.Value;
+                    copy.timingJudgement = GetTimingJudgement(copy.timingMs);
+                }
+                copies.Add(copy);
+            }
+            return any ? copies : null;
+        }
+
+        /// <summary>
+        /// Builds the debug native-timing graph (same look as the main timing graph, same ms
+        /// range as passed in) below the other graphs, with a title label. Returns null if
+        /// nothing was built.
+        /// </summary>
+        private static GameObject CreateNativeTimingGraph(string context, Transform parent, List<ExCue> nativeCues, float rangeMs)
+        {
+            GameObject go = CreateTimingGraph(context + NativeTimingGraphContextSuffix, parent, nativeCues, rangeMs);
+            if (go == null) return null;
+
+            go.name = "NativeTimingGraph (Clone)";
+            go.transform.localPosition = NativeTimingGraphLocalPosition;
+
+            CreateTimingLabel(go.transform, "NativeTimingGraphTitle",
+                new Vector3(-(TimingGraphWidth / 2f) - 0.5f, 0f, 0f), Color.white, TextAlignmentOptions.Right)
+                .text = "Native\n(frame)\ntiming";
+
+            return go;
         }
     }
 }

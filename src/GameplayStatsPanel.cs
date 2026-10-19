@@ -181,8 +181,24 @@ namespace ExScoringMod
         /// </summary>
         private static void BuildGameplayStatsContent(string context, Transform parent, List<ExCue> cuesToShow, float judgementPercent, bool failed, float scaleMultiplier = 1f, float yOffset = 0f)
         {
-            GameObject timingGraph = CreateTimingGraph(context, parent, cuesToShow);
+            // Debug: native frame-based timing graph, live results screen only (saved runs don't
+            // keep native timing). Both timing graphs share one ms range so their spread can be
+            // compared directly.
+            List<ExCue> nativeCues = context == ResultsStatsContext && Config.ShowNativeTimingGraph
+                ? BuildNativeTimingCues(cuesToShow)
+                : null;
+            float sharedTimingRangeMs = nativeCues != null
+                ? Mathf.Max(GetWorstTimingJudgementRangeMs(cuesToShow), GetWorstTimingJudgementRangeMs(nativeCues))
+                : -1f;
+
+            GameObject timingGraph = CreateTimingGraph(context, parent, cuesToShow, sharedTimingRangeMs);
             ApplyStatsPanelScaleAndOffset(timingGraph, scaleMultiplier, yOffset);
+
+            if (nativeCues != null)
+            {
+                GameObject nativeTimingGraph = CreateNativeTimingGraph(context, parent, nativeCues, sharedTimingRangeMs);
+                ApplyStatsPanelScaleAndOffset(nativeTimingGraph, scaleMultiplier, yOffset);
+            }
 
             GameObject aimGraph = CreateAimGraph(context, parent, cuesToShow);
             ApplyStatsPanelScaleAndOffset(aimGraph, scaleMultiplier, yOffset);

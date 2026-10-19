@@ -18,6 +18,7 @@ namespace ExScoringMod
         public static float sfxLevel;
         public static bool missFilter;
         public static float inputOffset;
+        public static bool preciseShotTiming;
         public static float videoOffset;
         public static float gunPitch;
         public static float gunRoll;
@@ -82,6 +83,7 @@ namespace ExScoringMod
         public static float searchKeyboardTilt;
         public static bool enableScoreUpload;
         public static bool debugLogs;
+        public static bool showNativeTimingGraph;
 
         public static void GetExScorePopupSize()
         {
@@ -317,6 +319,17 @@ namespace ExScoringMod
         {
             debugLogs = value;
             Config.UpdateDebugLogs(value);
+        }
+
+        public static void GetShowNativeTimingGraph()
+        {
+            showNativeTimingGraph = Config.ShowNativeTimingGraph;
+        }
+
+        public static void SetShowNativeTimingGraph(bool value)
+        {
+            showNativeTimingGraph = value;
+            Config.UpdateShowNativeTimingGraph(value);
         }
 
         /// <summary>Whether an API key is currently set (valid or not).</summary>
@@ -750,6 +763,17 @@ namespace ExScoringMod
         public static void SetInputOffset(float value)
         {
             PlayerPreferences.I.InputOffsetMs.Set(value);
+        }
+
+        public static void GetPreciseShotTiming()
+        {
+            preciseShotTiming = Config.PreciseShotTiming;
+        }
+
+        public static void SetPreciseShotTiming(bool value)
+        {
+            preciseShotTiming = value;
+            Config.UpdatePreciseShotTiming(value);
         }
 
         public static void GetWeaponSfxMode()

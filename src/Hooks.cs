@@ -1096,8 +1096,9 @@ namespace ExScoringMod
                         exCue.handType = cue.handType;
                         exCue.tick = cue.tick;
                         exCue.successTick = cue.successTick;
-                        exCue.timing = timing;
+                        exCue.timing = PreciseTiming.GetExTimingScore(cue, timing);
                         exCue.timingMs = timingMs;
+                        exCue.nativeTimingMs = GetNativeTimingMsFromCue(cue);
                         exCue.aim = aim;
                         exCue.contactPos = cue.target.GetContactPosition();
                         exCue.contactRotation = finalContactRotation;

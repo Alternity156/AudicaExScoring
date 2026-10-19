@@ -14,6 +14,10 @@ namespace ExScoringMod
             public float successTick;
             public float timing;
             public float timingMs;
+            // Native's frame-based timing (from successTick), captured alongside timingMs for the
+            // debug "Show Native Timing Graph" comparison on the live results screen. In-memory
+            // only - never saved to run data or uploaded.
+            public float? nativeTimingMs;
             public float aim;
             public TargetHitPos targetHitPos;
             public Vector3 contactPos;
@@ -31,6 +35,8 @@ namespace ExScoringMod
             public Judgement timingJudgement;
             public Judgement aimJudgement;
             public Judgement chainJudgement;
+
+            public ExCue ShallowCopy() => (ExCue)MemberwiseClone();
 
             public enum ScoringCalculation
             {

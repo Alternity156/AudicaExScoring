@@ -21,6 +21,8 @@ namespace ExScoringMod
 
         public static float TimingWindow;
 
+        public static bool PreciseShotTiming;
+
         public static bool DisableTemporalAimAssist;
         public static bool ForceHitSounds;
         public static bool DisableGunBeamRedirection;
@@ -102,6 +104,7 @@ namespace ExScoringMod
 
         public static string debugHeader = "[Header]Debug";
         public static bool DebugLogs;
+        public static bool ShowNativeTimingGraph;
 
         public static void RegisterConfig()
         {
@@ -121,6 +124,8 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(DisableMineSounds), false, "Disables mine sounds");
 
             MelonPrefs.RegisterFloat(Category, nameof(TimingWindow), 1f, "Sets the timing window [0,1,0.05,1] {P}");
+
+            MelonPrefs.RegisterBool(Category, nameof(PreciseShotTiming), true, "Times EX shots from the controller's own trigger timestamp and a smoothed song clock instead of the game frame");
 
             MelonPrefs.RegisterBool(Category, nameof(DisableTemporalAimAssist), false, "Disables temporal aim assist");
             MelonPrefs.RegisterBool(Category, nameof(ForceHitSounds), false, "Forces hit sounds on targets that have none");
@@ -191,6 +196,7 @@ namespace ExScoringMod
 
             MelonPrefs.RegisterString(Category, nameof(debugHeader), "", "[Header]Debug");
             MelonPrefs.RegisterBool(Category, nameof(DebugLogs), false, "Writes the mod's debug logs to the MelonLoader console/log file");
+            MelonPrefs.RegisterBool(Category, nameof(ShowNativeTimingGraph), false, "Shows a second timing graph on the results screen using the game's native frame-based timing, for comparison with Precise Shot Timing");
 
             OnModSettingsApplied();
         }
@@ -205,6 +211,7 @@ namespace ExScoringMod
             SafeSongListReload = MelonPrefs.GetBool(Category, nameof(SafeSongListReload));
             DisableMineSounds = MelonPrefs.GetBool(Category, nameof(DisableMineSounds));
             TimingWindow = MelonPrefs.GetFloat(Category, nameof(TimingWindow));
+            PreciseShotTiming = MelonPrefs.GetBool(Category, nameof(PreciseShotTiming));
             DisableTemporalAimAssist = MelonPrefs.GetBool(Category, nameof(DisableTemporalAimAssist));
             ForceHitSounds = MelonPrefs.GetBool(Category, nameof(ForceHitSounds));
             DisableGunBeamRedirection = MelonPrefs.GetBool(Category, nameof(DisableGunBeamRedirection));
@@ -258,12 +265,20 @@ namespace ExScoringMod
             TotalLeaderboardListId = MelonPrefs.GetString(Category, nameof(TotalLeaderboardListId));
 
             DebugLogs = MelonPrefs.GetBool(Category, nameof(DebugLogs));
+            ShowNativeTimingGraph = MelonPrefs.GetBool(Category, nameof(ShowNativeTimingGraph));
         }
 
         public static void UpdateDebugLogs(bool value)
         {
             MelonPrefs.SetBool(Category, nameof(DebugLogs), value);
             DebugLogs = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateShowNativeTimingGraph(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(ShowNativeTimingGraph), value);
+            ShowNativeTimingGraph = value;
             MelonPrefs.SaveConfig();
         }
 
@@ -642,6 +657,13 @@ namespace ExScoringMod
             if (value > 1f) value = 1f;
             MelonPrefs.SetFloat(Category, nameof(TimingWindow), value);
             TimingWindow = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdatePreciseShotTiming(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(PreciseShotTiming), value);
+            PreciseShotTiming = value;
             MelonPrefs.SaveConfig();
         }
 

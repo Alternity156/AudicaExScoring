@@ -57,6 +57,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetForceHitSounds();
                 OptionsMenuFunctions.GetInputOffset();
                 OptionsMenuFunctions.GetVideoOffset();
+                OptionsMenuFunctions.GetPreciseShotTiming();
                 OptionsMenuFunctions.GetGunPitch();
                 OptionsMenuFunctions.GetGunRoll();
                 OptionsMenuFunctions.GetGunYaw();
@@ -121,6 +122,12 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.videoOffset = v; OptionsMenuFunctions.SetVideoOffset(v); },
                     -200f, 200f, 1f, 0f, "N0");
                 OptionsMenuClone.AddRow(inputOffsetSlider, videoOffsetSlider);
+
+                var preciseShotTimingToggle = OptionsMenuClone.CreateToggle(0, "Precise Shot Timing",
+                    () => OptionsMenuFunctions.preciseShotTiming,
+                    v => { OptionsMenuFunctions.preciseShotTiming = v; OptionsMenuFunctions.SetPreciseShotTiming(v); },
+                    "Times EX shots from the controller's own trigger timestamp and a smoothed song clock instead of the game frame. Native score is unaffected.");
+                OptionsMenuClone.AddRow(preciseShotTimingToggle);
 
                 var gunCalibrationHeader = OptionsMenuClone.CreateHeader(0, "Gun Calibration");
                 OptionsMenuClone.AddRow(gunCalibrationHeader);
@@ -591,6 +598,7 @@ namespace ExScoringMod
             new OptionsCategory("opt_debug", "Debug", () =>
             {
                 OptionsMenuFunctions.GetDebugLogs();
+                OptionsMenuFunctions.GetShowNativeTimingGraph();
 
                 var header = OptionsMenuClone.CreateHeader(0, "Debug");
                 OptionsMenuClone.AddRow(header);
@@ -600,6 +608,12 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.debugLogs = v; OptionsMenuFunctions.SetDebugLogs(v); },
                     "Writes the mod's debug logs to the MelonLoader console/log file");
                 OptionsMenuClone.AddRow(debugLogsToggle);
+
+                var nativeTimingGraphToggle = OptionsMenuClone.CreateToggle(0, "Show Native Timing Graph",
+                    () => OptionsMenuFunctions.showNativeTimingGraph,
+                    v => { OptionsMenuFunctions.showNativeTimingGraph = v; OptionsMenuFunctions.SetShowNativeTimingGraph(v); },
+                    "Results screen only: adds a second timing graph below the others using the game's native frame-based timing, for comparison with Precise Shot Timing");
+                OptionsMenuClone.AddRow(nativeTimingGraphToggle);
             }),
         };
 

@@ -68,7 +68,19 @@ namespace ExScoringMod
             return (int)(rawScore * 100);
         }
 
+        /// <summary>
+        /// Timing offset in ms (positive = late) EX uses for a cue. With Precise Shot Timing on
+        /// (PreciseTiming.cs), this is the sub-frame estimate when one exists; otherwise it is
+        /// native's frame-based value from successTick.
+        /// </summary>
         public static float GetTimingMsFromCue(Cue cue)
+        {
+            if (PreciseTiming.TryGetTimingMs(cue, out float preciseMs)) return preciseMs;
+            return GetNativeTimingMsFromCue(cue);
+        }
+
+        /// <summary>Native's frame-based timing offset in ms, from cue.successTick.</summary>
+        public static float GetNativeTimingMsFromCue(Cue cue)
         {
             float startTick;
             float endTick;
