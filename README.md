@@ -37,6 +37,23 @@ This mod includes a massive overhaul of the song list where the launch page is n
 
 ![](songlist.png)
 
+## New Features
+It contains a lot of features such as
+- Song Cache
+- Multiplayer
+- Song downloads from Maudica directly from the song list
+- Song list search that includes local and Maudica songs
+- Data graphs when selecting a song
+- Able to view stats from previous runs, including from the leaderboards (EX scoring only)
+- Ability to switch the UI from classic Audica (conserving all new features but using classic scoring) and the new scoring system easily.
+- Online leaderboard on a [website](https://audicaex.org) for EX scoring linked to the game via an API key
+- Ability to use a link code for the audicaex website to make it easy for systems like the Steam Frame
+- New scoring system now uses controller polling rate instead of frame timing for more precision (disabled for classic audica)
+- Settings for specific songs that persist
+- Full song request support using [Silzoid's mod](https://github.com/Silzoid/SongRequest)
+- There is now an optional chain arrow visual for chains to make it easier to see which direction to trace
+- Possibly more stuff that I am not thinking about
+
 ## Options
 Settings are now integrated to the song list. There is a decent amount of customization available from the options menu.
 
