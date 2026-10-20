@@ -506,6 +506,22 @@ namespace ExScoringMod
         /// <summary>Root view dispatcher: Default folders, or generated letter folders.</summary>
         private static List<ViewRow> BuildRootView()
         {
+            List<ViewRow> rows = BuildSortedRootView();
+
+            // Online play: the lobby's "Suggested Songs" folder, pinned at the top while in a lobby.
+            try
+            {
+                LobbySongList.InsertInto(rows);
+            }
+            catch (Exception e)
+            {
+                DebugLog.Log("[FolderRowManager] Suggested Songs folder failed: " + e);
+            }
+            return rows;
+        }
+
+        private static List<ViewRow> BuildSortedRootView()
+        {
             switch (currentSort)
             {
                 case SortMode.AToZ: return BuildAlphaView(reversed: false);

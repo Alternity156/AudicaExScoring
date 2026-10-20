@@ -32,6 +32,8 @@ namespace ExScoringMod
         public int starDiff;      // star header: (int)KataConfig.Difficulty (gold uses Expert); ignored when starTier==0
         public int starTier;      // star header: 1..5 = N stars of starDiff, 6 = gold; 0 = pips only (no filled stars)
         public bool starHeader;   // true = render star icons (incl. pips-only); false = text title
+        public string titleOverride; // song: text shown instead of the song's own title (e.g. "Destiny (Suggested by Bob)")
+        public bool disabled;     // action/downloadable: shown but not shootable
 
         /// <summary>Default folder-header grey. Action rows override via their own color.</summary>
         public static readonly Color FolderColor = new Color(0.18f, 0.18f, 0.18f, 1f);
@@ -46,6 +48,14 @@ namespace ExScoringMod
 
         public static ViewRow SongRow(string id)
             => new ViewRow { kind = ViewRowKind.Song, songID = id };
+
+        /// <summary>A song row whose title line reads <paramref name="titleOverride"/> instead of the song's title.</summary>
+        public static ViewRow SongRow(string id, string titleOverride)
+            => new ViewRow { kind = ViewRowKind.Song, songID = id, titleOverride = titleOverride };
+
+        /// <summary>An action-style row that can't be shot (e.g. a song that can't be downloaded).</summary>
+        public static ViewRow DisabledRow(string label, Color color, string subLabel = null, string actionId = null)
+            => new ViewRow { kind = ViewRowKind.Action, label = label, color = color, subLabel = subLabel, actionId = actionId, disabled = true };
 
         public static ViewRow ActionRow(string label, Color color, Action onHit, string subLabel = null, string actionId = null)
             => new ViewRow { kind = ViewRowKind.Action, label = label, color = color, onHit = onHit, subLabel = subLabel, actionId = actionId };
@@ -329,6 +339,7 @@ namespace ExScoringMod
             public SongSelectItem ssi;
             public bool inUse;
             public string boundSong; // last song Init()'d, to skip redundant rebinds
+            public string appliedTitle; // title override currently shown on this item, or null
         }
 
         private sealed class HeaderPoolItem
@@ -896,11 +907,17 @@ namespace ExScoringMod
                 pi.go.transform.localRotation = Quaternion.identity;
                 pi.go.SetActive(true);
 
-                if (pi.boundSong != row.songID)
+                // Re-Init also when this item still shows another row's title override and this row
+                // doesn't want that same text (Init puts the song's own title back).
+                if (pi.boundSong != row.songID || (pi.appliedTitle != null && pi.appliedTitle != row.titleOverride))
                 {
                     if (pi.ssi != null) pi.ssi.Init(row.songID, songSelect);
                     pi.boundSong = row.songID;
+                    pi.appliedTitle = null;
                 }
+
+                if (row.titleOverride != null && pi.appliedTitle != row.titleOverride)
+                    ApplyTitleOverride(pi, row);
 
                 // SongSelectItem.Init registers the item into songSelect.mSongButtons. Since the
                 // game now builds an empty list and we own the display, keep our recycled pool
@@ -979,6 +996,7 @@ namespace ExScoringMod
                         int capturedIndex = physicalIndex - wrapBuffer; // exact, no modulo — identifies this specific copy
                         hi.button.onHitEvent = new UnityEvent();
                         hi.button.onHitEvent.AddListener(new Action(() => FolderToggleHandler?.Invoke(captured, capturedIndex)));
+                        hi.button.SetInteractable(true);
                     }
                 }
                 else // Action
@@ -988,9 +1006,11 @@ namespace ExScoringMod
 
                     if (hi.button != null)
                     {
-                        Action cb = row.onHit;
+                        Action cb = row.disabled ? null : row.onHit;
                         hi.button.onHitEvent = new UnityEvent();
                         hi.button.onHitEvent.AddListener(new Action(() => cb?.Invoke()));
+                        // Pooled: always set, so a disabled row's state never leaks to the next bind.
+                        hi.button.SetInteractable(!row.disabled);
                     }
                 }
 
@@ -998,6 +1018,33 @@ namespace ExScoringMod
                 rowBindings[physicalIndex] = new Binding { isHeader = true, slot = slot };
                 ApplyHeaderIndicator(hi, row);
             }
+        }
+
+        /// <summary>
+        /// Swaps the song item's title text for row.titleOverride. The item's title label is found
+        /// as the text currently showing the song's own title (set by SongSelectItem.Init).
+        /// </summary>
+        private static void ApplyTitleOverride(SongPoolItem pi, ViewRow row)
+        {
+            try
+            {
+                if (pi.ssi == null) return;
+                SongList.SongData data = SongList.I != null ? SongList.I.GetSong(row.songID) : null;
+                string title = data != null ? data.title : null;
+                if (string.IsNullOrEmpty(title)) return;
+
+                var texts = pi.go.GetComponentsInChildren<TextMeshProUGUI>(true);
+                for (int i = 0; i < texts.Length; i++)
+                {
+                    if (texts[i] != null && texts[i].text == title)
+                    {
+                        texts[i].text = row.titleOverride;
+                        pi.appliedTitle = row.titleOverride;
+                        return;
+                    }
+                }
+            }
+            catch (Exception e) { DebugLog.Log("[VList] ApplyTitleOverride failed: " + e.Message); }
         }
 
         // ── Selection indicators ───────────────────────────────────────────────

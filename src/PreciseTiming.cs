@@ -37,7 +37,8 @@ namespace ExScoringMod
     ///        threshold crossing is interpolated (step changes are placed mid-frame).
     ///
     /// The press is converted to song ms in Gun.UpdateTrigger (when it returns true) and linked to
-    /// the cue in Gun.Fire, deliberately not in Target.OnHit (see the wrong-hand note in Hooks.cs).
+    /// the cue when the game scores the hit (LinkPress, from GetScoreForCuePatch in Hooks.cs), not
+    /// in Gun.Fire (patching it breaks no-target shots) or Target.OnHit (see the wrong-hand note in Hooks.cs).
     /// Cues reached without a fresh trigger press (e.g. chain nodes) still get the smoothed clock
     /// for the frame their successTick was recorded, looked up by that exact tick value.
     /// </summary>
@@ -238,6 +239,48 @@ namespace ExScoringMod
             {
                 LogErrorOnce(ex);
                 return nativeTiming;
+            }
+        }
+
+        /// <summary>
+        /// Links this frame's trigger press to the cue the game is scoring right now. Called from
+        /// GetScoreForCuePatch.Prefix, which runs in the same frame as the shot (Gun.Update ->
+        /// UpdateTrigger, where the press was recorded -> Fire -> hit -> scoring), before anything
+        /// asks TryGetTimingMs for this cue.
+        ///
+        /// Only cues a trigger press scores are linked (chain nodes, melee and dodges are not), and
+        /// only when exactly one hand pressed this frame: with both, which press scored which cue is
+        /// ambiguous, so the cue falls back to the smoothed song clock like a chain node.
+        /// </summary>
+        public static void LinkPress(Cue cue)
+        {
+            if (!Config.PreciseShotTiming || cue == null || !clockValid) return;
+            if (pressScoringMsByCueIndex.ContainsKey(cue.index)) return;
+
+            if (cue.behavior != Target.TargetBehavior.Standard &&
+                cue.behavior != Target.TargetBehavior.Horizontal &&
+                cue.behavior != Target.TargetBehavior.Vertical &&
+                cue.behavior != Target.TargetBehavior.ChainStart &&
+                cue.behavior != Target.TargetBehavior.Hold)
+            {
+                return;
+            }
+
+            try
+            {
+                int frame = Time.frameCount;
+                bool left = hands[1].pressFrame == frame;
+                bool right = hands[2].pressFrame == frame;
+                if (left == right) return; // no press this frame, or both hands pressed
+
+                HandState state = hands[left ? 1 : 2];
+                pressScoringMsByCueIndex[cue.index] = state.pressScoringMs;
+                statFireLinks++;
+                if (state.pendingRecord != null) statPressRecordByCue[cue.index] = state.pendingRecord;
+            }
+            catch (Exception ex)
+            {
+                LogErrorOnce(ex);
             }
         }
 
@@ -747,34 +790,10 @@ namespace ExScoringMod
             }
         }
 
-        /// <summary>Links this frame's press to the cue being shot.</summary>
-        [HarmonyPatch(typeof(Gun), "Fire")]
-        private static class Gun_Fire_PreciseTiming
-        {
-            private static void Prefix(Gun __instance, Target target)
-            {
-                if (!Config.PreciseShotTiming || target == null) return;
-
-                try
-                {
-                    Cue cue = target.mCue;
-                    if (cue == null) return;
-
-                    int hand = (int)__instance.controller;
-                    if (hand != 1 && hand != 2) return;
-
-                    HandState state = hands[hand];
-                    if (state.pressFrame != Time.frameCount) return;
-
-                    pressScoringMsByCueIndex[cue.index] = state.pressScoringMs;
-                    statFireLinks++;
-                    if (state.pendingRecord != null) statPressRecordByCue[cue.index] = state.pendingRecord;
-                }
-                catch (Exception ex)
-                {
-                    LogErrorOnce(ex);
-                }
-            }
-        }
+        // No Gun.Fire patch: Fire(Target, Vector3, int, bool, bool, ShootableToy = null) is also where
+        // a shot that hits no target is resolved (the beam rebounding off the floor disc and menu
+        // glass, and the misfire health penalty). With a Harmony patch on it under MelonLoader
+        // 0.5.7 those stopped working even with an empty prefix (confirmed in game 2026-10-20), so
+        // the press is linked to its cue at scoring time instead (LinkPress, from Hooks.cs).
     }
 }

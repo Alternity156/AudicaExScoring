@@ -102,6 +102,9 @@ namespace ExScoringMod
         // whenever this is empty or names a list the server no longer has.
         public static string TotalLeaderboardListId;
 
+        public static string onlinePlayHeader = "[Header]Online Play";
+        public static bool EnableOnlinePlay;
+
         public static string debugHeader = "[Header]Debug";
         public static bool DebugLogs;
         public static bool ShowNativeTimingGraph;
@@ -194,6 +197,9 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(ScoreUploadUserConfigured), false, "");
             MelonPrefs.RegisterString(Category, nameof(TotalLeaderboardListId), "", "");
 
+            MelonPrefs.RegisterString(Category, nameof(onlinePlayHeader), "", "[Header]Online Play");
+            MelonPrefs.RegisterBool(Category, nameof(EnableOnlinePlay), false, "Allows connecting to online play lobbies. Nothing connects while this is off");
+
             MelonPrefs.RegisterString(Category, nameof(debugHeader), "", "[Header]Debug");
             MelonPrefs.RegisterBool(Category, nameof(DebugLogs), false, "Writes the mod's debug logs to the MelonLoader console/log file");
             MelonPrefs.RegisterBool(Category, nameof(ShowNativeTimingGraph), false, "Shows a second timing graph on the results screen using the game's native frame-based timing, for comparison with Precise Shot Timing");
@@ -264,8 +270,17 @@ namespace ExScoringMod
             ScoreUploadUserConfigured = MelonPrefs.GetBool(Category, nameof(ScoreUploadUserConfigured));
             TotalLeaderboardListId = MelonPrefs.GetString(Category, nameof(TotalLeaderboardListId));
 
+            EnableOnlinePlay = MelonPrefs.GetBool(Category, nameof(EnableOnlinePlay));
+
             DebugLogs = MelonPrefs.GetBool(Category, nameof(DebugLogs));
             ShowNativeTimingGraph = MelonPrefs.GetBool(Category, nameof(ShowNativeTimingGraph));
+        }
+
+        public static void UpdateEnableOnlinePlay(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(EnableOnlinePlay), value);
+            EnableOnlinePlay = value;
+            MelonPrefs.SaveConfig();
         }
 
         public static void UpdateDebugLogs(bool value)
@@ -328,6 +343,9 @@ namespace ExScoringMod
 
             // Keep the Main page's Audica Mode / EX Mode buttons in step (no-op if not created yet).
             ModeButtons.Refresh();
+
+            // Online play: the lobby shows each player's scoring mode.
+            MpGameplay.OnScoringTypeChanged(ex);
         }
 
         public static void UpdateHideScoreData(bool value)

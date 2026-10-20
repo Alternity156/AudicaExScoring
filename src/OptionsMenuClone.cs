@@ -325,31 +325,77 @@ namespace ExScoringMod
 
         public static void Wipe()
         {
-            if (Menu == null) return;
-            Transform t = Menu.transform;
+            WipeMenu(Menu);
+        }
+
+        /// <summary>Wipe() for any OptionsMenu this mod draws on (the song-page clone or another one).</summary>
+        public static void WipeMenu(OptionsMenu menu)
+        {
+            if (menu == null) return;
+            Transform t = menu.transform;
             for (int i = t.childCount - 1; i >= 0; i--)
             {
                 Transform child = t.GetChild(i);
                 if (child.gameObject.name.Contains("(Clone)"))
                     GameObject.DestroyImmediate(child.gameObject); // Destroy is end-of-frame; DestroyImmediate clears them now
             }
-            Menu.mRows.Clear();
-            Menu.scrollable.ClearRows();
-            Menu.scrollable.mRows.Clear();
-            Menu.scrollable.mIndex = 0;
-            Menu.scrollable.destroyChildren = true;
+            menu.mRows.Clear();
+            menu.scrollable.ClearRows();
+            menu.scrollable.mRows.Clear();
+            menu.scrollable.mIndex = 0;
+            menu.scrollable.destroyChildren = true;
+        }
+
+        // ── Drawing on another OptionsMenu ──
+        // The Create*/Add* helpers below build on Target: the song-page clone (Menu) normally, or,
+        // for the duration of a DrawOn call, another OptionsMenu (e.g. the Main page's Online Play
+        // screen, OnlinePlayScreen.cs), with its buttons tied to that menu's own ShellPage.
+        private static OptionsMenu drawTarget;
+        private static ShellPage drawTargetShellPage;
+        private static OptionsMenu Target => drawTarget ?? Menu;
+        private static ShellPage TargetShellPage => drawTarget != null ? drawTargetShellPage : SongShellPage;
+
+        /// <summary>
+        /// Draw() for another OptionsMenu: blank custom page, title, then build's rows. The menu
+        /// must be one the OptionsMenu.ShowPage patch (Hooks.cs) lets through only while
+        /// allowShowPage is set, so the game never swaps its content for a native page.
+        /// </summary>
+        public static void DrawOn(OptionsMenu menu, ShellPage shellPage, string title, Action build)
+        {
+            if (menu == null) return;
+
+            OptionsMenu previousTarget = drawTarget;
+            ShellPage previousShellPage = drawTargetShellPage;
+            drawTarget = menu;
+            drawTargetShellPage = shellPage;
+            try
+            {
+                allowShowPage = true;
+                menu.ShowPage(OptionsMenu.Page.Customization);
+                allowShowPage = false;
+                WipeMenu(menu);
+                if (menu.screenTitle != null) menu.screenTitle.text = title ?? "";
+                build?.Invoke();
+                menu.scrollable.SnapTo(0, true);
+            }
+            finally
+            {
+                allowShowPage = false;
+                drawTarget = previousTarget;
+                drawTargetShellPage = previousShellPage;
+            }
         }
 
         // ── Create-only (returns the control's GameObject, does NOT add a row) ──
 
         public static GameObject CreateHeader(int col, string text)
         {
-            return Menu.AddHeader(col, text);
+            return Target.AddHeader(col, text);
         }
 
         public static GameObject CreateToggle(int col, string label, Func<bool> get, Action<bool> set, string hover = null)
         {
-            var omb = Menu.AddButton(col, label,
+            var omb = Target.AddButton(col, label,
                 new Action(() => { set(!get()); }),
                 new Func<bool>(() => get()),
                 hover ?? label);
@@ -357,7 +403,7 @@ namespace ExScoringMod
             var gb = omb.button;
             if (gb != null)
             {
-                if (SongShellPage != null) gb.mShellPage = SongShellPage;
+                if (TargetShellPage != null) gb.mShellPage = TargetShellPage;
                 gb.SetInteractable(true);
             }
 
@@ -372,21 +418,22 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// A plain, momentary action button — click and it just runs onClick, no persisted
-        /// on/off state (isOn is always false, so it never shows a checked/toggled visual).
-        /// Same underlying Menu.AddButton as CreateToggle, minus the flip-to-opposite logic.
+        /// A plain, momentary action button — click and it just runs onClick. No on/off state and
+        /// no checkbox square (null isChecked). Same underlying Target.AddButton as CreateToggle.
         /// </summary>
         public static GameObject CreateButton(int col, string label, Action onClick, string hover = null)
         {
-            var omb = Menu.AddButton(col, label,
+            // A null isChecked makes OptionsMenu build a plain button, with no checkbox square
+            // (same as the Mod Settings mod's category buttons). Toggles use CreateToggle.
+            var omb = Target.AddButton(col, label,
                 new Action(onClick),
-                new Func<bool>(() => false),
+                (OptionsMenuButton.IsCheckedDelegate)null,
                 hover ?? label);
 
             var gb = omb.button;
             if (gb != null)
             {
-                if (SongShellPage != null) gb.mShellPage = SongShellPage;
+                if (TargetShellPage != null) gb.mShellPage = TargetShellPage;
                 gb.SetInteractable(true);
             }
 
@@ -404,7 +451,7 @@ namespace ExScoringMod
                                               float min, float max, float step, float def,
                                               string format = "N0", string hover = null)
         {
-            var sl = Menu.AddSlider(col, label, format,
+            var sl = Target.AddSlider(col, label, format,
                 new Action<float>((amount) =>
                 {
                     float v = get() + amount * step;
@@ -422,7 +469,7 @@ namespace ExScoringMod
                                               float min, float max, float step, float def,
                                               Func<float, string> displayFormatter, string hover = null)
         {
-            var sl = Menu.AddSlider(col, label, "N0",
+            var sl = Target.AddSlider(col, label, "N0",
                 new Action<float>((amount) =>
                 {
                     float v = get() + amount * step;
@@ -440,7 +487,7 @@ namespace ExScoringMod
                                              Func<int> get, Action<int> set, int def = 0, string hover = null)
         {
             int n = options != null ? options.Length : 0;
-            var sl = Menu.AddSlider(col, label, "0",
+            var sl = Target.AddSlider(col, label, "0",
                 new Action<float>((amount) =>
                 {
                     if (n == 0) return;
@@ -464,7 +511,7 @@ namespace ExScoringMod
                                           float min, float max, float step, float def,
                                           string format = "N0", string hover = null)
         {
-            var sl = Menu.AddSlider(0, label, format,
+            var sl = Target.AddSlider(0, label, format,
                 new Action<float>((amount) =>
                 {
                     float v = get() + amount * step;
@@ -521,7 +568,7 @@ namespace ExScoringMod
 
         public static void AddRow(GameObject single)
         {
-            Menu.scrollable.AddRow(single);
+            Target.scrollable.AddRow(single);
         }
 
         public static void AddRow(GameObject left, GameObject right)
@@ -529,7 +576,7 @@ namespace ExScoringMod
             var list = new Il2CppSystem.Collections.Generic.List<GameObject>();
             list.Add(left);
             if (right != null) list.Add(right);
-            Menu.scrollable.AddRow(list);
+            Target.scrollable.AddRow(list);
         }
 
         // ── Single-row convenience (unchanged signatures) ──

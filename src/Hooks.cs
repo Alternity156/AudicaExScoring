@@ -24,8 +24,15 @@ namespace ExScoringMod
             // AuthorableModifiers is fully reset when a song ends (see AuthorableBridge), so a
             // restart from the results/failed screen has to reload its modifiers. No-op when
             // AuthorableModifiers isn't installed or nothing needs reloading.
-            public static void Prefix()
+            // Set when online play blocked this restart, so the Postfix (which Harmony still
+            // runs) doesn't reset the run that keeps going.
+            private static bool restartBlocked;
+
+            public static bool Prefix()
             {
+                restartBlocked = MpGameplay.ShouldBlockRestart();
+                if (restartBlocked) return false;
+
                 AuthorableBridge.OnInGameRestart();
 
                 // Re-apply per-song settings for the song being restarted. Covers restarts from
@@ -35,12 +42,20 @@ namespace ExScoringMod
                 // ready, then un-fades to the per-song level itself (PlaylistEndlessManager).
                 if (!launchedOutsideSongFlow)
                     PerSongSettings.ApplyForCurrentSong(PlaylistEndlessManager.VolumeFadedOut);
+
+                return true;
             }
 
             public static void Postfix(
                 InGameUI __instance
                 )
             {
+                if (restartBlocked)
+                {
+                    restartBlocked = false;
+                    return;
+                }
+
                 ResetExScore();
                 exTypePurple = false;
                 exTypePurpleLastFrame = false;
@@ -52,6 +67,10 @@ namespace ExScoringMod
         {
             public static bool Prefix(LaunchPanel __instance)
             {
+                // Online lobby: Play is Select / Unselect / host Play (LobbyLaunchButton). A match
+                // launch itself still comes through here and is let through.
+                if (LobbyLaunchButton.InterceptPlay()) return false;
+
                 suppressShellPageAnimations = false;
 
                 // Playing anything (a song, or a marathon) makes the Latest Maudica folder
@@ -103,6 +122,17 @@ namespace ExScoringMod
                 )
             {
                 DebugLog.Log($"SetState: {menuState} -> {state}");
+
+                // Online play: location, and quitSong when leaving a match song early.
+                try
+                {
+                    MpGameplay.OnMenuStateChanged(menuState, state);
+                    OnlinePlayScreen.OnMenuStateChanged(state);
+                }
+                catch (Exception e)
+                {
+                    DebugLog.Log("[MpGame] OnMenuStateChanged failed: " + e);
+                }
 
                 // Clears anything AuthorableModifiers still holds once we're really out of
                 // gameplay / the song page (ExScoring has no launch page, so AM's own
@@ -557,6 +587,9 @@ namespace ExScoringMod
 
                 // Folder rows have no song data — ignore them
                 if (__instance.mSongData == null) return;
+
+                // Online play: the song the player is looking at.
+                MpGameplay.OnSongBrowsed(__instance.mSongData);
 
                 // Picking a song exits marathon setup and restores the launch panel.
                 MarathonSetup.CancelIfActive();
@@ -1017,6 +1050,10 @@ namespace ExScoringMod
                 ref float extra
                 )
             {
+                // Precise timing: link this frame's trigger press to the cue being scored, before
+                // anything below (or the Postfix) asks for its timing. Replaces the Gun.Fire patch.
+                if (menuState == MenuState.State.Launched) PreciseTiming.LinkPress(cue);
+
                 if (Config.LinearCalculation && menuState == MenuState.State.Launched)
                 {
                     timing = GetLinearTimingScore(GetTimingMsFromCue(cue));
@@ -1670,9 +1707,9 @@ namespace ExScoringMod
                 shouldShowKeyboard = false;
                 settingsButtonCount = 0;
 
-                if (OptionsMenuClone.Menu != null &&
-                    __instance.Pointer == OptionsMenuClone.Menu.Pointer &&
-                    !OptionsMenuClone.allowShowPage)
+                bool ourMenu = (OptionsMenuClone.Menu != null && __instance.Pointer == OptionsMenuClone.Menu.Pointer)
+                               || OnlinePlayScreen.IsScreenMenu(__instance);
+                if (ourMenu && !OptionsMenuClone.allowShowPage)
                 {
                     DebugLog.Log($"[ShowPage CLONE] BLOCKED page={page}");
                     return false;
@@ -1742,6 +1779,15 @@ namespace ExScoringMod
                             default: PlaylistNav.AppendCreateName(label); break;
                         }
                     }
+                    else if (OnlinePlayMenu.EnteringCode)
+                    {
+                        switch (label)
+                        {
+                            case "done": OnlinePlayMenu.FinishCodeEntry(); break;
+                            case "clear": OnlinePlayMenu.ClearCode(); break;
+                            default: OnlinePlayMenu.AppendCode(label); break;
+                        }
+                    }
                     else
                     {
                         return true;
@@ -1774,6 +1820,10 @@ namespace ExScoringMod
                     {
                         PlaylistNav.BackspaceCreateName();
                     }
+                    else if (OnlinePlayMenu.EnteringCode)
+                    {
+                        OnlinePlayMenu.BackspaceCode();
+                    }
                     else
                     {
                         return true;
@@ -1802,6 +1852,10 @@ namespace ExScoringMod
                     else if (PlaylistNav.Creating)
                     {
                         PlaylistNav.AppendCreateName(" ");
+                    }
+                    else if (OnlinePlayMenu.EnteringCode)
+                    {
+                        // Lobby codes have no spaces.
                     }
                     else
                     {
@@ -2019,8 +2073,15 @@ namespace ExScoringMod
         [HarmonyPatch(typeof(InGameUI), "SetState", new Type[] { typeof(InGameUI.State), typeof(bool) })]
         private static class InGameUISetStatePatch
         {
+            // Set when online play refused a pause, so the Postfix (which Harmony still runs)
+            // doesn't count a pause or add pause-page buttons for a page that never opened.
+            private static bool pauseBlocked;
+
             private static bool Prefix(InGameUI __instance, InGameUI.State state, bool instant)
             {
+                pauseBlocked = state == InGameUI.State.PausePage && MpGameplay.ShouldBlockPausePage();
+                if (pauseBlocked) return false;
+
                 if (PlaylistManager.state == PlaylistManager.PlaylistState.Endless)
                 {
                     if (state == InGameUI.State.ResultsPage)
@@ -2034,6 +2095,12 @@ namespace ExScoringMod
 
             private static void Postfix(InGameUI __instance, InGameUI.State state, bool instant)
             {
+                if (pauseBlocked)
+                {
+                    pauseBlocked = false;
+                    return;
+                }
+
                 if (state == InGameUI.State.FailedPage)
                 {
                     CreateDeleteButton(ButtonUtils.ButtonLocation.Failed);

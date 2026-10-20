@@ -27,11 +27,7 @@ namespace ExScoringMod
         /// </summary>
         public static void SubmitRun(bool failed)
         {
-            if (!Config.EnableScoreUpload) return;
-            if (failed) return;
-            if (string.IsNullOrEmpty(Config.ApiKey)) return;
-            if (exCues.Count == 0) return;
-            if (selectedSongData == null) return;
+            if (!WillSubmitRun(failed)) return;
 
             try
             {
@@ -66,6 +62,27 @@ namespace ExScoringMod
             {
                 DebugLog.Log($"[ExScoring] Failed to prepare run submission: {ex}");
             }
+        }
+
+        /// <summary>
+        /// Whether SubmitRun would upload the current run. Also used by online play
+        /// (MpGameplay) to decide whether "finished" carries this run's clientRunId.
+        /// A run that failed during an online match never uploads, even though no-fail
+        /// made the game treat it as completed (ApiContract.md Section 19.5).
+        /// </summary>
+        internal static bool WillSubmitRun(bool failed)
+        {
+            if (!Config.EnableScoreUpload) return false;
+            if (failed) return false;
+            if (string.IsNullOrEmpty(Config.ApiKey)) return false;
+            if (exCues.Count == 0) return false;
+            if (selectedSongData == null) return false;
+            if (MpGameplay.ShouldSuppressUpload(currentRunId))
+            {
+                DebugLog.Log($"[ExScoring] Not uploading run {currentRunId}: it failed during an online match.");
+                return false;
+            }
+            return true;
         }
 
         private static byte[] GzipCompress(string text)

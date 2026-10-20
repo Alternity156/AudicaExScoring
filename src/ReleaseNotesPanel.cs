@@ -29,6 +29,9 @@ namespace ExScoringMod
             // the early returns further down must not skip them.
             ModeButtons.Setup();
 
+            // Online Play in place of Tutorial (OnlinePlayButton.cs).
+            OnlinePlayButton.Setup();
+
             GameObject left = GameObject.Find("menu/ShellPage_Main/page/ShellPanel_Left");
             if (left == null)
             {

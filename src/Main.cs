@@ -97,6 +97,9 @@ namespace ExScoringMod
         {
             Config.RegisterConfig();
             PlaylistConfig.RegisterConfig();
+            MpGameplay.Init();
+            OnlinePlayMenu.Init();
+            LobbySongList.Init();
 
             // Check if AuthorableModifiers is installed
             if (MelonHandler.Mods.Any(it => it.Assembly.GetName().Name == "AuthorableModifiers"))
@@ -329,6 +332,7 @@ namespace ExScoringMod
 
         public override void OnApplicationQuit()
         {
+            MpSession.Shutdown();
             CleanDeletedSongs();
         }
 
@@ -491,6 +495,10 @@ namespace ExScoringMod
 
             TrippyMenu.Tick();
             TickGradeVisualAnimation();
+            MpSession.Tick();
+            MpGameplay.Tick();
+            LobbyPanel.Tick();
+            LobbyLaunchButton.Tick();
             FolderRowManager.TickSortLabels();
         }
 

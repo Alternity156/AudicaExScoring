@@ -561,6 +561,10 @@ namespace ExScoringMod
                 OptionsMenuClone.AddRow(enableUploadToggle, apiKeyButton);
             }),
 
+            // Online play settings (OnlinePlayMenu.cs). The lobby menu itself is only on the Main
+            // page (OnlinePlayScreen), not here.
+            new OptionsCategory(OnlinePlayMenu.SettingsCategoryId, "Multiplayer", OnlinePlayMenu.BuildSettings),
+
             new OptionsCategory("opt_scoring", "Scoring", () =>
             {
                 var scoringTypeCycle = OptionsMenuClone.CreateCycle(0, "Scoring Type", OptionsMenuFunctions.ScoringTypeOptions,

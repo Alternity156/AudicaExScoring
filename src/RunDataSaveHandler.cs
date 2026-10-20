@@ -109,7 +109,7 @@ namespace ExScoringMod
         /// for leaderboards/achievements/DLC) and maps it to a plain string for save data / API
         /// use. Wrapped in its own try/catch so an interop hiccup here never costs the run save.
         /// </summary>
-        private static string GetPlatformString()
+        internal static string GetPlatformString()
         {
             try
             {
