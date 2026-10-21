@@ -36,9 +36,18 @@ namespace ExScoringMod
     ///      - Oculus: no input timestamps exist, so samples are timestamped per frame and the
     ///        threshold crossing is interpolated (step changes are placed mid-frame).
     ///
-    /// The press is converted to song ms in Gun.UpdateTrigger (when it returns true) and linked to
-    /// the cue when the game scores the hit (LinkPress, from GetScoreForCuePatch in Hooks.cs), not
-    /// in Gun.Fire (patching it breaks no-target shots) or Target.OnHit (see the wrong-hand note in Hooks.cs).
+    /// The press is converted to song ms in Gun.UpdateTrigger (when it returns true), bound to the
+    /// cue the pressing gun actually aimed at (BindShot, from the Gun.FindBestIntersection patch in
+    /// Hooks.cs, same frame as the shot) and linked when the game scores the cue (LinkPress, from
+    /// GetScoreForCuePatch in Hooks.cs). Not in Gun.Fire (patching it breaks no-target shots) or
+    /// Target.OnHit (see the wrong-hand note in Hooks.cs).
+    ///
+    /// Scoring is not always on the shot frame: a Hold is scored when it completes, seconds after
+    /// the grab. Linking "whichever hand pressed this frame" at scoring time used to give a Hold the
+    /// OTHER hand's press when it pressed on the completion frame, reading late by the hold length
+    /// and clamped to +100 ms (seen in logs 2026-10-20: precise 1370/2790 ms vs native ~0). So a press
+    /// is only ever linked to a cue whose successTick is the scoring tick of that press's frame.
+    ///
     /// Cues reached without a fresh trigger press (e.g. chain nodes) still get the smoothed clock
     /// for the frame their successTick was recorded, looked up by that exact tick value.
     /// </summary>
@@ -81,7 +90,16 @@ namespace ExScoringMod
 
             public int pressFrame = -1;
             public double pressScoringMs;
+            public float pressScoringTick = float.NaN; // GetTick(Scoring) of the press frame
             public PressRecord pendingRecord;
+        }
+
+        /// <summary>A press bound to the cue its gun aimed at on the shot frame (BindShot).</summary>
+        private class BoundPress
+        {
+            public double scoringMs;
+            public float scoringTick; // must equal cue.successTick for the link to be valid
+            public PressRecord record;
         }
 
         /// <summary>Debug details of one registered press, for the end-of-song outlier lines.</summary>
@@ -103,6 +121,12 @@ namespace ExScoringMod
         private const double MaxPressSampleAgeMs = 100.0;
 
         private static readonly Dictionary<int, double> pressScoringMsByCueIndex = new Dictionary<int, double>();
+        private static readonly Dictionary<int, BoundPress> boundPressByCueIndex = new Dictionary<int, BoundPress>();
+
+        // GetTick(Scoring) cached by UpdateClock for the current frame (successTick of any cue hit
+        // this frame equals it exactly).
+        private static float currentScoringTick = float.NaN;
+        private static int currentScoringTickFrame = -1;
 
         private static bool loggedError;
         private static bool loggedScoreMismatch;
@@ -119,6 +143,9 @@ namespace ExScoringMod
         private static int statPressesRuntimeTimed;
         private static double statPressLeadSumMs; // frame time - estimated press time, summed
         private static int statFireLinks;
+        private static int statBoundLinks;          // linked through the shooting gun (BindShot)
+        private static int statFrameLinks;          // linked through the same-frame single-hand fallback
+        private static int statStaleLinksRejected;  // a press existed this frame but the cue wasn't hit this frame (e.g. Hold completion)
         private static int statScoreRecomputed;
         private static int statScoreMismatches;
         private static readonly HashSet<int> statPressTimedCues = new HashSet<int>();
@@ -143,6 +170,8 @@ namespace ExScoringMod
         private static readonly Dictionary<int, PressRecord> statPressRecordByCue = new Dictionary<int, PressRecord>();
         private static readonly Dictionary<int, KeyValuePair<float, float>> statPreciseNativeByCue = new Dictionary<int, KeyValuePair<float, float>>();
         private static readonly Dictionary<int, int> statHandByCue = new Dictionary<int, int>();
+        private static readonly Dictionary<int, Target.TargetBehavior> statBehaviorByCue = new Dictionary<int, Target.TargetBehavior>();
+        private static readonly Dictionary<int, string> statLinkSourceByCue = new Dictionary<int, string>();
 
         // ── Public API ──
 
@@ -175,8 +204,10 @@ namespace ExScoringMod
             timingMs = Mathf.Clamp(rawMs, -window, window);
             if (timingMs != rawMs && statClampedCues.Add(cue.index))
             {
-                DebugLog.Log($"[PreciseTiming] Cue {cue.index} clamped to Good window: precise {rawMs:0.00} ms -> {timingMs:0.00} ms " +
-                             $"(native {ExScoring.GetNativeTimingMsFromCue(cue):0.00} ms).");
+                statLinkSourceByCue.TryGetValue(cue.index, out string source);
+                DebugLog.Log($"[PreciseTiming] Cue {cue.index} ({cue.behavior}, handType {(int)cue.handType}) clamped to Good window: " +
+                             $"precise {rawMs:0.00} ms -> {timingMs:0.00} ms (native {ExScoring.GetNativeTimingMsFromCue(cue):0.00} ms, " +
+                             $"{(pressTimed ? "press via " + (source ?? "?") : "clock-only")}).");
             }
 
             if (pressTimed) statPressTimedCues.Add(cue.index);
@@ -187,6 +218,7 @@ namespace ExScoringMod
                 statDiffByCue[cue.index] = timingMs - nativeMs;
                 statPreciseNativeByCue[cue.index] = new KeyValuePair<float, float>(timingMs, nativeMs);
                 statHandByCue[cue.index] = (int)cue.handType;
+                statBehaviorByCue[cue.index] = cue.behavior;
             }
 
             return true;
@@ -242,40 +274,108 @@ namespace ExScoringMod
             }
         }
 
+        private static bool IsPressScoredBehavior(Target.TargetBehavior behavior)
+        {
+            return behavior == Target.TargetBehavior.Standard ||
+                   behavior == Target.TargetBehavior.Horizontal ||
+                   behavior == Target.TargetBehavior.Vertical ||
+                   behavior == Target.TargetBehavior.ChainStart ||
+                   behavior == Target.TargetBehavior.Hold;
+        }
+
         /// <summary>
-        /// Links this frame's trigger press to the cue the game is scoring right now. Called from
-        /// GetScoreForCuePatch.Prefix, which runs in the same frame as the shot (Gun.Update ->
-        /// UpdateTrigger, where the press was recorded -> Fire -> hit -> scoring), before anything
-        /// asks TryGetTimingMs for this cue.
+        /// Binds this frame's press of the given gun to the target it is aiming at. Called from the
+        /// Gun.FindBestIntersection patch (Hooks.cs) when it finds an intersection - the shooting gun
+        /// and its target, on the shot frame. Only binds if THIS gun pressed this frame, so it never
+        /// takes the other hand's press, and works when both hands press in the same frame.
         ///
-        /// Only cues a trigger press scores are linked (chain nodes, melee and dodges are not), and
-        /// only when exactly one hand pressed this frame: with both, which press scored which cue is
-        /// ambiguous, so the cue falls back to the smoothed song clock like a chain node.
+        /// FindBestIntersection may also test targets that end up not being hit; their binding is
+        /// harmless, since LinkPress only accepts it if the cue's successTick is the press frame's
+        /// tick, and a later press on the same cue overwrites it.
+        /// </summary>
+        public static void BindShot(Gun gun, Target target)
+        {
+            if (!Config.PreciseShotTiming || !clockValid || gun == null || target == null) return;
+
+            try
+            {
+                Cue cue = target.mCue;
+                if (cue == null || !IsPressScoredBehavior(cue.behavior)) return;
+
+                int hand = (int)gun.controller;
+                if (hand != 1 && hand != 2) return;
+
+                HandState state = hands[hand];
+                if (state.pressFrame != Time.frameCount || float.IsNaN(state.pressScoringTick)) return;
+
+                boundPressByCueIndex[cue.index] = new BoundPress
+                {
+                    scoringMs = state.pressScoringMs,
+                    scoringTick = state.pressScoringTick,
+                    record = state.pendingRecord,
+                };
+            }
+            catch (Exception ex)
+            {
+                LogErrorOnce(ex);
+            }
+        }
+
+        /// <summary>
+        /// Links a trigger press to the cue the game is scoring right now. Called from
+        /// GetScoreForCuePatch.Prefix, before anything asks TryGetTimingMs for this cue.
+        ///
+        /// A press is only accepted if the cue was hit on that press's frame (cue.successTick equals
+        /// the frame's scoring tick). That matters for Holds, which are scored at completion: the
+        /// press that grabbed them is used (bound in BindShot), never a press that merely happened
+        /// on the completion frame.
+        ///  1. Bound press (BindShot): the gun that aimed at this cue on its shot frame.
+        ///  2. Fallback, if nothing was bound: the cue was hit THIS frame and exactly one hand pressed
+        ///     this frame (with both, which press scored which cue is ambiguous).
+        ///  Otherwise the cue uses the smoothed song clock at its successTick, like a chain node.
+        ///
+        /// Only cues a trigger press scores are linked (chain nodes, melee and dodges are not).
         /// </summary>
         public static void LinkPress(Cue cue)
         {
             if (!Config.PreciseShotTiming || cue == null || !clockValid) return;
             if (pressScoringMsByCueIndex.ContainsKey(cue.index)) return;
-
-            if (cue.behavior != Target.TargetBehavior.Standard &&
-                cue.behavior != Target.TargetBehavior.Horizontal &&
-                cue.behavior != Target.TargetBehavior.Vertical &&
-                cue.behavior != Target.TargetBehavior.ChainStart &&
-                cue.behavior != Target.TargetBehavior.Hold)
-            {
-                return;
-            }
+            if (!IsPressScoredBehavior(cue.behavior)) return;
 
             try
             {
+                if (boundPressByCueIndex.TryGetValue(cue.index, out BoundPress bound))
+                {
+                    boundPressByCueIndex.Remove(cue.index);
+                    if (bound.scoringTick == cue.successTick)
+                    {
+                        pressScoringMsByCueIndex[cue.index] = bound.scoringMs;
+                        statFireLinks++;
+                        statBoundLinks++;
+                        statLinkSourceByCue[cue.index] = "shooting gun";
+                        if (bound.record != null) statPressRecordByCue[cue.index] = bound.record;
+                        return;
+                    }
+                }
+
                 int frame = Time.frameCount;
                 bool left = hands[1].pressFrame == frame;
                 bool right = hands[2].pressFrame == frame;
                 if (left == right) return; // no press this frame, or both hands pressed
 
+                if (currentScoringTickFrame != frame || cue.successTick != currentScoringTick)
+                {
+                    // A press happened this frame, but this cue was hit on an earlier frame
+                    // (e.g. a Hold completing while the other hand shoots).
+                    statStaleLinksRejected++;
+                    return;
+                }
+
                 HandState state = hands[left ? 1 : 2];
                 pressScoringMsByCueIndex[cue.index] = state.pressScoringMs;
                 statFireLinks++;
+                statFrameLinks++;
+                statLinkSourceByCue[cue.index] = "same-frame fallback";
                 if (state.pendingRecord != null) statPressRecordByCue[cue.index] = state.pendingRecord;
             }
             catch (Exception ex)
@@ -299,6 +399,9 @@ namespace ExScoringMod
             smoothedScoringMsByTick.Clear();
             tickHistory.Clear();
             pressScoringMsByCueIndex.Clear();
+            boundPressByCueIndex.Clear();
+            currentScoringTick = float.NaN;
+            currentScoringTickFrame = -1;
             for (int i = 0; i < hands.Length; i++) hands[i] = new HandState();
 
             statClockFrames = 0;
@@ -311,6 +414,9 @@ namespace ExScoringMod
             statPressesRuntimeTimed = 0;
             statPressLeadSumMs = 0;
             statFireLinks = 0;
+            statBoundLinks = 0;
+            statFrameLinks = 0;
+            statStaleLinksRejected = 0;
             statScoreRecomputed = 0;
             statScoreMismatches = 0;
             statPressTimedCues.Clear();
@@ -332,6 +438,8 @@ namespace ExScoringMod
             statPressRecordByCue.Clear();
             statPreciseNativeByCue.Clear();
             statHandByCue.Clear();
+            statBehaviorByCue.Clear();
+            statLinkSourceByCue.Clear();
         }
 
         /// <summary>One debug log line per song summarizing what Precise Shot Timing did.</summary>
@@ -365,7 +473,8 @@ namespace ExScoringMod
                 $"trigger polls L {statSamplePolls[1]} R {statSamplePolls[2]}, changes L {statSampleChanges[1]} R {statSampleChanges[2]} | " +
                 $"presses {statPresses} ({statPressesRuntimeTimed} runtime-timed, " +
                 $"{statPresses - statPressesRuntimeTimed - statPressesFrameTimed} interpolated, {statPressesFrameTimed} frame-timed fallback, " +
-                $"avg {(statPresses > 0 ? statPressLeadSumMs / statPresses : 0):0.00} ms before frame), linked to cues {statFireLinks} | " +
+                $"avg {(statPresses > 0 ? statPressLeadSumMs / statPresses : 0):0.00} ms before frame), linked to cues {statFireLinks} " +
+                $"({statBoundLinks} via shooting gun, {statFrameLinks} via same-frame fallback, {statStaleLinksRejected} stale presses rejected) | " +
                 $"cues: {statPressTimedCues.Count} press-timed, {statClockOnlyCues.Count} clock-only, {nativeOnly} native | " +
                 $"EX timing score: {statScoreRecomputed} recomputed, {statScoreMismatches} kept native (mismatch) | " +
                 $"clamped to Good window: {statClampedCues.Count} | " +
@@ -437,10 +546,13 @@ namespace ExScoringMod
 
                 statPreciseNativeByCue.TryGetValue(kv.Key, out var pn);
                 statHandByCue.TryGetValue(kv.Key, out int handType);
+                string behavior = statBehaviorByCue.TryGetValue(kv.Key, out Target.TargetBehavior beh) ? beh.ToString() : "?";
                 string detail;
                 if (statPressRecordByCue.TryGetValue(kv.Key, out PressRecord r))
                 {
-                    detail = $"press frame {r.frame} ({(r.runtimeTimed ? "runtime" : "frame/interp")}), lead {r.leadMs:0.00} ms, " +
+                    statLinkSourceByCue.TryGetValue(kv.Key, out string source);
+                    detail = $"press hand {(r.hand == 1 ? "L" : "R")} via {source ?? "?"}, " +
+                             $"press frame {r.frame} ({(r.runtimeTimed ? "runtime" : "frame/interp")}), lead {r.leadMs:0.00} ms, " +
                              $"frame dt {r.frameDtMs:0.00} ms, change age {r.ageMs:0.00} ms, clock err {r.clockErrMs:0.00} ms";
                 }
                 else
@@ -448,7 +560,7 @@ namespace ExScoringMod
                     detail = "clock-only (no press linked)";
                 }
 
-                DebugLog.Log($"[PreciseTiming]   cue {kv.Key} handType {handType}: native {pn.Value:0.00} ms, precise {pn.Key:0.00} ms, " +
+                DebugLog.Log($"[PreciseTiming]   cue {kv.Key} {behavior} handType {handType}: native {pn.Value:0.00} ms, precise {pn.Key:0.00} ms, " +
                              $"diff {kv.Value:0.00} ms | {detail}");
             }
         }
@@ -572,6 +684,8 @@ namespace ExScoringMod
 
             // Fallback map for cues hit without a fresh press.
             float scoringTick = audioDriver.GetTick(AudioDriver.TickContext.Scoring);
+            currentScoringTick = scoringTick;
+            currentScoringTickFrame = frame;
             smoothedScoringMsByTick[scoringTick] = clockSongMs - GetInputOffsetMs();
             tickHistory.Enqueue(new KeyValuePair<double, float>(now, scoringTick));
             while (tickHistory.Count > 0 && now - tickHistory.Peek().Key > FallbackRetentionMs)
@@ -766,6 +880,7 @@ namespace ExScoringMod
 
                     state.pressFrame = Time.frameCount;
                     state.pressScoringMs = SongMsAt(pressTime) - GetInputOffsetMs();
+                    state.pressScoringTick = currentScoringTickFrame == state.pressFrame ? currentScoringTick : float.NaN;
 
                     double frameDtMs = Time.unscaledDeltaTime * 1000.0;
                     double leadMs = clockFrameMs - pressTime;

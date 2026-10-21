@@ -1030,6 +1030,10 @@ namespace ExScoringMod
                 if (target == null || target.mCue == null) return;
 
                 resolvedIntersectionByIndex[target.mCue.index] = intersection;
+
+                // Precise timing: bind this gun's press (if it pressed this frame) to the cue it is
+                // aiming at, so the cue gets its own shot's press even when scored later (Holds).
+                if (menuState == MenuState.State.Launched) PreciseTiming.BindShot(__instance, target);
             }
         }
 
