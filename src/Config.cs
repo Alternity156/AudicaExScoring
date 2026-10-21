@@ -105,6 +105,12 @@ namespace ExScoringMod
         public static string onlinePlayHeader = "[Header]Online Play";
         public static bool EnableOnlinePlay;
 
+        public static string gunTricksHeader = "[Header]Gun Tricks";
+        public static bool DisableThrowing;
+        public static bool UncapThrowDistance;
+        public static float ThrowSpeed;        // percent of the game's throw boost, 100 = vanilla
+        public static float MaxThrowDistance;  // metres, 5 = vanilla leash
+
         public static string debugHeader = "[Header]Debug";
         public static bool DebugLogs;
         public static bool ShowNativeTimingGraph;
@@ -200,6 +206,12 @@ namespace ExScoringMod
             MelonPrefs.RegisterString(Category, nameof(onlinePlayHeader), "", "[Header]Online Play");
             MelonPrefs.RegisterBool(Category, nameof(EnableOnlinePlay), false, "Allows connecting to online play lobbies. Nothing connects while this is off");
 
+            MelonPrefs.RegisterString(Category, nameof(gunTricksHeader), "", "[Header]Gun Tricks");
+            MelonPrefs.RegisterBool(Category, nameof(DisableThrowing), false, "Prevents the guns from being thrown");
+            MelonPrefs.RegisterBool(Category, nameof(UncapThrowDistance), false, "Removes the throw distance limit while the throw is held (overrides Max Throw Distance)");
+            MelonPrefs.RegisterFloat(Category, nameof(ThrowSpeed), 100f, "Sets the throw speed as a percent of the game's default [25,300,5,100] {P}");
+            MelonPrefs.RegisterFloat(Category, nameof(MaxThrowDistance), 5f, "Sets how far a thrown gun can travel, in metres [1,15,0.5,5] {G}");
+
             MelonPrefs.RegisterString(Category, nameof(debugHeader), "", "[Header]Debug");
             MelonPrefs.RegisterBool(Category, nameof(DebugLogs), false, "Writes the mod's debug logs to the MelonLoader console/log file");
             MelonPrefs.RegisterBool(Category, nameof(ShowNativeTimingGraph), false, "Shows a second timing graph on the results screen using the game's native frame-based timing, for comparison with Precise Shot Timing");
@@ -272,6 +284,11 @@ namespace ExScoringMod
 
             EnableOnlinePlay = MelonPrefs.GetBool(Category, nameof(EnableOnlinePlay));
 
+            DisableThrowing = MelonPrefs.GetBool(Category, nameof(DisableThrowing));
+            UncapThrowDistance = MelonPrefs.GetBool(Category, nameof(UncapThrowDistance));
+            ThrowSpeed = UnityEngine.Mathf.Clamp(MelonPrefs.GetFloat(Category, nameof(ThrowSpeed)), 25f, 300f);
+            MaxThrowDistance = UnityEngine.Mathf.Clamp(MelonPrefs.GetFloat(Category, nameof(MaxThrowDistance)), 1f, 15f);
+
             DebugLogs = MelonPrefs.GetBool(Category, nameof(DebugLogs));
             ShowNativeTimingGraph = MelonPrefs.GetBool(Category, nameof(ShowNativeTimingGraph));
         }
@@ -280,6 +297,36 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(EnableOnlinePlay), value);
             EnableOnlinePlay = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateDisableThrowing(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(DisableThrowing), value);
+            DisableThrowing = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateUncapThrowDistance(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(UncapThrowDistance), value);
+            UncapThrowDistance = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateThrowSpeed(float value)
+        {
+            value = UnityEngine.Mathf.Clamp(value, 25f, 300f);
+            MelonPrefs.SetFloat(Category, nameof(ThrowSpeed), value);
+            ThrowSpeed = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateMaxThrowDistance(float value)
+        {
+            value = UnityEngine.Mathf.Clamp(value, 1f, 15f);
+            MelonPrefs.SetFloat(Category, nameof(MaxThrowDistance), value);
+            MaxThrowDistance = value;
             MelonPrefs.SaveConfig();
         }
 

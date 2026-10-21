@@ -299,6 +299,41 @@ namespace ExScoringMod
                 OptionsMenuClone.AddRow(exLowHealthVisualToggle, exLowHealthIntensitySlider);
             }),
 
+            new OptionsCategory("opt_guntricks", "Gun Tricks", () =>
+            {
+                OptionsMenuFunctions.GetDisableThrowing();
+                OptionsMenuFunctions.GetUncapThrowDistance();
+                OptionsMenuFunctions.GetThrowSpeed();
+                OptionsMenuFunctions.GetMaxThrowDistance();
+
+                var throwingHeader = OptionsMenuClone.CreateHeader(0, "Throwing");
+                OptionsMenuClone.AddRow(throwingHeader);
+
+                var disableThrowingToggle = OptionsMenuClone.CreateToggle(0, "Disable Throwing",
+                    () => OptionsMenuFunctions.disableThrowing,
+                    v => { OptionsMenuFunctions.disableThrowing = v; OptionsMenuFunctions.SetDisableThrowing(v); },
+                    "Prevents the guns from being thrown. Overrides every other throwing setting.");
+                var uncapDistanceToggle = OptionsMenuClone.CreateToggle(1, "Uncap Throw Distance",
+                    () => OptionsMenuFunctions.uncapThrowDistance,
+                    v => { OptionsMenuFunctions.uncapThrowDistance = v; OptionsMenuFunctions.SetUncapThrowDistance(v); },
+                    "No distance limit while the throw is held. The gun still returns as soon as you let go. Overrides Max Throw Distance.");
+                OptionsMenuClone.AddRow(disableThrowingToggle, uncapDistanceToggle);
+
+                var throwSpeedSlider = OptionsMenuClone.CreateSlider(0, "Throw Speed",
+                    () => OptionsMenuFunctions.throwSpeed,
+                    v => { OptionsMenuFunctions.throwSpeed = v; OptionsMenuFunctions.SetThrowSpeed(v); },
+                    25f, 300f, 5f, 100f,
+                    v => v.ToString("N0") + "%",
+                    "How fast a thrown gun flies. 100% is the game's default.");
+                var maxDistanceSlider = OptionsMenuClone.CreateSlider(1, "Max Throw Distance",
+                    () => OptionsMenuFunctions.maxThrowDistance,
+                    v => { OptionsMenuFunctions.maxThrowDistance = v; OptionsMenuFunctions.SetMaxThrowDistance(v); },
+                    1f, 15f, 0.5f, 5f,
+                    v => v.ToString("N1") + " m",
+                    "How far a thrown gun can travel. 5 m is the game's default. Ignored when Uncap Throw Distance is on.");
+                OptionsMenuClone.AddRow(throwSpeedSlider, maxDistanceSlider);
+            }),
+
             new OptionsCategory("opt_customize", "Customize", OptionsMenu.Page.Customization),
 
             new OptionsCategory("opt_colors", "Colors", OptionsMenu.Page.Colors),

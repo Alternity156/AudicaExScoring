@@ -84,6 +84,54 @@ namespace ExScoringMod
         public static bool enableScoreUpload;
         public static bool debugLogs;
         public static bool showNativeTimingGraph;
+        public static bool disableThrowing;
+        public static bool uncapThrowDistance;
+        public static float throwSpeed;
+        public static float maxThrowDistance;
+
+        public static void GetDisableThrowing()
+        {
+            disableThrowing = Config.DisableThrowing;
+        }
+
+        public static void SetDisableThrowing(bool value)
+        {
+            disableThrowing = value;
+            Config.UpdateDisableThrowing(value);
+        }
+
+        public static void GetUncapThrowDistance()
+        {
+            uncapThrowDistance = Config.UncapThrowDistance;
+        }
+
+        public static void SetUncapThrowDistance(bool value)
+        {
+            uncapThrowDistance = value;
+            Config.UpdateUncapThrowDistance(value);
+        }
+
+        public static void GetThrowSpeed()
+        {
+            throwSpeed = Config.ThrowSpeed;
+        }
+
+        public static void SetThrowSpeed(float value)
+        {
+            throwSpeed = value;
+            Config.UpdateThrowSpeed(value);
+        }
+
+        public static void GetMaxThrowDistance()
+        {
+            maxThrowDistance = Config.MaxThrowDistance;
+        }
+
+        public static void SetMaxThrowDistance(float value)
+        {
+            maxThrowDistance = value;
+            Config.UpdateMaxThrowDistance(value);
+        }
 
         public static void GetExScorePopupSize()
         {

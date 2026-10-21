@@ -220,6 +220,7 @@
     <Compile Include="src\GlobalOptions.cs" />
     <Compile Include="src\GradeDisplay.cs" />
     <Compile Include="src\GradeSystem.cs" />
+    <Compile Include="src\GunTricks.cs" />
     <Compile Include="src\LatestMaudica.cs" />
     <Compile Include="src\LaunchPanelVisibility.cs" />
     <Compile Include="src\LeaderboardStatsButton.cs" />
