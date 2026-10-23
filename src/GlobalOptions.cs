@@ -35,13 +35,152 @@ namespace ExScoringMod
 
         private static GameObject launchPage;
 
-        public static readonly Color OptionsRowColor = new Color(0.24f, 0.22f, 0.30f, 1f);
-        private static readonly Color CategoryColor = new Color(0.26f, 0.26f, 0.30f, 1f);
+        // Customisable on Options > Colors (ColorSettings).
+        public static Color OptionsRowColor => ColorSettings.RowOptions.Value;
+        private static Color CategoryColor => ColorSettings.RowOptionCategory.Value;
 
         // Time to let HideLaunchPanel's animation play before showing the clone. Tune if needed.
         private static float hideAnimDelay = 0.25f;
 
         private static bool panelShown = false;
+
+        // ── Colors page ───────────────────────────────────────────────────────
+        // Every colour row's checkmark square is always shown and tinted with its current colour.
+        // Shooting a row opens ColorPickerPopup.
+        private const string ColorsCategoryId = "opt_colors";
+
+        // Audica's default gun colours (used by Reset Targets).
+        private static readonly Color DefaultLeftHandColor = new Color(0f, 0.665f, 1f, 1f);
+        private static readonly Color DefaultRightHandColor = new Color(1f, 0.467f, 0f, 1f);
+
+        private static readonly Dictionary<ColorSetting, GameObject> colorSettingRows = new Dictionary<ColorSetting, GameObject>();
+
+        private static GameObject leftHandColorRow;
+        private static GameObject rightHandColorRow;
+        private static GameObject eitherHandColorRow;
+
+        /// <summary>Tints a toggle row's checkmark square. Uses renderer.material (a per-row
+        /// instance) because the shared OptionsMenuWhite material is used by every options button.</summary>
+        private static void TintCheckmark(GameObject row, Color color)
+        {
+            if (row == null) return; // Unity-null: row wiped by a redraw
+            Transform check = row.transform.Find("checkmark");
+            if (check == null) return;
+            var renderer = check.GetComponent<MeshRenderer>();
+            if (renderer == null) return;
+            renderer.material.color = color;
+        }
+
+        private static void RefreshHandColorRows()
+        {
+            if (KataConfig.I == null) return;
+            TintCheckmark(leftHandColorRow, KataConfig.I.leftHandColor);
+            TintCheckmark(rightHandColorRow, KataConfig.I.rightHandColor);
+            TintCheckmark(eitherHandColorRow, Config.EitherHandColor);
+        }
+
+        private static void OpenHandColorPicker(Target.TargetHandType hand)
+        {
+            GameObject row = hand == Target.TargetHandType.Left ? leftHandColorRow : rightHandColorRow;
+            ColorPickerPopup.ShowHand(hand,
+                c => TintCheckmark(row, c),
+                RefreshHandColorRows);
+        }
+
+        private static void OpenEitherHandColorPicker()
+        {
+            GameObject row = eitherHandColorRow;
+            ColorPickerPopup.ShowEitherHand(
+                c => TintCheckmark(row, c),
+                RefreshHandColorRows);
+        }
+
+        /// <summary>A colour row for a ColorSettings entry (same look as the hand rows).</summary>
+        private static GameObject CreateColorRow(int col, ColorSetting setting)
+        {
+            GameObject row = OptionsMenuClone.CreateToggle(col, setting.Label,
+                () => true,
+                v => OpenColorSettingPicker(setting),
+                "Opens the colour picker for " + setting.Label + ". Shoot the bottom-right swatch to confirm, the top-right one to cancel");
+            colorSettingRows[setting] = row;
+            TintCheckmark(row, setting.Value);
+            return row;
+        }
+
+        /// <summary>Adds colour rows two per line.</summary>
+        private static void AddColorRows(params ColorSetting[] settings)
+        {
+            for (int i = 0; i < settings.Length; i += 2)
+            {
+                GameObject left = CreateColorRow(0, settings[i]);
+                if (i + 1 < settings.Length)
+                    OptionsMenuClone.AddRow(left, CreateColorRow(1, settings[i + 1]));
+                else
+                    OptionsMenuClone.AddRow(left);
+            }
+        }
+
+        private static void OpenColorSettingPicker(ColorSetting setting)
+        {
+            Color original = setting.Value;
+            ColorPickerPopup.Show(setting.Value,
+                c =>
+                {
+                    // Live preview (not saved yet).
+                    setting.Value = c;
+                    TintColorSettingRow(setting);
+                    OnColorSettingChanged(setting);
+                },
+                c =>
+                {
+                    ColorSettings.Set(setting, c);
+                    TintColorSettingRow(setting);
+                    OnColorSettingChanged(setting);
+                },
+                () =>
+                {
+                    setting.Value = original;
+                    TintColorSettingRow(setting);
+                    OnColorSettingChanged(setting);
+                });
+        }
+
+        private static void TintColorSettingRow(ColorSetting setting)
+        {
+            if (colorSettingRows.TryGetValue(setting, out GameObject row))
+                TintCheckmark(row, setting.Value);
+        }
+
+        /// <summary>Song-list colours are baked into the rows when the view is built, so rebuild it.
+        /// Judgement colours are read whenever a popup / graph / results screen is drawn.</summary>
+        private static void OnColorSettingChanged(ColorSetting setting)
+        {
+            if (setting.Section == ColorSection.SongList)
+                FolderRowManager.RefreshList();
+        }
+
+        private static void ResetTargetColors()
+        {
+            ColorPickerPopup.CancelIfOpen();
+
+            var setter = TargetColorSetter.I;
+            if (setter != null) setter.SetColors(DefaultLeftHandColor, DefaultRightHandColor, false);
+
+            ExScoring.EitherHandColorOverride = null;
+            Config.UpdateEitherHandColor(Color.white);
+            Config.UpdateOverrideMeleeColor(false);
+            ExScoring.RefreshEitherHandColors();
+
+            RedrawIfShowing(ColorsCategoryId);
+        }
+
+        private static void ResetColorSection(ColorSection section)
+        {
+            ColorPickerPopup.CancelIfOpen();
+            ColorSettings.ResetSection(section);
+            if (section == ColorSection.SongList) FolderRowManager.RefreshList();
+            RedrawIfShowing(ColorsCategoryId);
+        }
 
         private static readonly List<OptionsCategory> Categories = new List<OptionsCategory>
         {
@@ -336,7 +475,80 @@ namespace ExScoringMod
 
             new OptionsCategory("opt_customize", "Customize", OptionsMenu.Page.Customization),
 
-            new OptionsCategory("opt_colors", "Colors", OptionsMenu.Page.Colors),
+            new OptionsCategory(ColorsCategoryId, "Colors", () =>
+            {
+                colorSettingRows.Clear();
+
+                // ── Targets ───────────────────────────────────────────────
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Targets"));
+
+                // Not real toggles: isChecked is always true so the square stays visible, and the
+                // square is tinted with the colour. Shooting the row opens the colour picker.
+                leftHandColorRow = OptionsMenuClone.CreateToggle(0, "Left Hand",
+                    () => true,
+                    v => OpenHandColorPicker(Target.TargetHandType.Left),
+                    "Opens the colour picker for the left hand. Shoot the bottom-right swatch to confirm, the top-right one to cancel");
+                rightHandColorRow = OptionsMenuClone.CreateToggle(1, "Right Hand",
+                    () => true,
+                    v => OpenHandColorPicker(Target.TargetHandType.Right),
+                    "Opens the colour picker for the right hand. Shoot the bottom-right swatch to confirm, the top-right one to cancel");
+                OptionsMenuClone.AddRow(leftHandColorRow, rightHandColorRow);
+
+                eitherHandColorRow = OptionsMenuClone.CreateToggle(0, "Either Hand",
+                    () => true,
+                    v => OpenEitherHandColorPicker(),
+                    "Opens the colour picker for either-hand targets (melee included). Only applied in-game when Override Either Hand Color is on");
+                var overrideEitherToggle = OptionsMenuClone.CreateToggle(1, "Override Either Hand Color",
+                    () => Config.OverrideMeleeColor,
+                    v => { Config.UpdateOverrideMeleeColor(v); ExScoring.RefreshEitherHandColors(); },
+                    "Applies the either hand color to all either-hand targets, melee included. Off = default look");
+                OptionsMenuClone.AddRow(eitherHandColorRow, overrideEitherToggle);
+
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateButton(0, "Reset Targets", ResetTargetColors,
+                    "Restores the default left/right hand colours, white either hand colour, and turns the override off"));
+
+                RefreshHandColorRows();
+
+                // ── Judgements ────────────────────────────────────────────
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Judgements"));
+                AddColorRows(
+                    ColorSettings.JudgementImpeccable, ColorSettings.JudgementFantastic,
+                    ColorSettings.JudgementExcellent, ColorSettings.JudgementGreat,
+                    ColorSettings.JudgementGood, ColorSettings.JudgementMiss);
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateButton(0, "Reset Judgements",
+                    () => ResetColorSection(ColorSection.Judgements),
+                    "Restores the default judgement colours"));
+
+                // ── Song List ─────────────────────────────────────────────
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Song List Folders"));
+                AddColorRows(
+                    ColorSettings.FolderFavorites, ColorSettings.FolderAudica,
+                    ColorSettings.FolderAudicaDLC, ColorSettings.FolderUnsorted,
+                    ColorSettings.FolderSongRequests, ColorSettings.FolderLatestMaudica,
+                    ColorSettings.FolderSearch, ColorSettings.FolderOther);
+
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Song List Rows"));
+                AddColorRows(
+                    ColorSettings.RowOptions, ColorSettings.RowOptionCategory,
+                    ColorSettings.RowPlaylists, ColorSettings.RowPlaylistEntry,
+                    ColorSettings.RowBack, ColorSettings.RowCreate,
+                    ColorSettings.RowDelete, ColorSettings.RowConfirmDelete,
+                    ColorSettings.RowMarathon);
+
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Downloads"));
+                AddColorRows(
+                    ColorSettings.RowDownloadable, ColorSettings.RowDownloadAll,
+                    ColorSettings.RowLoadMore);
+
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Online Lobby"));
+                AddColorRows(
+                    ColorSettings.LobbyFolder, ColorSettings.LobbyDownloadable,
+                    ColorSettings.LobbyUnavailable, ColorSettings.LobbyLooking);
+
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateButton(0, "Reset Song List",
+                    () => ResetColorSection(ColorSection.SongList),
+                    "Restores the default song list colours"));
+            }),
 
             new OptionsCategory("opt_modifiers", "Modifiers", rawPage: true),
 
@@ -672,6 +884,7 @@ namespace ExScoringMod
         private static void OnCategoryShot(OptionsCategory cat)
         {
             DebugLog.Log($"[Options] category shot: {cat.Title}");
+            ColorPickerPopup.CancelIfOpen(); // switching category: the rows driving the picker are about to be wiped
             activeCategory = cat;
             VirtualSongList.SetSelectedAction(cat.Id);
             ShowCategory(cat);
@@ -719,6 +932,7 @@ namespace ExScoringMod
 
         public static void HidePanel()
         {
+            ColorPickerPopup.CancelIfOpen();
             VirtualSongList.SetSelectedAction(null);
             activeCategory = null;
             if (!panelShown) return;
@@ -755,6 +969,7 @@ namespace ExScoringMod
             restorePending = FolderRowManager.InGlobalOptions;
             restoreCategoryId = activeCategory?.Id;
 
+            ColorPickerPopup.CancelIfOpen();
             VirtualSongList.SetSelectedAction(null);
             activeCategory = null;
             if (panelShown)

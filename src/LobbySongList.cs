@@ -21,10 +21,11 @@ namespace ExScoringMod
     {
         public const string FolderName = "Suggested Songs";
 
-        private static readonly Color FolderColor = new Color(0.30f, 0.18f, 0.40f, 1f);
-        private static readonly Color DownloadableColor = new Color(0.15f, 0.28f, 0.40f, 1f);
-        private static readonly Color UnavailableColor = new Color(0.45f, 0.10f, 0.10f, 1f);
-        private static readonly Color LookingColor = new Color(0.22f, 0.22f, 0.30f, 1f);
+        // Customisable on Options > Colors (ColorSettings).
+        private static Color FolderColor => ColorSettings.LobbyFolder.Value;
+        private static Color DownloadableColor => ColorSettings.LobbyDownloadable.Value;
+        private static Color UnavailableColor => ColorSettings.LobbyUnavailable.Value;
+        private static Color LookingColor => ColorSettings.LobbyLooking.Value;
 
         private enum LookupState { Searching, Found, NotFound }
 

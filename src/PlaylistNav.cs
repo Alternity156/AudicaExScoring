@@ -16,12 +16,13 @@ namespace ExScoringMod
     internal static class PlaylistNav
     {
         // ── Palette (tunable) ─────────────────────────────────────────────────
-        public static readonly Color PlaylistRowColor = new Color(0.30f, 0.30f, 0.30f, 1f); // lighter grey
-        public static readonly Color BackColor = new Color(0.20f, 0.24f, 0.34f, 1f); // slate-blue
-        public static readonly Color CreateColor = new Color(0.10f, 0.30f, 0.14f, 1f); // dark green
-        public static readonly Color DeleteColor = new Color(0.34f, 0.10f, 0.10f, 1f); // dark red
-        public static readonly Color ConfirmDeleteColor = new Color(0.65f, 0.10f, 0.10f, 1f); // brighter red
-        public static readonly Color MarathonColor = new Color(0.28f, 0.20f, 0.40f, 1f); // dark indigo
+        // Customisable on Options > Colors (ColorSettings); defaults are the previous hardcoded colours.
+        public static Color PlaylistRowColor => ColorSettings.RowPlaylistEntry.Value;   // lighter grey
+        public static Color BackColor => ColorSettings.RowBack.Value;                  // slate-blue
+        public static Color CreateColor => ColorSettings.RowCreate.Value;              // dark green
+        public static Color DeleteColor => ColorSettings.RowDelete.Value;              // dark red
+        public static Color ConfirmDeleteColor => ColorSettings.RowConfirmDelete.Value; // brighter red
+        public static Color MarathonColor => ColorSettings.RowMarathon.Value;          // dark indigo
 
         // Two-tap delete: armed playlist shows "Confirm Delete?" until shot again or navigated away.
         private static string deleteArmedPlaylist = null;

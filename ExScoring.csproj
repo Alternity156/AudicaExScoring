@@ -210,6 +210,8 @@
     <Compile Include="src\ChainArrow.cs" />
     <Compile Include="src\AddPlaylistButton.cs" />
     <Compile Include="src\AlbumArt.cs" />
+    <Compile Include="src\ColorPickerPopup.cs" />
+    <Compile Include="src\ColorSettings.cs" />
     <Compile Include="src\DifficultyCalculator.cs" />
     <Compile Include="src\EitherHandFix.cs" />
     <Compile Include="src\ExLeaderboardDisplay.cs" />

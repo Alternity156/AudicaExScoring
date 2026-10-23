@@ -49,19 +49,20 @@ namespace ExScoringMod
         {
             switch (judgement)
             {
+                // Customisable on Options > Colors (ColorSettings). OK follows Fantastic.
                 case Judgement.Impeccable:
-                    return Color.cyan;
+                    return ColorSettings.JudgementImpeccable.Value;
                 case Judgement.Fantastic:
                 case Judgement.OK:
-                    return Color.white;
+                    return ColorSettings.JudgementFantastic.Value;
                 case Judgement.Excellent:
-                    return new Color(1.0f, 0.84f, 0f); //Gold
+                    return ColorSettings.JudgementExcellent.Value;
                 case Judgement.Great:
-                    return Color.green;
+                    return ColorSettings.JudgementGreat.Value;
                 case Judgement.Good:
-                    return new Color(0.133f, 0.545f, 0.133f); //Forest Green
+                    return ColorSettings.JudgementGood.Value;
                 case Judgement.Miss:
-                    return Color.red;
+                    return ColorSettings.JudgementMiss.Value;
             }
             return Color.white;
         }

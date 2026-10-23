@@ -1,4 +1,5 @@
 ﻿using MelonLoader;
+using UnityEngine;
 
 namespace ExScoringMod
 {
@@ -83,6 +84,16 @@ namespace ExScoringMod
         public static float SearchKeyboardPosY;
         public static float SearchKeyboardPosZ;
         public static float SearchKeyboardTilt;
+
+        public static string colorsHeader = "[Header]Colors";
+        // Either-hand target colour. Applied by EitherHandFix when OverrideMeleeColor is on.
+        public static float EitherHandColorR;
+        public static float EitherHandColorG;
+        public static float EitherHandColorB;
+        public static Color EitherHandColor => new Color(EitherHandColorR, EitherHandColorG, EitherHandColorB, 1f);
+        // When false, either-hand targets keep the original EitherHandFix look (white) and the melee
+        // material stays vanilla. When true, all either-hand targets (incl. melee) use EitherHandColor.
+        public static bool OverrideMeleeColor;
 
         public static string leaderboardHeader = "[Header]Leaderboard";
         public static string ApiKey;
@@ -197,6 +208,12 @@ namespace ExScoringMod
             MelonPrefs.RegisterFloat(Category, nameof(SearchKeyboardPosZ), 2f, "Sets the search keyboard Z position [-5,5,0.25,2] {P}");
             MelonPrefs.RegisterFloat(Category, nameof(SearchKeyboardTilt), 30f, "Sets the search keyboard tilt angle [0,90,1,30] {P}");
 
+            MelonPrefs.RegisterString(Category, nameof(colorsHeader), "", "[Header]Colors");
+            MelonPrefs.RegisterFloat(Category, nameof(EitherHandColorR), 1f, "Either hand target color, red [0,1,0.01,1] {P}");
+            MelonPrefs.RegisterFloat(Category, nameof(EitherHandColorG), 1f, "Either hand target color, green [0,1,0.01,1] {P}");
+            MelonPrefs.RegisterFloat(Category, nameof(EitherHandColorB), 1f, "Either hand target color, blue [0,1,0.01,1] {P}");
+            MelonPrefs.RegisterBool(Category, nameof(OverrideMeleeColor), false, "Applies the either hand color above to all either-hand targets (including melee). Off = default look");
+
             MelonPrefs.RegisterString(Category, nameof(leaderboardHeader), "", "[Header]Leaderboard");
             MelonPrefs.RegisterString(Category, nameof(ApiKey), "", "API key for the online leaderboard (paste from the website)");
             MelonPrefs.RegisterBool(Category, nameof(EnableScoreUpload), false, "Automatically uploads runs to the online leaderboard after each song");
@@ -216,11 +233,15 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(DebugLogs), false, "Writes the mod's debug logs to the MelonLoader console/log file");
             MelonPrefs.RegisterBool(Category, nameof(ShowNativeTimingGraph), false, "Shows a second timing graph on the results screen using the game's native frame-based timing, for comparison with Precise Shot Timing");
 
+            ColorSettings.Register(); // judgement / song-list colours (hidden prefs)
+
             OnModSettingsApplied();
         }
 
         public static void OnModSettingsApplied()
         {
+            ColorSettings.Load();
+
             AudicaType = MelonPrefs.GetBool(Category, nameof(AudicaType));
             ExType = MelonPrefs.GetBool(Category, nameof(ExType));
 
@@ -276,6 +297,10 @@ namespace ExScoringMod
             SearchKeyboardPosY = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardPosY));
             SearchKeyboardPosZ = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardPosZ));
             SearchKeyboardTilt = MelonPrefs.GetFloat(Category, nameof(SearchKeyboardTilt));
+            EitherHandColorR = Mathf.Clamp01(MelonPrefs.GetFloat(Category, nameof(EitherHandColorR)));
+            EitherHandColorG = Mathf.Clamp01(MelonPrefs.GetFloat(Category, nameof(EitherHandColorG)));
+            EitherHandColorB = Mathf.Clamp01(MelonPrefs.GetFloat(Category, nameof(EitherHandColorB)));
+            OverrideMeleeColor = MelonPrefs.GetBool(Category, nameof(OverrideMeleeColor));
 
             ApiKey = MelonPrefs.GetString(Category, nameof(ApiKey));
             EnableScoreUpload = MelonPrefs.GetBool(Category, nameof(EnableScoreUpload));
@@ -743,6 +768,24 @@ namespace ExScoringMod
         {
             MelonPrefs.SetInt(Category, nameof(LastSongCount), newCount);
             LastSongCount = newCount;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateOverrideMeleeColor(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(OverrideMeleeColor), value);
+            OverrideMeleeColor = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateEitherHandColor(Color color)
+        {
+            EitherHandColorR = Mathf.Clamp01(color.r);
+            EitherHandColorG = Mathf.Clamp01(color.g);
+            EitherHandColorB = Mathf.Clamp01(color.b);
+            MelonPrefs.SetFloat(Category, nameof(EitherHandColorR), EitherHandColorR);
+            MelonPrefs.SetFloat(Category, nameof(EitherHandColorG), EitherHandColorG);
+            MelonPrefs.SetFloat(Category, nameof(EitherHandColorB), EitherHandColorB);
             MelonPrefs.SaveConfig();
         }
 

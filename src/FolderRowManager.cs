@@ -42,7 +42,7 @@ namespace ExScoringMod
         private static SortMode currentSort = SortMode.Default;
 
         // ── Search folder maudica integration ─────────────────────────────────
-        private static readonly UnityEngine.Color SR_LoadMoreColor = new UnityEngine.Color(0.22f, 0.22f, 0.30f, 1f);
+        private static UnityEngine.Color SR_LoadMoreColor => ColorSettings.RowLoadMore.Value; // customisable (Options > Colors)
         private static readonly HashSet<string> searchDownloading = new HashSet<string>();
         private static readonly Dictionary<string, int> searchLastPct = new Dictionary<string, int>();
         private static bool searchDownloadingAll;
@@ -536,25 +536,23 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Per-folder header color. Hardcoded/virtual folders use the lighter playlist grey;
-        /// custom subfolders fall back to the default folder grey. Add cases here to give a
-        /// specific folder its own color later.
+        /// Per-folder header color, customisable on Options > Colors (ColorSettings). Each built-in
+        /// folder has its own setting; user-created subfolders share "Other Folders".
         /// </summary>
         private static Color FolderColorFor(string folder)
         {
             switch (folder)
             {
-                case SongFolderManager.FolderFavorites:
-                case SongFolderManager.FolderAudica:
-                case SongFolderManager.FolderAudicaDLC:
-                case SongFolderManager.FolderCustom:      // "Unsorted"
-                case SongFolderManager.FolderSongRequests:
-                case SongFolderManager.FolderLatestMaudica:
-                    return PlaylistNav.PlaylistRowColor;
+                case SongFolderManager.FolderFavorites: return ColorSettings.FolderFavorites.Value;
+                case SongFolderManager.FolderAudica: return ColorSettings.FolderAudica.Value;
+                case SongFolderManager.FolderAudicaDLC: return ColorSettings.FolderAudicaDLC.Value;
+                case SongFolderManager.FolderCustom: return ColorSettings.FolderUnsorted.Value;      // "Unsorted"
+                case SongFolderManager.FolderSongRequests: return ColorSettings.FolderSongRequests.Value;
+                case SongFolderManager.FolderLatestMaudica: return ColorSettings.FolderLatestMaudica.Value;
                 default:
-                    // Search-results folder (dynamic name) also gets the new color.
+                    // Search-results folder (dynamic name).
                     if (folder == SongFolderManager.searchFolderName)
-                        return PlaylistNav.PlaylistRowColor;
+                        return ColorSettings.FolderSearch.Value;
                     return ViewRow.FolderColor;
             }
         }
@@ -592,7 +590,7 @@ namespace ExScoringMod
             // Entry into the playlist system (drills into Level 1) — pinned to the top.
             int plCount = PlaylistManager.playlists != null ? PlaylistManager.playlists.Count : 0;
             rows.Add(ViewRow.ActionRow("Options", GlobalOptions.OptionsRowColor, EnterGlobalOptions));
-            rows.Add(ViewRow.ActionRow("Playlists", PlaylistNav.PlaylistRowColor,
+            rows.Add(ViewRow.ActionRow("Playlists", ColorSettings.RowPlaylists.Value,
                 EnterPlaylistList, $"{plCount} playlist{(plCount != 1 ? "s" : "")}"));
 
             string open = SongFolderManager.openFolder;
@@ -1726,8 +1724,8 @@ namespace ExScoringMod
         }
 
         // ── Song Requests folder (optional SongRequest integration) ───────────────
-        private static readonly UnityEngine.Color SR_DownloadableColor = new UnityEngine.Color(0.15f, 0.28f, 0.40f, 1f);
-        private static readonly UnityEngine.Color SR_DownloadAllColor = new UnityEngine.Color(0.18f, 0.34f, 0.22f, 1f);
+        private static UnityEngine.Color SR_DownloadableColor => ColorSettings.RowDownloadable.Value; // customisable (Options > Colors)
+        private static UnityEngine.Color SR_DownloadAllColor => ColorSettings.RowDownloadAll.Value;
 
         // Two-shot Clear List: armed shows "Confirm Clear?" until shot again or the folder is toggled.
         private static bool srClearArmed;

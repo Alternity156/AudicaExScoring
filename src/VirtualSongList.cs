@@ -36,7 +36,7 @@ namespace ExScoringMod
         public bool disabled;     // action/downloadable: shown but not shootable
 
         /// <summary>Default folder-header grey. Action rows override via their own color.</summary>
-        public static readonly Color FolderColor = new Color(0.18f, 0.18f, 0.18f, 1f);
+        public static Color FolderColor => ColorSettings.FolderOther.Value; // customisable (Options > Colors)
 
         public static ViewRow Header(string folder, int count, string subLabelOverride = null, Color? color = null)
             => new ViewRow { kind = ViewRowKind.FolderHeader, folderName = folder, songCount = count, color = color ?? FolderColor, subLabel = subLabelOverride };
