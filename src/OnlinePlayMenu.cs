@@ -9,7 +9,7 @@ namespace ExScoringMod
     /// <summary>
     /// Online play menus:
     ///  - BuildSettings: the "Multiplayer" category of the song list's Options (GlobalOptions),
-    ///    settings only (Enable Online Play for now);
+    ///    settings only (Enable Online Play, Show Other Players);
     ///  - Build: the Online Play screen on the Main page (OnlinePlayScreen), not reachable from the
     ///    song list. The settings at the top, then the lobby menu. Not in a lobby: create, join by code, the public lobby
     ///    list. In a lobby: ready, leave, suggest a song, and for the host the lobby settings,
@@ -80,7 +80,16 @@ namespace ExScoringMod
                 () => Config.EnableOnlinePlay,
                 v => MpSession.SetEnabled(v),
                 "Allows connecting to online play lobbies. Nothing connects while this is off");
-            OptionsMenuClone.AddRow(enableToggle);
+            OptionsMenuClone.AddRow(enableToggle, CreateShowOtherPlayersToggle());
+        }
+
+        /// <summary>Show Other Players (MpPresence): the lobby's avatars in the menus.</summary>
+        private static UnityEngine.GameObject CreateShowOtherPlayersToggle()
+        {
+            return OptionsMenuClone.CreateToggle(1, "Show Other Players",
+                () => Config.ShowOtherPlayers,
+                v => Config.UpdateShowOtherPlayers(v),
+                "Shows the other players in your lobby in the menus. Your own pose is still shared while this is off");
         }
 
         // ── Online Play (lobby) category ──
@@ -89,7 +98,7 @@ namespace ExScoringMod
         {
             codeLabel = null;
 
-            // Settings first (the same toggle as Options > Multiplayer in the song list).
+            // Settings first (the same toggles as Options > Multiplayer in the song list).
             OptionsMenuClone.AddRow(OptionsMenuClone.CreateToggle(0, "Enable Online Play",
                 () => Config.EnableOnlinePlay,
                 v =>
@@ -99,7 +108,8 @@ namespace ExScoringMod
                     if (v) MpSession.Connect();
                     Redraw();
                 },
-                "Allows connecting to online play lobbies. Nothing connects while this is off"));
+                "Allows connecting to online play lobbies. Nothing connects while this is off"),
+                CreateShowOtherPlayersToggle());
 
             if (!Config.EnableOnlinePlay)
             {

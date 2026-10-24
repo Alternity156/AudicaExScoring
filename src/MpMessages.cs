@@ -63,6 +63,19 @@ namespace ExScoringMod
         public MpSongRef songChoice;
         /// <summary>"player" | "spectator" | null (only set during loading/playing).</summary>
         public string matchRole;
+        /// <summary>0..7, stable while the player stays in this lobby (v2.39). 0 from an older server.</summary>
+        public int seat;
+        /// <summary>This player's connection has the presence feature, so it can send poses (v2.39).</summary>
+        public bool presence;
+        /// <summary>Null until the player sends setGunColors (v2.39).</summary>
+        public MpGunColors gunColors;
+    }
+
+    /// <summary>PlayerState.gunColors (v2.39): 0..1 floats, [r, g, b].</summary>
+    public class MpGunColors
+    {
+        public float[] left;
+        public float[] right;
     }
 
     /// <summary>LobbyState (19.3). Always the full state; replace, never merge.</summary>
@@ -80,7 +93,7 @@ namespace ExScoringMod
         public string phase;
         public MpSongRef selectedSong;
         public string matchId;
-        /// <summary>Join order.</summary>
+        /// <summary>Seat order (v2.39; join order on an older server).</summary>
         public MpPlayerState[] players;
 
         public MpPlayerState FindPlayer(string userId)
@@ -128,6 +141,36 @@ namespace ExScoringMod
         public long serverTime;
         /// <summary>Non-null when the player was still seated inside the reconnect grace.</summary>
         public MpLobbyState lobby;
+        /// <summary>Features the server turned on for this connection (v2.39). Null from an older server.</summary>
+        public string[] features;
+    }
+
+    /// <summary>
+    /// poses.players entry (v2.39). Each part is [px, py, pz, qx, qy, qz, qw] in the sender's own
+    /// Unity world space, or null when it isn't tracked. t is the sender's estimate of server time
+    /// when the pose was sampled.
+    /// </summary>
+    public class MpPoseEntry
+    {
+        public string userId;
+        public long t;
+        public float[] head;
+        public float[] lHand;
+        public float[] rHand;
+        public float[] lGun;
+        public float[] rGun;
+        public bool lTrigger;
+        public bool rTrigger;
+    }
+
+    /// <summary>
+    /// poses (v2.39), ~15 Hz while not in a song. Holds every OTHER lobby member with a fresh pose;
+    /// anyone missing from it should be hidden.
+    /// </summary>
+    public class MpPoses
+    {
+        public long serverTime;
+        public MpPoseEntry[] players;
     }
 
     /// <summary>matchPrepare.participants entry (19.5).</summary>

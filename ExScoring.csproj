@@ -236,6 +236,7 @@
     <Compile Include="src\MpClient.cs" />
     <Compile Include="src\MpGameplay.cs" />
     <Compile Include="src\MpMessages.cs" />
+    <Compile Include="src\MpPresence.cs" />
     <Compile Include="src\MpSession.cs" />
     <Compile Include="src\OnlinePlayButton.cs" />
     <Compile Include="src\OnlinePlayMenu.cs" />

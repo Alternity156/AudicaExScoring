@@ -496,6 +496,7 @@ namespace ExScoringMod
             TrippyMenu.Tick();
             TickGradeVisualAnimation();
             MpSession.Tick();
+            MpPresence.Tick();
             MpGameplay.Tick();
             LobbyPanel.Tick();
             LobbyLaunchButton.Tick();

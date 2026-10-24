@@ -39,8 +39,12 @@ namespace ExScoringMod
         private const long ScoreUpdateIntervalMs = 110;     // server: 10/s
         private const long LocationIntervalMs = 260;        // server: 4/s
         private const long DownloadProgressIntervalMs = 550; // server: 2/s
+        private const long GunColorsIntervalMs = 600;       // server: 2/s (v2.39)
 
         private const int GuestNameMaxLength = 24;
+
+        /// <summary>The v2.39 feature name asked for in hello.</summary>
+        private const string PresenceFeature = "presence";
 
         // ── Public state ──
 
@@ -62,6 +66,16 @@ namespace ExScoringMod
         public static bool IsHost => Lobby != null && MyUserId != null && Lobby.hostUserId == MyUserId;
 
         public static MpLobbySummary[] LastLobbyList { get; private set; }
+
+        /// <summary>
+        /// True when the last welcome listed "presence" (v2.39): pose and setGunColors may be sent,
+        /// and poses will arrive. False before the first welcome, after a disconnect, and against a
+        /// server that doesn't know the feature.
+        /// </summary>
+        public static bool PresenceEnabled { get; private set; }
+
+        /// <summary>This player's seat in the current lobby (v2.39), or -1 outside a lobby.</summary>
+        public static int MySeat => MyPlayer != null ? MyPlayer.seat : -1;
 
         /// <summary>The current match, from matchPrepare until results or abort. Null otherwise.</summary>
         public static MpMatchPrepare CurrentMatch { get; private set; }
@@ -130,6 +144,12 @@ namespace ExScoringMod
         /// <summary>The host aborted the match (argument: matchId, may be null). No results follow.</summary>
         public static event Action<string> OnMatchAborted;
 
+        /// <summary>
+        /// Every poses message (v2.39), ~15 Hz while not in a song. Not sent at all while this
+        /// player is in a song, so listeners must hide avatars on their own when a song starts.
+        /// </summary>
+        public static event Action<MpPoses> OnPoses;
+
         /// <summary>Server errors that no request callback was waiting for.</summary>
         public static event Action<MpError> OnError;
 
@@ -194,6 +214,14 @@ namespace ExScoringMod
         private static JObject pendingDownloadProgress;
         private static string lastSentSongStatusKey;
         private static long lastDownloadProgressSentMs;
+
+        // setGunColors (v2.39): the latest colours asked for, and what was last sent. The colours
+        // belong to the connection server-side, but the contract asks for them after every join,
+        // so the sent key is forgotten on welcome and on joining a lobby.
+        private static float[] wantedGunLeft;
+        private static float[] wantedGunRight;
+        private static string lastSentGunColorsKey;
+        private static long lastGunColorsSentMs;
 
         // ── Connection ──
 
@@ -284,6 +312,8 @@ namespace ExScoringMod
                 pendingDownloadProgress = null;
                 lastDownloadProgressSentMs = now;
             }
+
+            SendGunColorsIfDue(now);
 
             ExpireRequests(now);
         }
@@ -495,6 +525,39 @@ namespace ExScoringMod
             Request("abortMatch", null, onComplete);
         }
 
+        /// <summary>
+        /// Moves a player to a seat (0..7, v2.39). If someone else sits there, the two swap. Any
+        /// phase. Errors: NOT_HOST, NOT_IN_LOBBY, UNKNOWN_PLAYER, BAD_SEAT.
+        /// </summary>
+        public static void SetSeat(string userId, int seat, Action<MpError> onComplete = null)
+        {
+            Request("setSeat", new JObject { ["userId"] = userId, ["seat"] = seat }, onComplete);
+        }
+
+        // ── Presence (v2.39) ──
+
+        /// <summary>
+        /// The player's gun colours ([r, g, b], 0..1). Call as often as convenient: they go out only
+        /// while in a lobby with presence on, only when they changed (or after a join), and at most
+        /// ~1.7 times a second with the latest value winning.
+        /// </summary>
+        public static void SetGunColors(float[] left, float[] right)
+        {
+            if (left == null || right == null || left.Length < 3 || right.Length < 3) return;
+            wantedGunLeft = new[] { Clamp01(left[0]), Clamp01(left[1]), Clamp01(left[2]) };
+            wantedGunRight = new[] { Clamp01(right[0]), Clamp01(right[1]), Clamp01(right[2]) };
+        }
+
+        /// <summary>
+        /// One pose (v2.39). Fire-and-forget, no reqId, never queued: dropped unless connected, in a
+        /// lobby and with presence on. The caller keeps it to ~15 a second and stops in songs.
+        /// </summary>
+        public static void SendPose(JObject pose)
+        {
+            if (pose == null || !IsConnected || !PresenceEnabled || !InLobby) return;
+            SendFireAndForget("pose", pose);
+        }
+
         // ── Match (19.5) ──
 
         /// <summary>The song is loaded and holding before playback.</summary>
@@ -578,7 +641,7 @@ namespace ExScoringMod
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("[Mp] ===== MpSession =====");
-            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")}");
+            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} seat={MySeat}");
             sb.AppendLine($"[Mp] clock: offset={ClockOffsetMs} ms, lastRtt={LastRttMs} ms, bestRtt={BestRttMs} ms, samples={clockSamples.Count}, serverNow={ServerNowMs}");
             sb.AppendLine($"[Mp] pending requests={pendingRequests.Count}, queued={queuedRequests.Count}, location=\"{currentLocation}\" browsing={currentBrowsingSongId ?? "none"}");
 
@@ -603,7 +666,7 @@ namespace ExScoringMod
                         string status = p.songStatus == null
                             ? "-"
                             : p.songStatus.status + (p.songStatus.progress.HasValue ? $" {p.songStatus.progress.Value:P0}" : "");
-                        sb.AppendLine($"[Mp]   {(p.isHost ? "*" : " ")} \"{p.nickname}\" {p.userId}{(p.guest ? " guest" : "")}{(p.bot ? " bot" : "")}{(p.connected ? "" : " DISCONNECTED")} " +
+                        sb.AppendLine($"[Mp]   {(p.isHost ? "*" : " ")} seat {p.seat} \"{p.nickname}\" {p.userId}{(p.guest ? " guest" : "")}{(p.bot ? " bot" : "")}{(p.connected ? "" : " DISCONNECTED")}{(p.presence ? " presence" : "")}{(p.gunColors != null ? " colors" : "")} " +
                                       $"loc={p.location} mode={p.scoringMode} song={status} diff={p.difficulty ?? "-"} ready={p.ready} " +
                                       $"choice={(p.songChoice != null ? p.songChoice.title ?? p.songChoice.songId : "-")} role={p.matchRole ?? "-"}");
                     }
@@ -666,11 +729,12 @@ namespace ExScoringMod
                 ["protocolVersion"] = ProtocolVersion,
                 ["modVersion"] = ExScoring.BuildInfo.Version,
                 ["platform"] = helloPlatform,
-                ["guestName"] = helloGuestName
+                ["guestName"] = helloGuestName,
+                ["features"] = new JArray(PresenceFeature)
             };
             if (!string.IsNullOrEmpty(resumeToken)) hello["resumeToken"] = resumeToken;
 
-            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")})");
+            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}])");
             MpClient.Send(hello.ToString(Formatting.None));
         }
 
@@ -679,7 +743,7 @@ namespace ExScoringMod
             string type = message.Value<string>("type");
             int? reqId = message.Value<int?>("reqId");
 
-            if (type != "pong" && type != "matchScores")
+            if (type != "pong" && type != "matchScores" && type != "poses")
             {
                 Log($"<- {type}{(reqId.HasValue ? $" (reqId {reqId})" : "")}");
             }
@@ -758,6 +822,23 @@ namespace ExScoringMod
                     SafeInvoke(OnMatchAborted, abortedId, "OnMatchAborted");
                     break;
 
+                case "poses":
+                    if (OnPoses != null)
+                    {
+                        MpPoses poses;
+                        try
+                        {
+                            poses = message.ToObject<MpPoses>(MpJson.Serializer);
+                        }
+                        catch (Exception ex)
+                        {
+                            Log($"   poses unreadable, ignored: {ex.Message}");
+                            break;
+                        }
+                        SafeInvoke(OnPoses, poses, "OnPoses");
+                    }
+                    break;
+
                 case "ok":
                     break;
 
@@ -805,6 +886,10 @@ namespace ExScoringMod
                 FailQueuedRequests();
             }
 
+            // Features belong to one connection; the next welcome says what the new one has.
+            PresenceEnabled = false;
+            lastSentGunColorsKey = null;
+
             LastDisconnect = info;
             Log($"Disconnected: {info.reason} (willReconnect={info.willReconnect})");
             ReportStateIfChanged();
@@ -822,6 +907,8 @@ namespace ExScoringMod
             IsGuest = welcome.guest;
             ApiKeyRejected = helloSentApiKey && welcome.guest;
             resumeToken = welcome.resumeToken;
+            PresenceEnabled = welcome.features != null && Array.IndexOf(welcome.features, PresenceFeature) >= 0;
+            lastSentGunColorsKey = null; // a new connection holds no colours yet
 
             // Rough offset until the first pong (no RTT correction).
             if (clockSamples.Count == 0 && welcome.serverTime > 0)
@@ -832,7 +919,7 @@ namespace ExScoringMod
             MpClient.MarkWelcomed();
             nextPingAtMs = 0; // ping right away for a real clock sample
 
-            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")}");
+            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled}");
 
             if (welcome.lobby != null)
             {
@@ -899,6 +986,7 @@ namespace ExScoringMod
                 lastSentSongStatusKey = null;
                 lastSentLocationKey = null;
                 locationDirty = currentLocation != null;
+                lastSentGunColorsKey = null; // v2.39: send the colours once after every join
             }
 
             if (lobby.lobbyId != scoringModeSentForLobbyId)
@@ -1016,6 +1104,45 @@ namespace ExScoringMod
         private static string LocationKey()
         {
             return (currentLocation ?? "") + "|" + (currentBrowsingSongId ?? "");
+        }
+
+        private static void SendGunColorsIfDue(long now)
+        {
+            if (wantedGunLeft == null || wantedGunRight == null) return;
+            if (!PresenceEnabled || !InLobby) return;
+            if (now - lastGunColorsSentMs < GunColorsIntervalMs) return;
+
+            string key = ColorKey(wantedGunLeft) + "|" + ColorKey(wantedGunRight);
+            if (key == lastSentGunColorsKey) return;
+
+            lastSentGunColorsKey = key;
+            lastGunColorsSentMs = now;
+            Request("setGunColors", new JObject
+            {
+                ["left"] = new JArray(Round3(wantedGunLeft[0]), Round3(wantedGunLeft[1]), Round3(wantedGunLeft[2])),
+                ["right"] = new JArray(Round3(wantedGunRight[0]), Round3(wantedGunRight[1]), Round3(wantedGunRight[2]))
+            }, error =>
+            {
+                // Let the next tick try again (e.g. BAD_MESSAGE can't happen with clamped values,
+                // but a TIMEOUT or a drop can).
+                if (error != null && lastSentGunColorsKey == key) lastSentGunColorsKey = null;
+            });
+        }
+
+        private static string ColorKey(float[] c)
+        {
+            return $"{Round3(c[0])},{Round3(c[1])},{Round3(c[2])}";
+        }
+
+        private static double Round3(float v)
+        {
+            return Math.Round(v, 3);
+        }
+
+        private static float Clamp01(float v)
+        {
+            if (float.IsNaN(v)) return 0f;
+            return v < 0f ? 0f : (v > 1f ? 1f : v);
         }
 
         private static void ExpireRequests(long now)
