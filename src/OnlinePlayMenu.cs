@@ -9,9 +9,9 @@ namespace ExScoringMod
     /// <summary>
     /// Online play menus:
     ///  - BuildSettings: the "Multiplayer" category of the song list's Options (GlobalOptions),
-    ///    settings only (Enable Online Play, Show Other Players);
+    ///    settings only (Enable Online Play, Show Other Players, Auto-Download Missing Songs);
     ///  - Build: the Online Play screen on the Main page (OnlinePlayScreen), not reachable from the
-    ///    song list. The settings at the top, then the lobby menu. Not in a lobby: create, join by code, the public lobby
+    ///    song list. No settings there (they live only in Options > Multiplayer); just the lobby menu. Not in a lobby: create, join by code, the public lobby
     ///    list. In a lobby: ready, leave, suggest a song, and for the host the lobby settings,
     ///    song selection, start/abort, kick and make host.
     /// The Main page's Online Play button (OnlinePlayButton) opens that screen.
@@ -32,7 +32,7 @@ namespace ExScoringMod
         private static bool initialized;
 
         /// <summary>
-        /// Host setting: the launch panel's Play (and Start Match) start with whoever is ready
+        /// Host setting: the lobby panel's Start Song (and Start Match) start with whoever is ready
         /// instead of waiting for everyone. Not saved; off in every new session.
         /// </summary>
         public static bool ForceStart { get; private set; }
@@ -80,16 +80,16 @@ namespace ExScoringMod
                 () => Config.EnableOnlinePlay,
                 v => MpSession.SetEnabled(v),
                 "Allows connecting to online play lobbies. Nothing connects while this is off");
-            OptionsMenuClone.AddRow(enableToggle, CreateShowOtherPlayersToggle());
-        }
-
-        /// <summary>Show Other Players (MpPresence): the lobby's avatars in the menus.</summary>
-        private static UnityEngine.GameObject CreateShowOtherPlayersToggle()
-        {
-            return OptionsMenuClone.CreateToggle(1, "Show Other Players",
+            var showOthers = OptionsMenuClone.CreateToggle(1, "Show Other Players",
                 () => Config.ShowOtherPlayers,
                 v => Config.UpdateShowOtherPlayers(v),
                 "Shows the other players in your lobby in the menus. Your own pose is still shared while this is off");
+            OptionsMenuClone.AddRow(enableToggle, showOthers);
+
+            OptionsMenuClone.AddRow(OptionsMenuClone.CreateToggle(0, "Auto-Download Missing Songs",
+                () => Config.AutoDownloadSongs,
+                v => Config.UpdateAutoDownloadSongs(v),
+                "In a lobby, downloads the selected song and the players' suggestions you don't have, when they're on Maudica"));
         }
 
         // ── Online Play (lobby) category ──
@@ -98,22 +98,12 @@ namespace ExScoringMod
         {
             codeLabel = null;
 
-            // Settings first (the same toggles as Options > Multiplayer in the song list).
-            OptionsMenuClone.AddRow(OptionsMenuClone.CreateToggle(0, "Enable Online Play",
-                () => Config.EnableOnlinePlay,
-                v =>
-                {
-                    MpSession.SetEnabled(v);
-                    SetStatus("");
-                    if (v) MpSession.Connect();
-                    Redraw();
-                },
-                "Allows connecting to online play lobbies. Nothing connects while this is off"),
-                CreateShowOtherPlayersToggle());
-
+            // The settings (Enable Online Play, Show Other Players, Auto-Download Missing Songs)
+            // live only in the song list's Options > Multiplayer (BuildSettings).
             if (!Config.EnableOnlinePlay)
             {
                 OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Online Play is turned off"));
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Turn it on in Options > Multiplayer in the song list"));
                 return;
             }
 
@@ -233,18 +223,18 @@ namespace ExScoringMod
 
             if (isHost)
             {
-                OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Host"));
+                var visibility = OptionsMenuClone.CreateToggle(1, "Public",
+                    () => MpSession.Lobby != null && MpSession.Lobby.visibility == "public",
+                    v => MpSession.UpdateLobbySettings(isPublic: v, onComplete: ReportError),
+                    "Public lobbies are listed for everyone; private ones can only be joined by code");
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Host"), visibility);
 
                 GameObject select = current != null
                     ? OptionsMenuClone.CreateButton(0, "Select: " + Trim(current.title, 18),
                         () => MpSession.SelectSong(current, ReportError),
                         $"Makes {current.title} [{current.difficulty}] (selected in the song list) the lobby's song")
                     : OptionsMenuClone.CreateHeader(0, "Pick a song in the song list");
-                var visibility = OptionsMenuClone.CreateToggle(1, "Public",
-                    () => MpSession.Lobby != null && MpSession.Lobby.visibility == "public",
-                    v => MpSession.UpdateLobbySettings(isPublic: v, onComplete: ReportError),
-                    "Public lobbies are listed for everyone; private ones can only be joined by code");
-                OptionsMenuClone.AddRow(select, visibility);
+                OptionsMenuClone.AddRow(select);
 
                 string[] sizes = { "2", "3", "4", "5", "6", "7", "8" };
                 var maxPlayers = OptionsMenuClone.CreateCycle(0, "Max Players", sizes,
@@ -260,7 +250,7 @@ namespace ExScoringMod
                 if (!inMatch)
                 {
                     var start = OptionsMenuClone.CreateButton(0, "Start Match", () => MpSession.StartMatch(ForceStart, ReportError),
-                        "Starts the selected song (same as Play on the launch panel)");
+                        "Starts the selected song (same as Start Song on the lobby panel)");
                     var force = OptionsMenuClone.CreateToggle(1, "Force Start",
                         () => ForceStart,
                         v => ForceStart = v,

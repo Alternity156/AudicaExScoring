@@ -116,6 +116,7 @@ namespace ExScoringMod
         public static string onlinePlayHeader = "[Header]Online Play";
         public static bool EnableOnlinePlay;
         public static bool ShowOtherPlayers;
+        public static bool AutoDownloadSongs;
 
         public static string gunTricksHeader = "[Header]Gun Tricks";
         public static bool DisableThrowing;
@@ -224,6 +225,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterString(Category, nameof(onlinePlayHeader), "", "[Header]Online Play");
             MelonPrefs.RegisterBool(Category, nameof(EnableOnlinePlay), false, "Allows connecting to online play lobbies. Nothing connects while this is off");
             MelonPrefs.RegisterBool(Category, nameof(ShowOtherPlayers), true, "Shows the other players in your lobby (head, body, hands and guns) in the menus. Your own pose is still shared while this is off");
+            MelonPrefs.RegisterBool(Category, nameof(AutoDownloadSongs), true, "In an online lobby, automatically downloads the selected song and the players' suggestions you don't have, when they're on Maudica");
 
             MelonPrefs.RegisterString(Category, nameof(gunTricksHeader), "", "[Header]Gun Tricks");
             MelonPrefs.RegisterBool(Category, nameof(DisableThrowing), false, "Prevents the guns from being thrown");
@@ -311,6 +313,7 @@ namespace ExScoringMod
 
             EnableOnlinePlay = MelonPrefs.GetBool(Category, nameof(EnableOnlinePlay));
             ShowOtherPlayers = MelonPrefs.GetBool(Category, nameof(ShowOtherPlayers));
+            AutoDownloadSongs = MelonPrefs.GetBool(Category, nameof(AutoDownloadSongs));
 
             DisableThrowing = MelonPrefs.GetBool(Category, nameof(DisableThrowing));
             UncapThrowDistance = MelonPrefs.GetBool(Category, nameof(UncapThrowDistance));
@@ -332,6 +335,13 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(ShowOtherPlayers), value);
             ShowOtherPlayers = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateAutoDownloadSongs(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(AutoDownloadSongs), value);
+            AutoDownloadSongs = value;
             MelonPrefs.SaveConfig();
         }
 

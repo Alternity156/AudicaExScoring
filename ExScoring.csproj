@@ -230,6 +230,7 @@
     <Compile Include="src\LobbyPanel.cs" />
     <Compile Include="src\LobbySongList.cs" />
     <Compile Include="src\MarathonSetup.cs" />
+    <Compile Include="src\MaudicaLookup.cs" />
     <Compile Include="src\ModeButtons.cs" />
     <Compile Include="src\ModifiersPage.cs" />
     <Compile Include="src\ModSettingsBlocker.cs" />

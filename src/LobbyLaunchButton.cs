@@ -5,18 +5,21 @@ using UnityEngine;
 namespace ExScoringMod
 {
     /// <summary>
-    /// The launch panel's Play button while the player is in an online lobby. For the song (and
-    /// difficulty) selected in the song list:
-    ///  - "Select": suggests it (setSongChoice);
-    ///  - "Unselect": it's your suggestion, withdraws it;
-    ///  - "Select" greyed out: someone else already suggested this song (any difficulty);
-    ///  - host, on a suggested song: "Play", which starts the match. Greyed out until every
-    ///    connected player is ready, unless the host turned Force Start on (OnlinePlayMenu).
-    /// Out of a lobby the button is put back exactly as it was.
+    /// The launch panel's Play button while the player is in an online lobby, the same for
+    /// everyone, host included: always "Select", which suggests the song (and difficulty)
+    /// selected in the song list (setSongChoice). A new suggestion replaces your previous one; the
+    /// same song at the same difficulty again does nothing. Several players may suggest the same
+    /// song (LobbySongList shows it once, with every name). Withdrawing is on the Online Play
+    /// screen. Out of a lobby the button is put back exactly as it was.
     ///
-    /// The host selecting a suggested song in the song list also makes it the lobby's song
-    /// (selectSong fromChoiceOf), so the other players can get it and ready up while the host
-    /// waits on Play.
+    /// Host selection: the lobby's song is the last song the host selected in the song list that
+    /// is in the online pool (someone's suggestion, the host's own included), at the host's
+    /// difficulty. Every RefreshIntervalMs on the song page, when the host's song-list selection is
+    /// a pool song and differs from the lobby's (song or difficulty), it goes out as selectSong
+    /// (lobby phase only). Selecting a song outside the pool changes nothing for the others; the
+    /// lobby keeps the last pool song, and the lobby panel's Start Song is greyed out until the
+    /// host is back on the lobby's song (HostOnLobbySong). Becoming host doesn't send the song you
+    /// happen to be on; only picking a song or difficulty afterwards does.
     /// </summary>
     internal static class LobbyLaunchButton
     {
@@ -24,7 +27,10 @@ namespace ExScoringMod
         private const float DisabledLabelAlpha = 0.25f;
         private const long RefreshIntervalMs = 200;
 
-        private enum Mode { None, Select, Unselect, Taken, Play }
+        // Host selection: the last song|difficulty sent (or seen), for the lobby it was sent in.
+        private static string lastSelectionKey;
+        private static string lastSelectionLobbyId;
+        private static bool wasHost;
 
         private static GameObject playObject;
         private static GunButton playButton;
@@ -46,6 +52,11 @@ namespace ExScoringMod
 
             try
             {
+                // Before the button lookup: the host's pick counts even if the launch panel's
+                // button can't be found right now.
+                if (MpSession.InLobby) UpdateHostSelection();
+                else wasHost = false;
+
                 if (!FindButton()) return;
 
                 if (!MpSession.InLobby)
@@ -54,8 +65,7 @@ namespace ExScoringMod
                     return;
                 }
 
-                Mode mode = CurrentMode(out bool enabled);
-                Apply(LabelFor(mode), enabled);
+                Apply("Select", MpSession.Lobby != null && CurrentSongRef() != null);
             }
             catch (Exception ex)
             {
@@ -71,96 +81,88 @@ namespace ExScoringMod
         {
             if (!MpSession.InLobby || MpGameplay.IsLaunchingMatch) return false;
 
-            Mode mode = CurrentMode(out bool enabled);
-            if (!enabled) return true;
+            MpSongRef song = CurrentSongRef();
+            if (song == null) return true;
 
-            switch (mode)
-            {
-                case Mode.Select:
-                    MpSongRef song = CurrentSongRef();
-                    if (song != null) MpSession.SetSongChoice(song, ReportError);
-                    break;
-                case Mode.Unselect:
-                    MpSession.SetSongChoice(null, ReportError);
-                    break;
-                case Mode.Play:
-                    MpSession.StartMatch(OnlinePlayMenu.ForceStart, ReportError);
-                    break;
-            }
+            // Already your suggestion at this difficulty: nothing to send.
+            MpSongRef mine = MpSession.MyPlayer?.songChoice;
+            if (mine != null && mine.songId == song.songId && mine.difficulty == song.difficulty) return true;
+
+            MpSession.SetSongChoice(song, ReportError);
             nextRefreshMs = 0;
             return true;
         }
 
         /// <summary>
-        /// From MpGameplay.OnSongBrowsed (song list selection). The host picking a suggested song
-        /// makes it the lobby's song.
+        /// From MpGameplay.OnSongBrowsed (song list selection): check the host's selection on the
+        /// next tick instead of waiting for the timer.
         /// </summary>
         public static void OnSongSelected(SongList.SongData song)
         {
-            if (song == null || !MpSession.IsConnected || !MpSession.IsHost) return;
+            nextRefreshMs = 0;
+        }
+
+        // ── Host selection ──
+
+        /// <summary>
+        /// Sends the host's song-list selection (song + difficulty) as the lobby's song when it is a
+        /// pool song (someone's suggestion) and differs from the lobby's. Not during a match, and
+        /// not right when becoming host.
+        /// </summary>
+        private static void UpdateHostSelection()
+        {
             MpLobbyState lobby = MpSession.Lobby;
-            if (lobby == null || lobby.phase != "lobby") return;
+            bool isHost = MpSession.IsHost;
+            MpSongRef current = isHost ? CurrentSongRef() : null;
+            string key = current != null ? current.songId + "|" + current.difficulty : null;
+            bool inPool = current != null && LobbySongList.FindSuggester(current.songId) != null;
 
-            MpPlayerState suggester = LobbySongList.FindSuggester(song.songID);
-            if (suggester == null) return;
-            if (lobby.selectedSong != null && lobby.selectedSong.songId == song.songID) return;
+            if (!isHost || lobby == null)
+            {
+                wasHost = false;
+                return;
+            }
 
-            DebugLog.Log($"[LobbyLaunchButton] host picked {song.songID}, suggested by {suggester.nickname}: selecting it for the lobby");
-            MpSession.SelectSongFromChoiceOf(suggester.userId, ReportError);
+            if (!wasHost || lastSelectionLobbyId != lobby.lobbyId)
+            {
+                // Just became host (or joined/created this lobby as host): only later picks count.
+                wasHost = true;
+                lastSelectionLobbyId = lobby.lobbyId;
+                lastSelectionKey = key;
+                return;
+            }
+
+            // Not a pool song: nothing changes for the others (Start Song stays greyed out).
+            // A song that joins the pool later (someone suggests it) is picked up then.
+            if (key == null || !inPool) return;
+            if (!MpSession.IsConnected || lobby.phase != "lobby") return; // retried once back in the lobby
+
+            MpSongRef selected = lobby.selectedSong;
+            if (selected != null && selected.songId == current.songId && selected.difficulty == current.difficulty)
+            {
+                lastSelectionKey = key;
+                return;
+            }
+            if (key == lastSelectionKey) return; // already sent; waiting for the lobbyState (or it was refused)
+
+            lastSelectionKey = key;
+
+            DebugLog.Log($"[LobbyLaunchButton] host picked {current.songId} [{current.difficulty}]: selecting it for the lobby");
+            MpSession.SelectSong(current, ReportError);
         }
 
         // ── State ──
 
-        private static Mode CurrentMode(out bool enabled)
+        /// <summary>
+        /// True when the host's song-list selection (song + difficulty) is the lobby's selected song,
+        /// so the lobby panel's Start Song can start it.
+        /// </summary>
+        public static bool HostOnLobbySong()
         {
-            enabled = false;
-            MpLobbyState lobby = MpSession.Lobby;
-            string songId = ExScoring.selectedSong;
-            if (lobby == null || string.IsNullOrEmpty(songId)) return Mode.Select;
-
-            MpPlayerState me = MpSession.MyPlayer;
-            MpPlayerState suggester = LobbySongList.FindSuggester(songId);
-
-            if (MpSession.IsHost && suggester != null)
-            {
-                enabled = lobby.phase == "lobby"
-                          && lobby.selectedSong != null && lobby.selectedSong.songId == songId
-                          && (OnlinePlayMenu.ForceStart || EveryoneReady(lobby));
-                return Mode.Play;
-            }
-
-            if (me != null && me.songChoice != null && me.songChoice.songId == songId)
-            {
-                enabled = true;
-                return Mode.Unselect;
-            }
-
-            if (LobbySongList.FindSuggester(songId, excludeMe: true) != null) return Mode.Taken;
-
-            enabled = true;
-            return Mode.Select;
-        }
-
-        /// <summary>Every connected player other than the host is ready (the host counts as ready).</summary>
-        private static bool EveryoneReady(MpLobbyState lobby)
-        {
-            if (lobby.players == null) return false;
-            foreach (MpPlayerState p in lobby.players)
-            {
-                if (p == null || !p.connected || p.userId == lobby.hostUserId) continue;
-                if (!p.ready) return false;
-            }
-            return true;
-        }
-
-        private static string LabelFor(Mode mode)
-        {
-            switch (mode)
-            {
-                case Mode.Unselect: return "Unselect";
-                case Mode.Play: return "Play";
-                default: return "Select";
-            }
+            MpSongRef selected = MpSession.Lobby?.selectedSong;
+            MpSongRef current = CurrentSongRef();
+            return selected != null && current != null
+                   && selected.songId == current.songId && selected.difficulty == current.difficulty;
         }
 
         private static MpSongRef CurrentSongRef()

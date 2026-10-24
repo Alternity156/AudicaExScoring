@@ -29,6 +29,9 @@ namespace ExScoringMod
         private static bool searching = false;
         private static bool disabled = false;
 
+        /// <summary>True while a song-list reload has Solo/Campaign/Party switched off.</summary>
+        public static bool ButtonsDisabled => disabled;
+
         private static List<Action> postProcessingActions = new List<Action>();
 
         /// <summary>

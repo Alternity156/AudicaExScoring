@@ -8,14 +8,22 @@ namespace ExScoringMod
 {
     /// <summary>
     /// The "Suggested Songs" folder of the song list, shown at the top while the player is in an
-    /// online lobby: one row per player's suggestion (PlayerState.songChoice), titled
-    /// "Destiny (Suggested by Alternity)".
+    /// online lobby: one row per suggested song (PlayerState.songChoice), titled with everyone
+    /// who suggested it, "Destiny (Suggested by Alternity, Bob)".
     ///  - Installed: a normal song row (with that title), so it selects like any song.
     ///  - Not installed but found on Maudica: a downloadable row, like Song Requests / search.
     ///  - Not found: a red row that can't be shot, "(Unavailable to download)", with whatever info
     ///    the suggestion carries.
     /// Rebuilt (FolderRowManager.RefreshList) when the suggestions change and when a Maudica lookup
     /// or download finishes.
+    ///
+    /// The lobby's selected song gets its own row too, "Title (Selected by host)", while it's
+    /// missing and isn't also a suggestion, so it can be downloaded by hand (the host now picks
+    /// straight from their song list, so the selection isn't always a suggestion).
+    ///
+    /// Maudica lookups go through MaudicaLookup (audica_id first). With Auto-Download Missing
+    /// Songs on, Tick downloads missing suggestions on its own, one at a time, in join order, and
+    /// only after the selected song (MpGameplay downloads that one). Not during songs.
     /// </summary>
     internal static class LobbySongList
     {
@@ -45,6 +53,9 @@ namespace ExScoringMod
         private static bool initialized;
         private static string lastSignature;
 
+        private const long AutoDownloadCheckIntervalMs = 1000;
+        private static long nextAutoDownloadCheckMs;
+
         public static void Init()
         {
             if (initialized) return;
@@ -66,25 +77,73 @@ namespace ExScoringMod
             if (!MpSession.InLobby || rows == null) return;
 
             List<KeyValuePair<MpPlayerState, MpSongRef>> suggestions = GetSuggestions();
+            MpSongRef hostSelection = MissingHostSelection(suggestions);
+            List<KeyValuePair<MpSongRef, string>> grouped = GroupBySong(suggestions);
+            int count = grouped.Count + (hostSelection != null ? 1 : 0);
 
             int insertAt = 0;
             while (insertAt < rows.Count && rows[insertAt].kind == ViewRowKind.Action) insertAt++;
 
             List<ViewRow> mine = new List<ViewRow>();
-            mine.Add(ViewRow.Header(FolderName, suggestions.Count,
-                suggestions.Count == 0 ? "No suggestions yet" : null, FolderColor));
+            mine.Add(ViewRow.Header(FolderName, count,
+                count == 0 ? "No suggestions yet" : null, FolderColor));
 
             if (SongFolderManager.openFolder == FolderName)
             {
-                foreach (var entry in suggestions) mine.Add(BuildRow(entry.Key, entry.Value));
+                if (hostSelection != null)
+                    mine.Add(BuildRow(hostSelection, $"{hostSelection.title ?? hostSelection.songId} (Selected by host)"));
+                foreach (var entry in grouped)
+                    mine.Add(BuildRow(entry.Key, $"{entry.Key.title ?? entry.Key.songId} (Suggested by {entry.Value})"));
             }
 
             rows.InsertRange(insertAt, mine);
         }
 
-        private static ViewRow BuildRow(MpPlayerState player, MpSongRef song)
+        /// <summary>
+        /// One entry per suggested song, in the order it was first suggested (join order), with the
+        /// first suggester's song ref and every suggester's nickname ("Alternity, Bob"). Several
+        /// players may suggest the same song, possibly at different difficulties.
+        /// </summary>
+        private static List<KeyValuePair<MpSongRef, string>> GroupBySong(List<KeyValuePair<MpPlayerState, MpSongRef>> suggestions)
         {
-            string label = $"{song.title ?? song.songId} (Suggested by {player.nickname})";
+            var order = new List<string>();
+            var songs = new Dictionary<string, MpSongRef>();
+            var names = new Dictionary<string, List<string>>();
+            foreach (var entry in suggestions)
+            {
+                string songId = entry.Value.songId;
+                if (!songs.ContainsKey(songId))
+                {
+                    order.Add(songId);
+                    songs[songId] = entry.Value;
+                    names[songId] = new List<string>();
+                }
+                names[songId].Add(entry.Key.nickname);
+            }
+
+            var result = new List<KeyValuePair<MpSongRef, string>>();
+            foreach (string songId in order)
+                result.Add(new KeyValuePair<MpSongRef, string>(songs[songId], string.Join(", ", names[songId].ToArray())));
+            return result;
+        }
+
+        /// <summary>
+        /// The lobby's selected song when this player is missing it and it isn't one of the
+        /// suggestions (those already have a row), or null.
+        /// </summary>
+        private static MpSongRef MissingHostSelection(List<KeyValuePair<MpPlayerState, MpSongRef>> suggestions)
+        {
+            MpSongRef selected = MpSession.Lobby?.selectedSong;
+            if (selected == null || string.IsNullOrEmpty(selected.songId) || IsInstalled(selected.songId)) return null;
+            foreach (var entry in suggestions)
+            {
+                if (entry.Value.songId == selected.songId) return null;
+            }
+            return selected;
+        }
+
+        private static ViewRow BuildRow(MpSongRef song, string label)
+        {
             string info = string.IsNullOrEmpty(song.mapper) ? (song.artist ?? "") : $"{song.artist} ({song.mapper})";
 
             if (IsInstalled(song.songId)) return ViewRow.SongRow(song.songId, label);
@@ -97,6 +156,7 @@ namespace ExScoringMod
                     var row = ViewRow.DownloadableSongRow(lookup.map.song_id, label, song.artist, song.mapper,
                         lookup.map.download_url, DownloadableColor, () => Download(song.songId));
                     if (lookup.downloading) row.subLabel = $"Downloading... {Math.Max(0, lookup.percent)}%";
+                    else if (MpGameplay.DownloadingSongId == song.songId) row.subLabel = "Downloading...";
                     else if (lookup.failed) row.subLabel = "Download failed - shoot to retry";
                     return row;
 
@@ -150,6 +210,7 @@ namespace ExScoringMod
         {
             if (!MpSession.InLobby) return "";
             StringBuilder sb = new StringBuilder("lobby");
+            sb.Append('|').Append(MpSession.Lobby?.selectedSong?.songId ?? "-"); // the "Selected by host" row
             foreach (var entry in GetSuggestions())
             {
                 sb.Append('|').Append(entry.Key.userId).Append(':').Append(entry.Key.nickname)
@@ -185,58 +246,71 @@ namespace ExScoringMod
             Lookup lookup = new Lookup { state = LookupState.Searching };
             lookups[song.songId] = lookup;
 
-            string songId = song.songId;
-            Action<string, APISongList> onDone = (query, list) =>
+            // audica_id first, then maudicaId, then a title search (MaudicaLookup). The callback can
+            // run right away when the answer is already cached.
+            bool answeredNow = true;
+            MaudicaLookup.Find(song, match =>
             {
-                Song match = PickMatch(list, song);
                 lookup.state = match != null ? LookupState.Found : LookupState.NotFound;
                 lookup.map = match;
-                DebugLog.Log($"[LobbySongList] Maudica lookup for {songId}: {(match != null ? "found " + match.song_id : "not found")}");
-                Refresh();
-            };
-
-            try
-            {
-                if (song.maudicaId.HasValue)
-                    MelonCoroutines.Start(SongDownloader.DoMaudicaIDSearch(song.maudicaId.Value.ToString(), onDone));
-                else
-                    MelonCoroutines.Start(SongDownloader.DoSongWebSearch(song.title ?? songId, onDone, DifficultyFilter.All, false, 1, false, 30));
-            }
-            catch (Exception ex)
-            {
-                DebugLog.Log($"[LobbySongList] Maudica lookup for {songId} failed: {ex.Message}");
-                lookup.state = LookupState.NotFound;
-            }
+                if (!answeredNow) Refresh();
+            });
+            answeredNow = false;
             return lookup;
         }
 
-        /// <summary>The Maudica map that is this song: same song id, or same title + artist + mapper.</summary>
-        private static Song PickMatch(APISongList list, MpSongRef song)
+        // ── Auto-download (Config.AutoDownloadSongs) ──
+
+        /// <summary>
+        /// Once per frame from ExScoring.OnUpdate. About once a second, in a lobby with
+        /// Auto-Download Missing Songs on and outside songs, starts the next missing suggestion's
+        /// download: one at a time, the selected song first (MpGameplay), then suggestions in join
+        /// order. A failed download isn't retried on its own (shooting its row retries it).
+        /// </summary>
+        public static void Tick()
         {
-            if (list == null || list.songs == null) return null;
+            if (!Config.AutoDownloadSongs || !MpSession.InLobby) return;
 
-            foreach (Song s in list.songs)
+            MenuState.State state = ExScoring.menuState;
+            if (state == MenuState.State.Launching || state == MenuState.State.Launched) return;
+
+            long now = MpSession.LocalNowMs;
+            if (now < nextAutoDownloadCheckMs) return;
+            nextAutoDownloadCheckMs = now + AutoDownloadCheckIntervalMs;
+
+            try
             {
-                if (s != null && !string.IsNullOrEmpty(s.song_id) && s.song_id == song.songId) return s;
-            }
+                if (SongList.I == null || SongList.OnSongListLoaded == null || !SongList.OnSongListLoaded.mDone) return;
+                if (MpGameplay.SelectedSongDownloadPending) return;
+                foreach (Lookup existing in lookups.Values)
+                {
+                    if (existing.downloading) return;
+                }
 
-            if (string.IsNullOrEmpty(song.title)) return null;
-            foreach (Song s in list.songs)
+                string selectedId = MpSession.Lobby?.selectedSong?.songId;
+                foreach (var entry in GetSuggestions())
+                {
+                    MpSongRef song = entry.Value;
+                    if (song.songId == selectedId || IsInstalled(song.songId)) continue;
+
+                    Lookup lookup = EnsureLookup(song);
+                    if (lookup.state != LookupState.Found || lookup.downloading || lookup.failed) continue;
+
+                    DebugLog.Log($"[LobbySongList] auto-downloading {song.songId}, suggested by {entry.Key.nickname}");
+                    Download(song.songId);
+                    return;
+                }
+            }
+            catch (Exception ex)
             {
-                if (s == null) continue;
-                if (Same(s.title, song.title) && Same(s.artist, song.artist) && Same(s.author, song.mapper)) return s;
+                DebugLog.Log("[LobbySongList] auto-download check failed: " + ex.Message);
             }
-            return null;
-        }
-
-        private static bool Same(string a, string b)
-        {
-            return string.Equals((a ?? "").Trim(), (b ?? "").Trim(), StringComparison.OrdinalIgnoreCase);
         }
 
         private static void Download(string songId)
         {
             if (!lookups.TryGetValue(songId, out Lookup lookup) || lookup.map == null || lookup.downloading) return;
+            if (MpGameplay.DownloadingSongId == songId) return; // the lobby's own download has it
 
             Song map = lookup.map;
             lookup.downloading = true;

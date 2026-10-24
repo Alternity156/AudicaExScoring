@@ -271,14 +271,50 @@ namespace ExScoringMod
                 return;
             }
 
-            if (selected.maudicaId.HasValue && !failedDownloadSongIds.Contains(songId))
+            if (failedDownloadSongIds.Contains(songId))
             {
-                MelonCoroutines.Start(DownloadForLobby(songId, selected.maudicaId.Value));
+                // Fetching it failed this session (or the map wasn't this song).
+                MpSession.SetSongStatus(songId, "unavailable", null, new string[0]);
                 return;
             }
 
-            // Not installed, and no Maudica map to fetch (or fetching it failed).
-            MpSession.SetSongStatus(songId, "unavailable", null, new string[0]);
+            if (Config.AutoDownloadSongs)
+            {
+                MelonCoroutines.Start(DownloadForLobby(selected));
+                return;
+            }
+
+            // Auto-download off: "missing" when Maudica has it (it can be downloaded by hand from
+            // the Suggested Songs folder), "unavailable" when it doesn't.
+            MaudicaLookup.State? lookup = MaudicaLookup.Peek(songId, out Song unused);
+            if (lookup == null)
+            {
+                MaudicaLookup.Find(selected, map => { nextStatusCheckMs = 0; });
+                MpSession.SetSongStatus(songId, "missing", null, new string[0]);
+                return;
+            }
+            MpSession.SetSongStatus(songId, lookup == MaudicaLookup.State.NotFound ? "unavailable" : "missing", null, new string[0]);
+        }
+
+        /// <summary>The selected song being downloaded by the lobby's auto-download, or null.</summary>
+        public static string DownloadingSongId => downloadingSongId;
+
+        /// <summary>
+        /// True while the lobby's selected song is missing and auto-download will fetch (or is
+        /// fetching) it: other auto-downloads wait so the selected song goes first.
+        /// </summary>
+        public static bool SelectedSongDownloadPending
+        {
+            get
+            {
+                if (downloadingSongId != null) return true;
+                if (!Config.AutoDownloadSongs) return false;
+                MpSongRef selected = MpSession.Lobby?.selectedSong;
+                if (selected == null || string.IsNullOrEmpty(selected.songId)) return false;
+                if (failedDownloadSongIds.Contains(selected.songId)) return false;
+                if (SongList.I == null || SongList.I.GetSong(selected.songId) != null) return false;
+                return MaudicaLookup.Peek(selected.songId, out Song unused) != MaudicaLookup.State.NotFound;
+            }
         }
 
         /// <summary>The song's difficulties with at least one cue, or null when it isn't installed.</summary>
@@ -302,29 +338,32 @@ namespace ExScoringMod
             return available.ToArray();
         }
 
-        private static IEnumerator DownloadForLobby(string songId, int maudicaId)
+        private static IEnumerator DownloadForLobby(MpSongRef selected)
         {
+            string songId = selected.songId;
             downloadingSongId = songId;
-            Log($"Selected song {songId} is missing: downloading Maudica map {maudicaId}");
+            Log($"Selected song {songId} is missing: looking it up on Maudica to download it");
             MpSession.SetSongStatus(songId, "downloading", 0f, new string[0]);
 
-            APISongList found = null;
+            // audica_id first, then the server's maudicaId, then a title search (MaudicaLookup).
+            Song map = null;
             bool searchDone = false;
-            MelonCoroutines.Start(SongDownloader.DoMaudicaIDSearch(maudicaId.ToString(), (id, list) =>
+            MaudicaLookup.Find(selected, found =>
             {
-                found = list;
+                map = found;
                 searchDone = true;
-            }));
+            });
 
-            float deadline = Time.unscaledTime + MaudicaSearchTimeoutSeconds;
+            // MaudicaLookup times each step out itself; this only guards against it never answering.
+            float deadline = Time.unscaledTime + MaudicaSearchTimeoutSeconds * 4f;
             while (!searchDone && Time.unscaledTime < deadline) yield return null;
 
-            Song map = found != null && found.songs != null && found.songs.Length > 0 ? found.songs[0] : null;
             if (map == null || string.IsNullOrEmpty(map.download_url))
             {
                 FinishDownload(songId, false, searchDone ? "Maudica has no such map" : "the Maudica lookup timed out");
                 yield break;
             }
+            Log($"Downloading {songId} from {map.download_url}");
 
             bool downloadDone = false;
             bool success = false;

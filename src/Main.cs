@@ -500,6 +500,8 @@ namespace ExScoringMod
             MpGameplay.Tick();
             LobbyPanel.Tick();
             LobbyLaunchButton.Tick();
+            LobbySongList.Tick();
+            OnlinePlayButton.Tick();
             FolderRowManager.TickSortLabels();
         }
 

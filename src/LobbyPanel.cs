@@ -47,11 +47,23 @@ namespace ExScoringMod
         // toggles), made by the song-page options clone's OptionsMenu and moved onto the panel,
         // just under its bottom edge. Menus only, outside matches. Position is relative to the
         // panel's bottom center (the panel grows upward from there).
+        // Position tuned in game at scale 0.1; may need re-tuning at 0.05.
         private static readonly Vector3 ReadyButtonPosition = new Vector3(-0.125f, -0.044f, -0.005f);
-        private static readonly Vector3 ReadyButtonScale = new Vector3(0.1f, 0.1f, 0.1f);
+        private static readonly Vector3 PanelButtonScale = new Vector3(0.05f, 0.05f, 0.05f);
+
+        // Host-only Start Song button: a plain options-menu button (no checkbox), same scale, under
+        // the Ready toggle. Starts the lobby's selected song (startMatch, with the host's Force
+        // Start setting). Greyed out until a song is selected and every connected player is ready,
+        // unless Force Start is on. Position from in-game tuning (2026-10-24).
+        private static readonly Vector3 StartButtonPosition = new Vector3(-0.125f, -0.125f, -0.005f);
+        private const float DisabledLabelAlpha = 0.25f;
 
         private static GameObject readyObject;
         private static GunButton readyButton;
+
+        private static GameObject startObject;
+        private static GunButton startButton;
+        private static TextMeshPro startLabel;
 
         private static GameObject root;
         private static GameObject background;
@@ -115,6 +127,7 @@ namespace ExScoringMod
             if (!want)
             {
                 if (readyObject != null && readyObject.activeSelf) readyObject.SetActive(false);
+                if (startObject != null && startObject.activeSelf) startObject.SetActive(false);
                 return;
             }
 
@@ -126,6 +139,110 @@ namespace ExScoringMod
             ShellPage page = CurrentShellPage();
             if (page != null) readyButton.mShellPage = page;
             readyButton.SetInteractable(true);
+
+            UpdateStartButton(page);
+        }
+
+        // ── Start Song (host) ──
+
+        private static void UpdateStartButton(ShellPage page)
+        {
+            if (!MpSession.IsHost)
+            {
+                if (startObject != null && startObject.activeSelf) startObject.SetActive(false);
+                return;
+            }
+
+            if (!EnsureStartButton()) return;
+            if (!startObject.activeSelf) startObject.SetActive(true);
+            if (page != null) startButton.mShellPage = page;
+
+            bool enabled = CanStart();
+            startButton.SetInteractable(enabled);
+            if (startLabel != null)
+            {
+                float alpha = enabled ? 1f : DisabledLabelAlpha;
+                if (startLabel.alpha != alpha) startLabel.alpha = alpha;
+            }
+        }
+
+        /// <summary>
+        /// A selected song that is also the host's song-list selection, and every connected player
+        /// ready (the host counts as ready), or Force Start on.
+        /// </summary>
+        private static bool CanStart()
+        {
+            MpLobbyState lobby = MpSession.Lobby;
+            if (lobby == null || lobby.phase != "lobby" || lobby.selectedSong == null) return false;
+            // On the song page, the host must be on the lobby's song (LobbyLaunchButton). Anywhere
+            // else it's fine: the match always plays the lobby's selected song (the last pool song
+            // the host picked); matchPrepare sets the local selection to it before launching.
+            if (ExScoring.menuState == MenuState.State.SongPage && !LobbyLaunchButton.HostOnLobbySong()) return false;
+            if (OnlinePlayMenu.ForceStart) return true;
+            if (lobby.players == null) return false;
+            foreach (MpPlayerState p in lobby.players)
+            {
+                if (p == null || !p.connected || p.userId == lobby.hostUserId) continue;
+                if (!p.ready) return false;
+            }
+            return true;
+        }
+
+        private static bool EnsureStartButton()
+        {
+            if (startObject != null && startButton != null) return true; // Unity-null: rebuilt if destroyed
+
+            if (!OptionsMenuClone.EnsureClone() || OptionsMenuClone.Menu == null) return false;
+
+            // A null isChecked makes a plain button, with no checkbox square.
+            OptionsMenuButton button = OptionsMenuClone.Menu.AddButton(0, "Start Song",
+                new Action(OnStartShot),
+                (OptionsMenuButton.IsCheckedDelegate)null,
+                "Starts the lobby's selected song for everyone");
+            if (button == null || button.button == null)
+            {
+                DebugLog.Log("[LobbyPanel] couldn't make the start button");
+                if (button != null) GameObject.Destroy(button.gameObject);
+                return false;
+            }
+
+            startObject = button.gameObject;
+            // No "(Clone)" in the name, and off the options menu, so its Wipe() never touches it.
+            startObject.name = "StartSongButton";
+            startObject.transform.SetParent(root.transform, false);
+            startObject.transform.localPosition = StartButtonPosition;
+            startObject.transform.localRotation = Quaternion.identity;
+            startObject.transform.localScale = PanelButtonScale;
+
+            startButton = button.button;
+            // It must stay after a shot (a shot that fails, e.g. NOT_ALL_READY, leaves the lobby as it was).
+            startButton.disableOnShot = false;
+            startButton.destroyOnShot = false;
+            startLabel = startObject.GetComponentInChildren<TextMeshPro>(true);
+            if (button.help != null) button.help.forceDisable = true; // no hover help bubble on the panel
+
+            DebugLog.Log("[LobbyPanel] start button created");
+            return true;
+        }
+
+        private static void OnStartShot()
+        {
+            if (!MpSession.IsHost || !CanStart()) return;
+            MpSession.StartMatch(OnlinePlayMenu.ForceStart, error =>
+            {
+                if (error == null) return;
+                string message = OnlinePlayMenu.Describe(error);
+                DebugLog.Log("[LobbyPanel] start: " + message);
+                try
+                {
+                    KataConfig.I.CreateDebugText(message, new Vector3(0f, -1f, 5f), 5f, null, false, 0.2f);
+                }
+                catch
+                {
+                    // The popup is a nicety; the log has it.
+                }
+            });
+            nextRefreshMs = 0;
         }
 
         private static bool EnsureReadyButton()
@@ -153,7 +270,7 @@ namespace ExScoringMod
             readyObject.transform.SetParent(root.transform, false);
             readyObject.transform.localPosition = ReadyButtonPosition;
             readyObject.transform.localRotation = Quaternion.identity;
-            readyObject.transform.localScale = ReadyButtonScale;
+            readyObject.transform.localScale = PanelButtonScale;
 
             readyButton = toggle.button;
             readyButton.SetInteractable(true);

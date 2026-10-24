@@ -117,6 +117,25 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// Look up maudica.com maps by the in-game song id (the .desc songID, e.g.
+        /// "weaponizedcelldwellershark_a0508d763c057c198291149233c4d150"), which identifies the exact
+        /// version of a map. Hands the caller an APISongList (normally 0 or 1 songs), or null when the
+        /// request failed or the response couldn't be read. Note that Song.song_id comes from the
+        /// download filename, so it can differ from the in-game id (no hash suffix): a hit here is
+        /// the right map whatever its song_id says.
+        /// </summary>
+        public static IEnumerator DoAudicaIdSearch(string audicaId, Action<string, APISongList> onSearchComplete)
+        {
+            string concatURL = apiUrl + "&audica_id=" + WebUtility.UrlEncode(audicaId ?? "");
+
+            WWW www = new WWW(concatURL);
+            yield return www;
+
+            APISongList result = ParseSearchPage(www, 1, 14);
+            onSearchComplete(audicaId, result);
+        }
+
+        /// <summary>
         /// Look up a single maudica.com map by its numeric site ID (the "-id N" form of !asr).
         /// Returns an APISongList (0 or 1 songs) through the same callback shape as DoSongWebSearch,
         /// keyed by the id string so the caller can correlate the result.
