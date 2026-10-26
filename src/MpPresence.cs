@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Text;
 using MelonLoader;
 using Newtonsoft.Json.Linq;
+using TMPro;
 using UnityEngine;
 
 namespace ExScoringMod
@@ -69,6 +70,22 @@ namespace ExScoringMod
     /// environment swaps it for another object, the template and every copy are rebuilt from the new
     /// one, and when there is none, nobody gets a disc.
     ///
+    /// Name labels (Config.ShowPlayerNames, only while ShowOtherPlayers is on): the player's
+    /// nickname (no guest/bot suffix) NameHeight above their interpolated head point, in world up,
+    /// under the avatar root (so it hides and is destroyed with the avatar), hidden while the head
+    /// part is missing. Each label is turned every frame to face one camera, upright, no roll.
+    /// Every player gets two labels, one per camera, kept apart by layers (camera dump 2026-10-26):
+    ///  - CenterEyeAnchor (headset) renders 20 HeadsetOnly and never 15 ThirdPersonAvatar
+    ///  - SpectatorCam (and its PreviewCam child) never renders 20; it renders 15 in both
+    ///    third-person modes (fixed and spinning) but not in first person
+    /// So while the spectator camera is on and renders 15 (third person), the headset label is on
+    /// 20 facing the headset and the spectator label on 15 facing SpectatorCam. Otherwise (first
+    /// person, which sits at the headset anyway, or no spectator camera) only the headset label is
+    /// shown, on layer 0, which both cameras render. The mode is checked every SpectatorCheckSeconds,
+    /// so switching spectator modes follows. No camera's culling mask is ever changed. The font and
+    /// material are copied from a native Main page label like LobbyPanel's; each label's material
+    /// instance is destroyed with the avatar.
+    ///
     /// Collisions: this player's thrown guns bounce off the other players' discs, guns, heads and
     /// bodies, as they do off the local platform and each other. Discs and guns carry a copy of the
     /// game's own collider:
@@ -107,6 +124,18 @@ namespace ExScoringMod
         private const string DiscColliderPath = "Static/GroundCollider";
         private const string GunColliderPath = "tricks";
         private const int PartColliderLayer = 11;        // Player: what the local guns are on
+
+        // Name labels.
+        private const float NameHeight = 0.35f;          // above the head point (eyes), world up (m)
+        private const float NameFontSize = 1.0f;         // TextMeshPro world size: ~0.12 m per line
+        private const float NameOutlineWidth = 0.2f;
+        private const int HeadsetNameLayer = 20;         // HeadsetOnly: the headset, never the spectator
+        private const int SpectatorNameLayer = 15;       // ThirdPersonAvatar: the spectator in 3rd person, never the headset
+        private const int SharedNameLayer = 0;           // Default: both, when only one label is shown
+        private const string SpectatorCamName = "SpectatorCam";
+        private const float SpectatorCheckSeconds = 0.5f;
+        // A native label whose font and material render well in this game (as LobbyPanel).
+        private const string NameFontSourcePath = "menu/ShellPage_Main/page/ShellPanel_Left";
 
         // Grid spot of each seat (index = seat, spot number = seat + 1), in units of SpotSpacing:
         // x = right, y = forward.
@@ -173,6 +202,11 @@ namespace ExScoringMod
             public readonly List<Material> TintRight = new List<Material>();
             public readonly List<Material> OwnedMaterials = new List<Material>();
             public string AppliedColorKey;
+            /// <summary>Faces the headset; on layer 20, or 0 when it is the only label.</summary>
+            public TextMeshPro NameHeadset;
+            /// <summary>Faces SpectatorCam, layer 15; only shown in its third-person modes.</summary>
+            public TextMeshPro NameSpectator;
+            public string AppliedName;
 
             // TorsoTrack state, in the sender's space.
             public bool BodyInit;
@@ -212,6 +246,11 @@ namespace ExScoringMod
         private static float nextDiscCheck;
 
         private static GameObject avatarHolder;
+
+        // Spectator camera, for the name labels.
+        private static Camera spectatorCam;
+        private static float nextSpectatorCheck;
+        private static bool splitNames; // two labels per player (spectator in third person)
 
         // Interpolation output, reused every frame.
         private static readonly Vector3[] curPos = new Vector3[PartCount];
@@ -529,6 +568,11 @@ namespace ExScoringMod
             MpLobbyState lobby = MpSession.Lobby;
             float dt = Time.deltaTime;
 
+            CheckSpectator();
+            Transform headsetEye = localHead;
+            if (headsetEye == null && Camera.main != null) headsetEye = Camera.main.transform;
+            Transform spectatorEye = splitNames && spectatorCam != null ? spectatorCam.transform : null;
+
             foreach (Remote remote in remotes.Values)
             {
                 if (!remote.Present || remote.Samples.Count == 0)
@@ -566,7 +610,138 @@ namespace ExScoringMod
                     }
                 }
 
+                UpdateNames(remote, player, headsetEye, spectatorEye);
+
                 SetVisible(remote, true);
+            }
+        }
+
+        // ── Name labels ──
+
+        /// <summary>
+        /// Every SpectatorCheckSeconds: finds SpectatorCam and decides whether each player needs a
+        /// second label for it (it is on and in third person: renders 15, never 20).
+        /// </summary>
+        private static void CheckSpectator()
+        {
+            if (Time.unscaledTime < nextSpectatorCheck) return;
+            nextSpectatorCheck = Time.unscaledTime + SpectatorCheckSeconds;
+
+            bool split = false;
+            try
+            {
+                if (spectatorCam == null || spectatorCam.WasCollected)
+                {
+                    spectatorCam = null;
+                    GameObject go = GameObject.Find(SpectatorCamName);
+                    if (go != null) spectatorCam = go.GetComponent<Camera>();
+                }
+
+                if (spectatorCam != null && spectatorCam.enabled && spectatorCam.gameObject.activeInHierarchy)
+                {
+                    int mask = spectatorCam.cullingMask;
+                    split = (mask & (1 << SpectatorNameLayer)) != 0 && (mask & (1 << HeadsetNameLayer)) == 0;
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"spectator camera check failed: {ex.Message}");
+                spectatorCam = null;
+            }
+
+            if (split != splitNames) Log(split ? "spectator in third person: one name label per camera" : "spectator off or in first person: one shared name label");
+            splitNames = split;
+        }
+
+        /// <summary>
+        /// Text, visibility, layer and facing of a player's labels. Called after the parts are
+        /// placed, so the head's world position is current.
+        /// </summary>
+        private static void UpdateNames(Remote remote, MpPlayerState player, Transform headsetEye, Transform spectatorEye)
+        {
+            if (remote.NameHeadset == null) return;
+
+            string name = player != null ? (player.nickname ?? "").Trim() : "";
+            if (name != remote.AppliedName)
+            {
+                remote.AppliedName = name;
+                string text = "<noparse>" + name.Replace("</noparse>", "") + "</noparse>";
+                remote.NameHeadset.text = text;
+                if (remote.NameSpectator != null) remote.NameSpectator.text = text;
+            }
+
+            bool show = Config.ShowPlayerNames && name.Length > 0 && remote.Head != null && curHas[PartHead];
+            Vector3 position = show ? remote.Head.position + Vector3.up * NameHeight : Vector3.zero;
+
+            ShowName(remote.NameHeadset, show, splitNames ? HeadsetNameLayer : SharedNameLayer, position, headsetEye);
+            ShowName(remote.NameSpectator, show && splitNames && spectatorEye != null, SpectatorNameLayer, position, spectatorEye);
+        }
+
+        private static void ShowName(TextMeshPro label, bool show, int layer, Vector3 position, Transform eye)
+        {
+            if (label == null) return;
+            GameObject go = label.gameObject;
+            if (go.activeSelf != show) go.SetActive(show);
+            if (!show) return;
+
+            if (go.layer != layer) SetLayerRecursive(go, layer); // TMP sub-meshes are children
+
+            Transform t = label.transform;
+            t.position = position;
+            if (eye == null) return;
+            // TextMeshPro reads from its -Z side, so +Z points away from the viewer; upright, no roll.
+            Vector3 away = position - eye.position;
+            if (away.sqrMagnitude > 0.0001f) t.rotation = Quaternion.LookRotation(away, Vector3.up);
+        }
+
+        /// <summary>A hidden label under the avatar root, with its own material (kept in owned).</summary>
+        private static TextMeshPro CreateNameLabel(GameObject root, string name, List<Material> owned)
+        {
+            GameObject go = new GameObject(name);
+            go.transform.SetParent(root.transform, false);
+            try
+            {
+                TextMeshPro text = go.AddComponent<TextMeshPro>();
+                text.fontSize = NameFontSize;
+                text.alignment = TextAlignmentOptions.Bottom;
+                text.enableWordWrapping = false;
+                text.overflowMode = TextOverflowModes.Overflow;
+                text.richText = true;
+                text.color = Color.white;
+                ApplyNameFont(text);
+                // fontMaterial makes this label's own material instance, so the outline never
+                // touches the game's shared font material.
+                Material mat = text.fontMaterial;
+                if (mat != null) owned.Add(mat);
+                text.outlineWidth = NameOutlineWidth;
+                text.outlineColor = Color.black;
+                text.rectTransform.pivot = new Vector2(0.5f, 0f); // grows upward from the label point
+                text.rectTransform.sizeDelta = new Vector2(3f, 0.5f);
+                go.SetActive(false); // shown once there is a head and a name
+                return text;
+            }
+            catch (Exception ex)
+            {
+                Log($"name label {name} failed: {ex.Message}");
+                UnityEngine.Object.Destroy(go);
+                return null;
+            }
+        }
+
+        /// <summary>The default TextMeshPro material is dim in game; copies a native label's (as LobbyPanel).</summary>
+        private static void ApplyNameFont(TextMeshPro target)
+        {
+            try
+            {
+                GameObject source = GameObject.Find(NameFontSourcePath);
+                TextMeshPro template = source != null ? source.GetComponentInChildren<TextMeshPro>(true) : null;
+                if (template == null || template.font == null) return; // keep the default
+                target.font = template.font;
+                target.fontSharedMaterial = template.fontSharedMaterial;
+            }
+            catch (Exception ex)
+            {
+                Log($"couldn't copy the game font for name labels: {ex.Message}");
             }
         }
 
@@ -708,6 +883,9 @@ namespace ExScoringMod
                 remote.LGun = CopyPart(tplGunL, root, "GunL");
                 remote.RGun = CopyPart(tplGunR, root, "GunR");
                 remote.Disc = CopyDisc(root);
+                remote.NameHeadset = CreateNameLabel(root, "NameHeadset", remote.OwnedMaterials);
+                remote.NameSpectator = CreateNameLabel(root, "NameSpectator", remote.OwnedMaterials);
+                remote.AppliedName = null;
 
                 CollectGunMaterials(remote.LGun, remote.TintLeft, remote.OwnedMaterials);
                 CollectGunMaterials(remote.RGun, remote.TintRight, remote.OwnedMaterials);
@@ -777,6 +955,8 @@ namespace ExScoringMod
             remote.Root = null;
             remote.Head = remote.Body = remote.LHand = remote.RHand = remote.LGun = remote.RGun = null;
             remote.Disc = null;
+            remote.NameHeadset = remote.NameSpectator = null;
+            remote.AppliedName = null;
             remote.BodyInit = false;
         }
 
@@ -1327,6 +1507,7 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] presence={MpSession.PresenceEnabled} inLobby={MpSession.InLobby} inSong={InSong()} results={MpGameplay.OnResultsScreen} show={Config.ShowOtherPlayers} mySeat={MpSession.MySeat} templates={templatesReady}");
             sb.AppendLine($"[MpPresence] rig: head={localHead != null} handL={localKataL != null} handR={localKataR != null} gunL={localGunL != null} gunR={localGunR != null} gunPoseL={GunPoseState(localGunL, localGunPoseL)} gunPoseR={GunPoseState(localGunR, localGunPoseR)}");
             sb.AppendLine($"[MpPresence] disc: template={tplDisc != null} source={(discSource != IntPtr.Zero ? "found" : "none")} collider={discCollider} mySpot={SpotNumber(MpSession.MySeat)}");
+            sb.AppendLine($"[MpPresence] names: show={Config.ShowPlayerNames} spectatorCam={(spectatorCam != null ? "found" : "none")} split={splitNames}");
             sb.AppendLine($"[MpPresence] colliders: gunL={gunCollidersL} gunR={gunCollidersR} head={headColliders} body={bodyColliders}");
             long renderTime = MpSession.ServerNowMs - RenderDelayMs;
             foreach (Remote remote in remotes.Values)
@@ -1334,7 +1515,7 @@ namespace ExScoringMod
                 MpPlayerState player = MpSession.Lobby?.FindPlayer(remote.UserId);
                 long newest = remote.Samples.Count > 0 ? remote.Samples[remote.Samples.Count - 1].T : 0;
                 sb.AppendLine($"[MpPresence]   {remote.UserId} \"{player?.nickname}\" seat={player?.seat} present={remote.Present} samples={remote.Samples.Count} " +
-                              $"newest={(newest > 0 ? (newest - renderTime) + " ms ahead of render" : "-")} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null}");
+                              $"newest={(newest > 0 ? (newest - renderTime) + " ms ahead of render" : "-")} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
             }
             foreach (string line in sb.ToString().TrimEnd().Split('\n')) MelonLogger.Log(line.TrimEnd('\r'));
         }

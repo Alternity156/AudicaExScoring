@@ -9,7 +9,8 @@ namespace ExScoringMod
     /// <summary>
     /// Online play menus:
     ///  - BuildSettings: the "Multiplayer" category of the song list's Options (GlobalOptions),
-    ///    settings only (Enable Online Play, Show Other Players, Auto-Download Missing Songs);
+    ///    settings only (Enable Online Play, Show Other Players, Show Player Names,
+    ///    Auto-Download Missing Songs);
     ///  - Build: the Online Play screen on the Main page (OnlinePlayScreen), not reachable from the
     ///    song list. No settings there (they live only in Options > Multiplayer); just the lobby menu. Not in a lobby: create, join by code, the public lobby
     ///    list. In a lobby: ready, leave, suggest a song, and for the host the lobby settings,
@@ -86,10 +87,15 @@ namespace ExScoringMod
                 "Shows the other players in your lobby in the menus. Your own pose is still shared while this is off");
             OptionsMenuClone.AddRow(enableToggle, showOthers);
 
-            OptionsMenuClone.AddRow(OptionsMenuClone.CreateToggle(0, "Auto-Download Missing Songs",
+            var autoDownload = OptionsMenuClone.CreateToggle(0, "Auto-Download Missing Songs",
                 () => Config.AutoDownloadSongs,
                 v => Config.UpdateAutoDownloadSongs(v),
-                "In a lobby, downloads the selected song and the players' suggestions you don't have, when they're on Maudica"));
+                "In a lobby, downloads the selected song and the players' suggestions you don't have, when they're on Maudica");
+            var showNames = OptionsMenuClone.CreateToggle(1, "Show Player Names",
+                () => Config.ShowPlayerNames,
+                v => Config.UpdateShowPlayerNames(v),
+                "Shows each player's name above their head (only while Show Other Players is on)");
+            OptionsMenuClone.AddRow(autoDownload, showNames);
         }
 
         // ── Online Play (lobby) category ──
@@ -98,7 +104,7 @@ namespace ExScoringMod
         {
             codeLabel = null;
 
-            // The settings (Enable Online Play, Show Other Players, Auto-Download Missing Songs)
+            // The settings (Enable Online Play, Show Other Players, Show Player Names, Auto-Download Missing Songs)
             // live only in the song list's Options > Multiplayer (BuildSettings).
             if (!Config.EnableOnlinePlay)
             {
