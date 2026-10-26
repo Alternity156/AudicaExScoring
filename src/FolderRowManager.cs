@@ -498,9 +498,30 @@ namespace ExScoringMod
 
             if (!VirtualSongList.IsActive) return false;
 
+            // Rebuild the view first: a song downloaded since it was built (the lobby's
+            // auto-download) may still be a "downloadable" row, or missing from it entirely.
+            Apply();
+
+            // The match song is the lobby's song, so the Suggested Songs folder has it, and it
+            // knows about songs downloaded this session (the regular folders don't until the
+            // song list is reloaded).
+            if (VirtualSongList.IndexOf(songID) < 0 && MpSession.InLobby &&
+                SongFolderManager.openFolder != LobbySongList.FolderName)
+            {
+                SongFolderManager.openFolder = LobbySongList.FolderName;
+                Apply();
+            }
+
+            // Its home folder otherwise. A song downloaded this session isn't in the folder map
+            // yet: rebuild it once and look again.
             if (VirtualSongList.IndexOf(songID) < 0)
             {
                 string folder = CurrentFolderFor(songID);
+                if (folder == null && currentSort == SortMode.Default)
+                {
+                    SongFolderManager.Rebuild(ExScoring.mainSongDirectory);
+                    folder = CurrentFolderFor(songID);
+                }
                 if (folder == null) return false; // grades still loading, or not a listed song
                 if (SongFolderManager.openFolder != folder)
                 {
