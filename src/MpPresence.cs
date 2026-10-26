@@ -69,6 +69,16 @@ namespace ExScoringMod
     /// environment swaps it for another object, the template and every copy are rebuilt from the new
     /// one, and when there is none, nobody gets a disc.
     ///
+    /// Collisions: this player's thrown guns bounce off the other players' discs and guns, as they
+    /// do off the local platform and each other. Each copy carries a copy of the game's own collider:
+    ///  - gun  = the solid BoxCollider on GunX/tricks (Player layer), placed relative to tricks/mesh
+    ///           as on the local gun, on a kinematic Rigidbody at the gun copy's root. A gun in hand
+    ///           is kinematic too and kinematic bodies never touch, so, as with the local guns, only a
+    ///           thrown gun hits anything
+    ///  - disc = the BoxCollider on Static/GroundCollider (a sibling of Static/Ground), static
+    /// Avatars get no colliders. Each client only simulates its own guns, so a bounce seen here is
+    /// what this player sees, and the others see it through this player's poses.
+    ///
     /// From the UnityExplorer console: ExScoringMod.MpPresence.DebugDump();
     /// </summary>
     public static class MpPresence
@@ -86,6 +96,8 @@ namespace ExScoringMod
         private const string DefaultGunModelName = "Gun1";
         private const string GunPosePath = "tricks/mesh";
         private const string DiscPath = "Static/Ground";
+        private const string DiscColliderPath = "Static/GroundCollider";
+        private const string GunColliderPath = "tricks";
 
         // Grid spot of each seat (index = seat, spot number = seat + 1), in units of SpotSpacing:
         // x = right, y = forward.
@@ -178,6 +190,7 @@ namespace ExScoringMod
         private static GameObject templateHolder;
         private static GameObject tplHead, tplBody, tplHandL, tplHandR, tplGunL, tplGunR;
         private static bool templatesReady;
+        private static bool gunCollidersL, gunCollidersR; // the gun templates got their colliders
         private static float nextTemplateTry;
 
         // Disc template, under its own inactive holder so it can be rebuilt on its own when the
@@ -185,6 +198,7 @@ namespace ExScoringMod
         private static GameObject discHolder;
         private static GameObject tplDisc;
         private static IntPtr discSource = IntPtr.Zero;
+        private static bool discCollider; // the disc template got a collider
         private static float nextDiscCheck;
 
         private static GameObject avatarHolder;
@@ -875,6 +889,22 @@ namespace ExScoringMod
             copy.transform.localScale = src.lossyScale;
 
             Strip(copy);
+
+            // The platform's collider is a sibling (Static/GroundCollider), copied at its world pose
+            // like the mesh. No Rigidbody: the disc only moves when the seats change.
+            discCollider = false;
+            GameObject colliderSource = null;
+            try
+            {
+                colliderSource = GameObject.Find(DiscColliderPath);
+            }
+            catch (Exception ex)
+            {
+                Log($"disc collider lookup failed: {ex.Message}");
+            }
+            BoxCollider box = colliderSource != null ? colliderSource.GetComponent<BoxCollider>() : null;
+            discCollider = AddColliderCopy(tplDisc, null, box, "Collider");
+            if (!discCollider) Log($"no {DiscColliderPath} BoxCollider, discs get no collider");
         }
 
         private static Transform CopyDisc(GameObject root)
@@ -890,6 +920,7 @@ namespace ExScoringMod
             if (discHolder != null) UnityEngine.Object.Destroy(discHolder);
             discHolder = null;
             tplDisc = null;
+            discCollider = false;
         }
 
         // ── Templates ──
@@ -982,6 +1013,13 @@ namespace ExScoringMod
             OwnMaterials(tplGunL);
             OwnMaterials(tplGunR);
 
+            // Gun collisions: the solid collider on tricks, and a kinematic Rigidbody so the copy can
+            // be moved every frame. A missing collider only costs the collisions, not the avatar.
+            gunCollidersL = AddGunCollider(tplGunL, localGunL, localGunPoseL);
+            gunCollidersR = AddGunCollider(tplGunR, localGunR, localGunPoseR);
+            if (!gunCollidersL || !gunCollidersR)
+                Log($"gun colliders missing (L={gunCollidersL} R={gunCollidersR}), those guns won't collide");
+
             templatesReady = true;
             Log("templates built (default mask, torso, hands, Gun1)");
             return true;
@@ -1006,6 +1044,56 @@ namespace ExScoringMod
 
             Strip(copy);
             return root;
+        }
+
+        /// <summary>Copies the gun's solid tricks collider into a gun template and makes its root kinematic.</summary>
+        private static bool AddGunCollider(GameObject template, Gun gun, Transform anchor)
+        {
+            if (template == null || gun == null || anchor == null) return false;
+
+            Transform tricks = gun.transform.Find(GunColliderPath);
+            BoxCollider box = tricks != null ? tricks.GetComponent<BoxCollider>() : null;
+            if (box == null || box.isTrigger) return false;
+            if (!AddColliderCopy(template, anchor, box, "Collider")) return false;
+
+            Rigidbody rb = template.AddComponent<Rigidbody>();
+            rb.isKinematic = true;
+            rb.useGravity = false;
+            return true;
+        }
+
+        /// <summary>
+        /// Adds a solid copy of source (size, center, layer, physics material) under a template root,
+        /// placed relative to anchor as source is in the game (the same way MakeTemplate places the
+        /// models). With no anchor the root stands for the world origin, as the disc template does.
+        /// </summary>
+        private static bool AddColliderCopy(GameObject root, Transform anchor, BoxCollider source, string name)
+        {
+            if (root == null || source == null) return false;
+
+            Transform src = source.transform;
+            GameObject go = new GameObject(name);
+            go.transform.SetParent(root.transform, false);
+            go.layer = source.gameObject.layer;
+            if (anchor != null)
+            {
+                go.transform.localPosition = anchor.InverseTransformPoint(src.position);
+                go.transform.localRotation = Quaternion.Inverse(anchor.rotation) * src.rotation;
+                go.transform.localScale = Divide(src.lossyScale, anchor.lossyScale);
+            }
+            else
+            {
+                go.transform.localPosition = src.position;
+                go.transform.localRotation = src.rotation;
+                go.transform.localScale = src.lossyScale;
+            }
+
+            BoxCollider box = go.AddComponent<BoxCollider>();
+            box.center = source.center;
+            box.size = source.size;
+            box.isTrigger = false;
+            box.sharedMaterial = source.sharedMaterial;
+            return true;
         }
 
         private static Transform FindGunModel(Transform gun)
@@ -1082,6 +1170,7 @@ namespace ExScoringMod
             if (templateHolder != null) UnityEngine.Object.Destroy(templateHolder);
             templateHolder = null;
             tplHead = tplBody = tplHandL = tplHandR = tplGunL = tplGunR = null;
+            gunCollidersL = gunCollidersR = false;
         }
 
         private static void SetLayerRecursive(GameObject root, int layer)
@@ -1121,7 +1210,8 @@ namespace ExScoringMod
             StringBuilder sb = new StringBuilder();
             sb.AppendLine($"[MpPresence] presence={MpSession.PresenceEnabled} inLobby={MpSession.InLobby} inSong={InSong()} results={MpGameplay.OnResultsScreen} show={Config.ShowOtherPlayers} mySeat={MpSession.MySeat} templates={templatesReady}");
             sb.AppendLine($"[MpPresence] rig: head={localHead != null} handL={localKataL != null} handR={localKataR != null} gunL={localGunL != null} gunR={localGunR != null} gunPoseL={GunPoseState(localGunL, localGunPoseL)} gunPoseR={GunPoseState(localGunR, localGunPoseR)}");
-            sb.AppendLine($"[MpPresence] disc: template={tplDisc != null} source={(discSource != IntPtr.Zero ? "found" : "none")} mySpot={SpotNumber(MpSession.MySeat)}");
+            sb.AppendLine($"[MpPresence] disc: template={tplDisc != null} source={(discSource != IntPtr.Zero ? "found" : "none")} collider={discCollider} mySpot={SpotNumber(MpSession.MySeat)}");
+            sb.AppendLine($"[MpPresence] gun colliders: L={gunCollidersL} R={gunCollidersR}");
             long renderTime = MpSession.ServerNowMs - RenderDelayMs;
             foreach (Remote remote in remotes.Values)
             {
