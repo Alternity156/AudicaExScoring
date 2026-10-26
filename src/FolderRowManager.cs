@@ -480,6 +480,41 @@ namespace ExScoringMod
             VirtualSongList.ScrollToAndSelect(songID, true);
         }
 
+        /// <summary>
+        /// Online match launch: put songID in the list and select it through the game's own
+        /// OnSelect, which has to run for the song before LaunchPanel.Play can load it.
+        /// Unlike RevealAndSelect this never selects a different song (its Song Requests
+        /// branch) and never defers to the background grade load: the caller retries instead.
+        /// Leaves the Options menu, playlist navigation and the add-to-playlist picker first.
+        /// Returns false when the song couldn't be put in view (the caller doesn't launch).
+        /// </summary>
+        public static bool RevealForMatch(string songID)
+        {
+            if (string.IsNullOrEmpty(songID)) return false;
+
+            if (level == NavLevel.AddPicker) RestoreFromAddPicker();
+            for (int i = 0; i < 3 && level != NavLevel.Root; i++) NavBack();
+            if (level != NavLevel.Root) return false;
+
+            if (!VirtualSongList.IsActive) return false;
+
+            if (VirtualSongList.IndexOf(songID) < 0)
+            {
+                string folder = CurrentFolderFor(songID);
+                if (folder == null) return false; // grades still loading, or not a listed song
+                if (SongFolderManager.openFolder != folder)
+                {
+                    SongFolderManager.openFolder = folder;
+                    Apply();
+                }
+            }
+
+            if (VirtualSongList.IndexOf(songID) < 0) return false;
+
+            VirtualSongList.ScrollToAndSelect(songID);
+            return true;
+        }
+
         private static void WireHandler()
         {
             if (handlerWired) return;

@@ -26,6 +26,13 @@ namespace ExScoringMod
     public static class MpGameplay
     {
         private const float LaunchPageTimeoutSeconds = 8f;
+        // Max wait for the game's own select of the match song before Play (retried a few times).
+        private const float MatchSelectTimeoutSeconds = 6f;
+        private const float MatchSelectRetrySeconds = 1.5f;
+        // Grace for the song page's own auto-select after navigating there, before we select.
+        private const float MatchSelectGraceSeconds = 1f;
+        // A match launch normally goes Launching -> Launched in ~2 s. Stuck this long = it never will.
+        private const long StuckLaunchTimeoutMs = 20000;
         private const float MaudicaSearchTimeoutSeconds = 20f;
         private const long ScoreSampleIntervalMs = 100;
         private const long SongStatusRecheckIntervalMs = 1000;
@@ -61,6 +68,13 @@ namespace ExScoringMod
         private static long lastScoreSampleMs;
         private static int highestStreak;
 
+        // Song the game's own SongSelectItem.OnSelect last completed for during this song-page
+        // visit (null after leaving the song page). LaunchPanel.Play only loads a song the game
+        // itself selected: setting SongDataHolder alone leaves Play stuck in Launching.
+        private static string nativeSelectedSongId;
+        // Local ms a match launch entered Launching; 0 when not in Launching for a match.
+        private static long matchLaunchingSinceMs;
+
         // clientRunId of a run that must not upload (failed during a match).
         private static string suppressUploadRunId;
 
@@ -93,6 +107,8 @@ namespace ExScoringMod
             {
                 Release(now);
             }
+
+            CheckStuckLaunch(now);
 
             if (InMatchRun && released && !finishedSent)
             {
@@ -130,6 +146,16 @@ namespace ExScoringMod
             currentLocation = nowInSong ? "InSong" : to.ToString();
             MpSession.SetLocation(currentLocation);
 
+            // A selection only counts for the song page it was made on (the menu is rebuilt
+            // after a song, and leaving the page drops it).
+            if (to != MenuState.State.SongPage && to != MenuState.State.LaunchPage)
+                nativeSelectedSongId = null;
+
+            if (to == MenuState.State.Launching && launchMatchId != null)
+                matchLaunchingSinceMs = MpSession.LocalNowMs;
+            else if (to != MenuState.State.Launching)
+                matchLaunchingSinceMs = 0;
+
             if (wasInSong && !nowInSong)
             {
                 if (InMatchRun && !finishedSent)
@@ -146,6 +172,7 @@ namespace ExScoringMod
         public static void OnSongBrowsed(SongList.SongData song)
         {
             if (song == null) return;
+            nativeSelectedSongId = song.songID;
             MpSession.SetLocation(currentLocation ?? menuState.ToString(), song.songID, song.title);
             LobbyLaunchButton.OnSongSelected(song);
         }
@@ -449,7 +476,8 @@ namespace ExScoringMod
 
             SelectForLaunch(data, difficulty);
 
-            if (menuState != MenuState.State.SongPage)
+            bool navigated = menuState != MenuState.State.SongPage;
+            if (navigated)
             {
                 MenuState.I.GoToSongPage();
             }
@@ -478,10 +506,124 @@ namespace ExScoringMod
             // make sure the match song and difficulty are what Play will launch.
             yield return new WaitForSecondsRealtime(0.3f);
             if (launchMatchId != matchId) yield break;
+
+            // Play only loads a song the game itself selected (SongSelectItem.OnSelect). Without
+            // it the menu hides, the game sits in Launching forever and the player is left in the
+            // void: e.g. still on the song list with another song selected, or the match song in
+            // a collapsed folder so the song page's auto-select couldn't reach it.
+            if (nativeSelectedSongId != songId)
+            {
+                Log($"matchPrepare {matchId}: the game hasn't selected {songId} " +
+                    $"(last select: {nativeSelectedSongId ?? "none"}), selecting it.");
+
+                float selectDeadline = Time.unscaledTime + MatchSelectTimeoutSeconds;
+                float nextAttempt = Time.unscaledTime + (navigated ? MatchSelectGraceSeconds : 0f);
+                while (nativeSelectedSongId != songId && Time.unscaledTime < selectDeadline)
+                {
+                    if (launchMatchId != matchId) yield break;
+                    if (Time.unscaledTime >= nextAttempt)
+                    {
+                        nextAttempt = Time.unscaledTime + MatchSelectRetrySeconds;
+                        bool started = false;
+                        try
+                        {
+                            started = FolderRowManager.RevealForMatch(songId);
+                        }
+                        catch (Exception e)
+                        {
+                            Log($"matchPrepare {matchId}: selecting {songId} failed: {e.Message}");
+                        }
+                        if (!started) Log($"matchPrepare {matchId}: {songId} isn't in the song list yet, retrying.");
+                    }
+                    yield return new WaitForSecondsRealtime(0.1f);
+                }
+
+                if (launchMatchId != matchId) yield break;
+                if (nativeSelectedSongId != songId)
+                {
+                    // Staying on the song list beats the void: the server drops us at its load
+                    // timeout and we spectate this one.
+                    Log($"matchPrepare {matchId}: couldn't select {songId}, not launching (the server will make us a spectator).");
+                    launchMatchId = null;
+                    yield break;
+                }
+
+                // Let the select's own UI work (launch panel, leaderboard) land before Play.
+                yield return new WaitForSecondsRealtime(0.3f);
+                if (launchMatchId != matchId) yield break;
+
+                if (menuState != MenuState.State.SongPage)
+                {
+                    Log($"matchPrepare {matchId}: left the song page while selecting (menuState={menuState}), not launching.");
+                    launchMatchId = null;
+                    yield break;
+                }
+
+                panel = UnityEngine.Object.FindObjectOfType<LaunchPanel>();
+                if (panel == null)
+                {
+                    Log($"matchPrepare {matchId}: no launch panel after selecting, not launching.");
+                    launchMatchId = null;
+                    yield break;
+                }
+            }
+
+            // The select can reset the difficulty: put the match's back.
             SelectForLaunch(data, difficulty);
 
             Log($"matchPrepare {matchId}: Play");
             panel.Play();
+        }
+
+        /// <summary>
+        /// Safety net: a match launch that sits in Launching far longer than a load takes will
+        /// never reach Launched (and StartPlaying, which the normal cancel path waits for). The
+        /// menu is hidden at that point, so put the player back on the song list.
+        /// </summary>
+        private static void CheckStuckLaunch(long now)
+        {
+            if (matchLaunchingSinceMs == 0) return;
+            if (menuState != MenuState.State.Launching)
+            {
+                matchLaunchingSinceMs = 0;
+                return;
+            }
+            if (now - matchLaunchingSinceMs < StuckLaunchTimeoutMs) return;
+
+            matchLaunchingSinceMs = 0;
+            Log($"Match launch stuck in Launching for {StuckLaunchTimeoutMs / 1000} s " +
+                $"(song {SongDataHolder.I?.songData?.songID ?? "NULL"}): returning to the song list.");
+
+            launchMatchId = null;
+            exitPending = false;
+            EndRun();
+
+            try
+            {
+                MenuState.I.GoToSongPage();
+            }
+            catch (Exception e)
+            {
+                Log("Returning to the song list failed: " + e.Message);
+            }
+
+            MelonCoroutines.Start(VerifyStuckLaunchRecovery());
+        }
+
+        private static IEnumerator VerifyStuckLaunchRecovery()
+        {
+            yield return new WaitForSecondsRealtime(2f);
+            if (menuState != MenuState.State.Launching) yield break;
+
+            Log("Still in Launching after GoToSongPage: going to the main menu instead.");
+            try
+            {
+                MenuState.I.GoToMainPage();
+            }
+            catch (Exception e)
+            {
+                Log("Going to the main menu failed: " + e.Message);
+            }
         }
 
         private static void SelectForLaunch(SongList.SongData data, KataConfig.Difficulty difficulty)
