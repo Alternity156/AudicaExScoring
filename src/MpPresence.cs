@@ -18,7 +18,11 @@ namespace ExScoringMod
     /// world pose [px,py,pz, qx,qy,qz,qw]:
     ///  - head  = OVRCameraRig.centerEyeAnchor
     ///  - hands = the KataHand objects (HandLeft / HandRight)
-    ///  - guns  = the Gun objects (GunLeft / GunRight)
+    ///  - guns  = GunLeft/GunRight's tricks/mesh, falling back to the Gun object itself. Gun tricks
+    ///            spin "tricks" (a pivot under the Gun); "mesh" puts the model back on the Gun's
+    ///            origin, so at rest this pose equals the Gun's (what older builds send) and during
+    ///            a trick it follows the spin. A throw takes "tricks" out from under the Gun, so the
+    ///            last mesh found is kept and sent wherever it is until it is back under the Gun
     ///  - triggers = Gun.GetTriggerPullAmount() >= Gun.GetTriggerThreshold()
     /// plus the gun colours (read from the prefs twice a second, sent by MpSession only on change).
     ///
@@ -32,7 +36,7 @@ namespace ExScoringMod
     ///  - head  = 3rdPersonHead with only the default mask kept      (under CenterEyeAnchor)
     ///  - body  = the default torso, 0.39 m under the body point       (under 3rdPersonBody)
     ///  - hands = KataHand.normalHand (*_hand_skeletal_lowres), static (under HandLeft/Right)
-    ///  - guns  = tricks/mesh/Gun1 with its offset and 0.021 scale     (under GunLeft/Right)
+    ///  - guns  = tricks/mesh/Gun1 with its offset and 0.021 scale     (under tricks/mesh)
     /// The copies are made under an inactive holder (so no Awake runs and the game's singletons
     /// stay untouched) and stripped of every component but Transform / MeshFilter / MeshRenderer /
     /// SkinnedMeshRenderer; muzzle, form indicator and multiplier display objects are removed.
@@ -80,6 +84,7 @@ namespace ExScoringMod
         private const float TorsoFollowRate = 10f;       // TorsoTrack: deltaTime * 10
         private const int AvatarLayer = 0;               // Default: headset + spectator camera
         private const string DefaultGunModelName = "Gun1";
+        private const string GunPosePath = "tricks/mesh";
         private const string DiscPath = "Static/Ground";
 
         // Grid spot of each seat (index = seat, spot number = seat + 1), in units of SpotSpacing:
@@ -165,6 +170,7 @@ namespace ExScoringMod
         private static Transform localHead;
         private static KataHand localKataL, localKataR;
         private static Gun localGunL, localGunR;
+        private static Transform localGunPoseL, localGunPoseR; // tricks/mesh, kept while thrown
         private static float nextRigLookup;
         private static bool loggedRigMissing;
 
@@ -262,8 +268,8 @@ namespace ExScoringMod
                 ["head"] = PartJson(localHead),
                 ["lHand"] = PartJson(localKataL != null ? localKataL.transform : null),
                 ["rHand"] = PartJson(localKataR != null ? localKataR.transform : null),
-                ["lGun"] = PartJson(localGunL != null ? localGunL.transform : null),
-                ["rGun"] = PartJson(localGunR != null ? localGunR.transform : null),
+                ["lGun"] = PartJson(GunPoseTransform(localGunL, ref localGunPoseL)),
+                ["rGun"] = PartJson(GunPoseTransform(localGunR, ref localGunPoseR)),
                 ["lTrigger"] = TriggerDown(localGunL),
                 ["rTrigger"] = TriggerDown(localGunR)
             };
@@ -278,6 +284,42 @@ namespace ExScoringMod
             return new JArray(
                 Math.Round((double)p.x, 3), Math.Round((double)p.y, 3), Math.Round((double)p.z, 3),
                 Math.Round((double)q.x, 4), Math.Round((double)q.y, 4), Math.Round((double)q.z, 4), Math.Round((double)q.w, 4));
+        }
+
+        /// <summary>
+        /// The transform a gun's pose is read from: tricks/mesh, which follows gun tricks and sits on
+        /// the Gun's origin at rest. Looked up under the Gun on every call; while it isn't there (the
+        /// gun is thrown, "tricks" is out from under the Gun) the last one found is used wherever it
+        /// is. Falls back to the Gun itself if none was ever found or it was destroyed.
+        /// </summary>
+        private static Transform GunPoseTransform(Gun gun, ref Transform cached)
+        {
+            if (gun == null) return null;
+            Transform found = gun.transform.Find(GunPosePath);
+            if (found != null) cached = found;
+            else if (!IsAlive(cached)) cached = null;
+            return cached != null ? cached : gun.transform;
+        }
+
+        private static bool IsAlive(Transform t)
+        {
+            if (t == null) return false;
+            try
+            {
+                return !t.WasCollected && t.gameObject != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>For the debug dump: where a gun's pose transform currently is.</summary>
+        private static string GunPoseState(Gun gun, Transform cached)
+        {
+            if (gun == null) return "no gun";
+            if (!IsAlive(cached)) return "root";
+            return gun.transform.Find(GunPosePath) != null ? "mesh" : "thrown";
         }
 
         private static bool TriggerDown(Gun gun)
@@ -930,10 +972,13 @@ namespace ExScoringMod
             tplHandL = MakeTemplate("TplHandL", localKataL.transform, handL.transform);
             tplHandR = MakeTemplate("TplHandR", localKataR.transform, handR.transform);
 
-            // Guns: the default model under GunLeft/GunRight (keeps its offset and 0.021 scale), with
-            // template-owned material copies so nothing points at the local gun's instances.
-            tplGunL = MakeTemplate("TplGunL", localGunL.transform, gunModelL);
-            tplGunR = MakeTemplate("TplGunR", localGunR.transform, gunModelR);
+            // Guns: the default model, anchored on the same transform the pose is sent from
+            // (tricks/mesh), so its offset doesn't include a trick that happens to be playing now.
+            // Keeps its 0.021 scale; template-owned material copies so nothing points at the local
+            // gun's instances.
+            // (FindGunModel finds nothing mid-throw, so a build then fails above and is retried.)
+            tplGunL = MakeTemplate("TplGunL", GunPoseTransform(localGunL, ref localGunPoseL), gunModelL);
+            tplGunR = MakeTemplate("TplGunR", GunPoseTransform(localGunR, ref localGunPoseR), gunModelR);
             OwnMaterials(tplGunL);
             OwnMaterials(tplGunR);
 
@@ -1075,7 +1120,7 @@ namespace ExScoringMod
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine($"[MpPresence] presence={MpSession.PresenceEnabled} inLobby={MpSession.InLobby} inSong={InSong()} results={MpGameplay.OnResultsScreen} show={Config.ShowOtherPlayers} mySeat={MpSession.MySeat} templates={templatesReady}");
-            sb.AppendLine($"[MpPresence] rig: head={localHead != null} handL={localKataL != null} handR={localKataR != null} gunL={localGunL != null} gunR={localGunR != null}");
+            sb.AppendLine($"[MpPresence] rig: head={localHead != null} handL={localKataL != null} handR={localKataR != null} gunL={localGunL != null} gunR={localGunR != null} gunPoseL={GunPoseState(localGunL, localGunPoseL)} gunPoseR={GunPoseState(localGunR, localGunPoseR)}");
             sb.AppendLine($"[MpPresence] disc: template={tplDisc != null} source={(discSource != IntPtr.Zero ? "found" : "none")} mySpot={SpotNumber(MpSession.MySeat)}");
             long renderTime = MpSession.ServerNowMs - RenderDelayMs;
             foreach (Remote remote in remotes.Values)
