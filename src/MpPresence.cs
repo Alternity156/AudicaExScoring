@@ -10,7 +10,9 @@ namespace ExScoringMod
     /// <summary>
     /// Player presence (ApiContract.md v2.39): the other lobby members drawn as the game's own
     /// default avatar (head, body, hands, guns), and this player's pose sent so they can draw us.
-    /// Nothing runs during songs: the server neither sends nor accepts poses there.
+    /// Nothing runs during songs: the server neither sends nor accepts poses there. A match's end
+    /// screen doesn't count as in the song (MpGameplay.OnResultsScreen, location "ResultsPage"), so
+    /// presence resumes there; gun colours still wait until the menus.
     ///
     /// Sending (in a lobby, presence on, not in a song): ~15 poses a second, every part as its
     /// world pose [px,py,pz, qx,qy,qz,qw]:
@@ -225,11 +227,19 @@ namespace ExScoringMod
             RemoveRemotesNotInLobby();
             CheckDisc();
             SendPoseIfDue();
-            PollGunColors();
+            // Not on the end screen either: another mod's temporary in-song colours must never go out.
+            if (!InSongScene()) PollGunColors();
             Render();
         }
 
+        /// <summary>In a song, except on a match's end screen (presence resumes there).</summary>
         private static bool InSong()
+        {
+            return InSongScene() && !MpGameplay.OnResultsScreen;
+        }
+
+        /// <summary>Anywhere from launching a song until leaving it, end screen included.</summary>
+        private static bool InSongScene()
         {
             MenuState.State state = ExScoring.menuState;
             return state == MenuState.State.Launching || state == MenuState.State.Launched;
@@ -1064,7 +1074,7 @@ namespace ExScoringMod
         public static void DebugDump()
         {
             StringBuilder sb = new StringBuilder();
-            sb.AppendLine($"[MpPresence] presence={MpSession.PresenceEnabled} inLobby={MpSession.InLobby} inSong={InSong()} show={Config.ShowOtherPlayers} mySeat={MpSession.MySeat} templates={templatesReady}");
+            sb.AppendLine($"[MpPresence] presence={MpSession.PresenceEnabled} inLobby={MpSession.InLobby} inSong={InSong()} results={MpGameplay.OnResultsScreen} show={Config.ShowOtherPlayers} mySeat={MpSession.MySeat} templates={templatesReady}");
             sb.AppendLine($"[MpPresence] rig: head={localHead != null} handL={localKataL != null} handR={localKataR != null} gunL={localGunL != null} gunR={localGunR != null}");
             sb.AppendLine($"[MpPresence] disc: template={tplDisc != null} source={(discSource != IntPtr.Zero ? "found" : "none")} mySpot={SpotNumber(MpSession.MySeat)}");
             long renderTime = MpSession.ServerNowMs - RenderDelayMs;

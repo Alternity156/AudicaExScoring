@@ -19,7 +19,10 @@ namespace ExScoringMod
     ///    paused the moment playback starts, "loaded" is sent, and playback resumes at matchStart's
     ///    startAt on the server clock (19.5);
     ///  - live scores (scoreUpdate), no failing at zero health (AllowFailure refused), finished / quitSong;
-    ///  - a run that reached zero health is played to the end, then ended as failed (SongEnd.OnSongOver).
+    ///  - a run that reached zero health is played to the end, then ended as failed (SongEnd.OnSongOver);
+    ///  - the match's end screen (Results, or Failed for a run that hit zero health) counts as out
+    ///    of the song: location "ResultsPage" instead of "InSong", so the server relays poses again
+    ///    and MpPresence resumes there instead of waiting until the player leaves the song.
     ///
     /// Main thread only. Init() from OnApplicationStart, Tick() from OnUpdate after MpSession.Tick().
     /// </summary>
@@ -45,7 +48,16 @@ namespace ExScoringMod
         private static bool initialized;
 
         // ── Location ──
+        private const string ResultsLocation = "ResultsPage";
         private static string currentLocation;
+        // On a match's end screen (still menuState Launched). Cleared on any MenuState change.
+        private static bool onResultsScreen;
+
+        /// <summary>
+        /// True while on a match's end screen in a lobby: the player still counts as in the song
+        /// scene (menuState Launched) but no longer as "InSong" for the server or MpPresence.
+        /// </summary>
+        public static bool OnResultsScreen => onResultsScreen;
 
         // ── Song status ──
         private static string statusSongId;                 // song the cached availability below is for
@@ -143,6 +155,8 @@ namespace ExScoringMod
             bool wasInSong = from == MenuState.State.Launching || from == MenuState.State.Launched;
             bool nowInSong = to == MenuState.State.Launching || to == MenuState.State.Launched;
 
+            // Any menu change leaves (or starts) a song: the end screen is behind us.
+            onResultsScreen = false;
             currentLocation = nowInSong ? "InSong" : to.ToString();
             MpSession.SetLocation(currentLocation);
 
@@ -876,8 +890,28 @@ namespace ExScoringMod
         {
             MenuState.State state = menuState;
             bool inSong = state == MenuState.State.Launching || state == MenuState.State.Launched;
-            currentLocation = inSong ? "InSong" : state.ToString();
+            if (inSong && onResultsScreen) currentLocation = ResultsLocation;
+            else currentLocation = inSong ? "InSong" : state.ToString();
             MpSession.SetLocation(currentLocation);
+        }
+
+        /// <summary>
+        /// From InGameUISetStatePatch: the match's end screen opened. Only a match run can reach an
+        /// end screen in a lobby (Play is intercepted there), and only after "finished" was sent.
+        /// Results is the normal end; Failed is a run that hit zero health, ended as failed at
+        /// SongEnd.OnSongOver.
+        /// </summary>
+        private static void OnInGameUIState(InGameUI.State state)
+        {
+            bool endScreen = state == InGameUI.State.ResultsPage || state == InGameUI.State.FailedPage;
+            if (!endScreen || onResultsScreen) return;
+            if (!MpSession.InLobby || !InMatchRun || !finishedSent) return;
+            if (menuState != MenuState.State.Launched) return;
+
+            onResultsScreen = true;
+            currentLocation = ResultsLocation;
+            MpSession.SetLocation(currentLocation);
+            Log($"Match end screen ({state}): location {ResultsLocation}, presence resumes.");
         }
 
         private static void Log(string message)
@@ -899,6 +933,28 @@ namespace ExScoringMod
                 catch (Exception ex)
                 {
                     MelonLogger.Log($"[MpGame] StartPlaying hook failed: {ex}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// The match's end screen opening (Results, or Failed for a run that hit zero health).
+        /// Its own patch, next to Hooks.cs's InGameUISetStatePatch; a Postfix still runs when that
+        /// one's Prefix skips the page (endless playlists), so OnInGameUIState only reacts in a
+        /// match run in a lobby, where that never happens.
+        /// </summary>
+        [HarmonyPatch(typeof(InGameUI), "SetState", new Type[] { typeof(InGameUI.State), typeof(bool) })]
+        private static class InGameUISetStateResultsPatch
+        {
+            private static void Postfix(InGameUI.State state)
+            {
+                try
+                {
+                    OnInGameUIState(state);
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Log($"[MpGame] InGameUI.SetState hook failed: {ex}");
                 }
             }
         }
