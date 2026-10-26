@@ -69,15 +69,23 @@ namespace ExScoringMod
     /// environment swaps it for another object, the template and every copy are rebuilt from the new
     /// one, and when there is none, nobody gets a disc.
     ///
-    /// Collisions: this player's thrown guns bounce off the other players' discs and guns, as they
-    /// do off the local platform and each other. Each copy carries a copy of the game's own collider:
+    /// Collisions: this player's thrown guns bounce off the other players' discs, guns, heads and
+    /// bodies, as they do off the local platform and each other. Discs and guns carry a copy of the
+    /// game's own collider:
     ///  - gun  = the solid BoxCollider on GunX/tricks (Player layer), placed relative to tricks/mesh
     ///           as on the local gun, on a kinematic Rigidbody at the gun copy's root. A gun in hand
     ///           is kinematic too and kinematic bodies never touch, so, as with the local guns, only a
     ///           thrown gun hits anything
     ///  - disc = the BoxCollider on Static/GroundCollider (a sibling of Static/Ground), static
-    /// Avatars get no colliders. Each client only simulates its own guns, so a bounce seen here is
-    /// what this player sees, and the others see it through this player's poses.
+    /// Head and body have no game collider to copy (the local ShootableHead is on the shootable-toy
+    /// layer, so shots would hit it). AddMeshColliders builds them from whatever is drawn, which
+    /// works for any shape (custom parts later): every enabled renderer that is switched on in the
+    /// template gets a "Collider" child on the Player layer, a convex MeshCollider of its mesh when
+    /// the mesh is readable, otherwise a BoxCollider of that mesh's own bounds. Disabled renderers
+    /// (3rdPersonHead's own hidden Cylinder) are skipped. The part's root gets a kinematic Rigidbody
+    /// like the guns, so all its colliders move as one. Hands get none.
+    /// Each client only simulates its own guns, so a bounce seen here is what this player sees, and
+    /// the others see it through this player's poses.
     ///
     /// From the UnityExplorer console: ExScoringMod.MpPresence.DebugDump();
     /// </summary>
@@ -98,6 +106,7 @@ namespace ExScoringMod
         private const string DiscPath = "Static/Ground";
         private const string DiscColliderPath = "Static/GroundCollider";
         private const string GunColliderPath = "tricks";
+        private const int PartColliderLayer = 11;        // Player: what the local guns are on
 
         // Grid spot of each seat (index = seat, spot number = seat + 1), in units of SpotSpacing:
         // x = right, y = forward.
@@ -191,6 +200,7 @@ namespace ExScoringMod
         private static GameObject tplHead, tplBody, tplHandL, tplHandR, tplGunL, tplGunR;
         private static bool templatesReady;
         private static bool gunCollidersL, gunCollidersR; // the gun templates got their colliders
+        private static int headColliders, bodyColliders;  // colliders AddMeshColliders gave head and body
         private static float nextTemplateTry;
 
         // Disc template, under its own inactive holder so it can be rebuilt on its own when the
@@ -998,6 +1008,13 @@ namespace ExScoringMod
             tplBody = MakeTemplate("TplBody", defaultTorso.transform.parent, defaultTorso.transform);
             SetLayerRecursive(tplBody, AvatarLayer);
 
+            // Head and body collisions, from the meshes actually drawn (added after the layer pass, so
+            // they stay on the Player layer). A missing one only costs the collisions.
+            headColliders = AddMeshColliders(tplHead);
+            bodyColliders = AddMeshColliders(tplBody);
+            if (headColliders == 0 || bodyColliders == 0)
+                Log($"head/body colliders missing (head={headColliders} body={bodyColliders}), those parts won't collide");
+
             // Hands: normalHand under HandLeft/HandRight. Animator stripped, so they stay in the pose
             // they had when copied.
             tplHandL = MakeTemplate("TplHandL", localKataL.transform, handL.transform);
@@ -1060,6 +1077,104 @@ namespace ExScoringMod
             rb.isKinematic = true;
             rb.useGravity = false;
             return true;
+        }
+
+        /// <summary>
+        /// Gives a template colliders matching what it draws, whatever its shape: for every renderer
+        /// that is enabled and switched on within the template, a "Collider" child (PartColliderLayer)
+        /// holding a convex MeshCollider of its mesh when the mesh is readable, otherwise a BoxCollider
+        /// of that mesh's own bounds (always available). The template root gets a kinematic Rigidbody
+        /// so the copies can be moved every frame. Returns how many colliders were added.
+        /// </summary>
+        private static int AddMeshColliders(GameObject template)
+        {
+            if (template == null) return 0;
+            Transform root = template.transform;
+            int added = 0;
+
+            var renderers = template.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Renderer renderer = renderers[i];
+                if (renderer == null || !renderer.enabled || !ActiveUnder(renderer.transform, root)) continue;
+
+                Mesh mesh = RendererMesh(renderer);
+                if (mesh == null) continue;
+
+                GameObject go = new GameObject("Collider");
+                go.transform.SetParent(renderer.transform, false);
+                go.layer = PartColliderLayer;
+
+                string kind = "box";
+                if (IsReadable(mesh))
+                {
+                    try
+                    {
+                        MeshCollider meshCollider = go.AddComponent<MeshCollider>();
+                        meshCollider.convex = true;
+                        meshCollider.sharedMesh = mesh;
+                        kind = "shape";
+                    }
+                    catch (Exception ex)
+                    {
+                        Log($"{template.name}: convex collider for {mesh.name} failed ({ex.Message}), using its box");
+                        MeshCollider failed = go.GetComponent<MeshCollider>();
+                        if (failed != null) UnityEngine.Object.DestroyImmediate(failed);
+                    }
+                }
+                if (kind == "box")
+                {
+                    Bounds b = mesh.bounds;
+                    BoxCollider box = go.AddComponent<BoxCollider>();
+                    box.center = b.center;
+                    box.size = b.size;
+                }
+
+                Vector3 size = Vector3.Scale(mesh.bounds.size, renderer.transform.lossyScale);
+                Log($"{template.name} collider: {renderer.name} ({mesh.name}) {kind}, {size.x:F2} x {size.y:F2} x {size.z:F2} m");
+                added++;
+            }
+
+            if (added > 0)
+            {
+                Rigidbody rb = template.AddComponent<Rigidbody>();
+                rb.isKinematic = true;
+                rb.useGravity = false;
+            }
+            return added;
+        }
+
+        /// <summary>The renderer's mesh: SkinnedMeshRenderer.sharedMesh or its MeshFilter's.</summary>
+        private static Mesh RendererMesh(Renderer renderer)
+        {
+            SkinnedMeshRenderer skinned = renderer.TryCast<SkinnedMeshRenderer>();
+            if (skinned != null) return skinned.sharedMesh;
+            MeshFilter filter = renderer.GetComponent<MeshFilter>();
+            return filter != null ? filter.sharedMesh : null;
+        }
+
+        /// <summary>activeSelf on t and every parent up to (and including) root; the holder above is inactive on purpose.</summary>
+        private static bool ActiveUnder(Transform t, Transform root)
+        {
+            while (t != null)
+            {
+                if (!t.gameObject.activeSelf) return false;
+                if (t.Pointer == root.Pointer) return true;
+                t = t.parent;
+            }
+            return true;
+        }
+
+        private static bool IsReadable(Mesh mesh)
+        {
+            try
+            {
+                return mesh.isReadable;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
         /// <summary>
@@ -1171,6 +1286,7 @@ namespace ExScoringMod
             templateHolder = null;
             tplHead = tplBody = tplHandL = tplHandR = tplGunL = tplGunR = null;
             gunCollidersL = gunCollidersR = false;
+            headColliders = bodyColliders = 0;
         }
 
         private static void SetLayerRecursive(GameObject root, int layer)
@@ -1211,7 +1327,7 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] presence={MpSession.PresenceEnabled} inLobby={MpSession.InLobby} inSong={InSong()} results={MpGameplay.OnResultsScreen} show={Config.ShowOtherPlayers} mySeat={MpSession.MySeat} templates={templatesReady}");
             sb.AppendLine($"[MpPresence] rig: head={localHead != null} handL={localKataL != null} handR={localKataR != null} gunL={localGunL != null} gunR={localGunR != null} gunPoseL={GunPoseState(localGunL, localGunPoseL)} gunPoseR={GunPoseState(localGunR, localGunPoseR)}");
             sb.AppendLine($"[MpPresence] disc: template={tplDisc != null} source={(discSource != IntPtr.Zero ? "found" : "none")} collider={discCollider} mySpot={SpotNumber(MpSession.MySeat)}");
-            sb.AppendLine($"[MpPresence] gun colliders: L={gunCollidersL} R={gunCollidersR}");
+            sb.AppendLine($"[MpPresence] colliders: gunL={gunCollidersL} gunR={gunCollidersR} head={headColliders} body={bodyColliders}");
             long renderTime = MpSession.ServerNowMs - RenderDelayMs;
             foreach (Remote remote in remotes.Values)
             {
