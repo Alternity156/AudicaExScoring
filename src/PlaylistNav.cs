@@ -10,14 +10,17 @@ namespace ExScoringMod
     /// the drill-in/back transitions live in FolderRowManager; this class only produces rows.
     ///
     /// Playlist entries are stored as filename stems (e.g. "mysong" for "mysong.audica"); the
-    /// folder/virtual system keys on songID, so we resolve stem -> SongData via zipPath. Entries
-    /// with no locally-installed match are omitted.
+    /// folder/virtual system keys on songID, so we resolve stem -> SongData via zipPath
+    /// (case-insensitive). Entries that aren't installed are shown as maudica lookups through
+    /// PlaylistDownloadManager (searching / downloadable / not on Maudica), with a "Download all"
+    /// row above the songs. Installed-but-hidden songs are left out, as before.
     /// </summary>
     internal static class PlaylistNav
     {
         // ── Palette (tunable) ─────────────────────────────────────────────────
         // Customisable on Options > Colors (ColorSettings); defaults are the previous hardcoded colours.
         public static Color PlaylistRowColor => ColorSettings.RowPlaylistEntry.Value;   // lighter grey
+        public static Color PlaylistTitleColor => ColorSettings.RowPlaylistTitle.Value; // grey
         public static Color BackColor => ColorSettings.RowBack.Value;                  // slate-blue
         public static Color CreateColor => ColorSettings.RowCreate.Value;              // dark green
         public static Color DeleteColor => ColorSettings.RowDelete.Value;              // dark red
@@ -62,11 +65,23 @@ namespace ExScoringMod
             return rows;
         }
 
-        /// <summary>Level 2: Back, Marathon, Delete, then the playlist's resolved (installed) songs.</summary>
+        /// <summary>
+        /// Level 2: the playlist's name (label row), Back, Marathon, Delete, "Download all" (when
+        /// something missing is on Maudica), then the playlist's entries in order: installed songs
+        /// as song rows, missing ones as maudica rows (searching / downloadable / not on Maudica).
+        /// </summary>
         public static List<ViewRow> BuildPlaylistContentsView(string playlistName)
         {
             var rows = new List<ViewRow>();
 
+            Playlist pl = GetPlaylist(playlistName);
+            var visible = BuildStemToSongData();
+            var installed = BuildInstalledStems();
+            var missing = pl != null && pl.songs != null
+                ? GetMissingStems(pl, visible, installed)
+                : new List<string>();
+
+            rows.Add(ViewRow.LabelRow(playlistName ?? "", PlaylistTitleColor, TitleSubLabel(pl, missing.Count)));
             rows.Add(ViewRow.ActionRow("Back", BackColor, FolderRowManager.NavBack));
             rows.Add(ViewRow.ActionRow("Marathon", MarathonColor,
                 () => MarathonSetup.Begin(playlistName), null, MarathonSetup.MarathonActionId));
@@ -77,10 +92,63 @@ namespace ExScoringMod
                 armed ? ConfirmDeleteColor : DeleteColor,
                 () => OnDelete(playlistName)));
 
-            foreach (var sd in ResolvePlaylistSongs(playlistName))
-                rows.Add(ViewRow.SongRow(sd.songID));
+            if (pl == null || pl.songs == null) return rows;
+
+            PlaylistDownloadManager.EnsureLookups(missing);
+
+            ViewRow? downloadAll = PlaylistDownloadManager.BuildDownloadAllRow(playlistName, missing);
+            if (downloadAll.HasValue) rows.Add(downloadAll.Value);
+
+            var shown = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+            foreach (string stem in pl.songs)
+            {
+                if (string.IsNullOrEmpty(stem) || !shown.Add(stem)) continue;
+
+                if (visible.TryGetValue(stem, out SongList.SongData sd))
+                    rows.Add(ViewRow.SongRow(sd.songID));
+                else if (!installed.Contains(stem))
+                    rows.Add(PlaylistDownloadManager.BuildMissingRow(stem));
+                // else: installed but hidden — omitted.
+            }
 
             return rows;
+        }
+
+        /// <summary>Second line of the title row: "12 songs · 3 missing" (or just "12 songs").</summary>
+        private static string TitleSubLabel(Playlist pl, int missingCount)
+        {
+            int count = pl != null && pl.songs != null ? pl.songs.Count : 0;
+            string text = $"{count} song{(count != 1 ? "s" : "")}";
+            if (missingCount > 0) text += $" \u00B7 {missingCount} missing";
+            return text;
+        }
+
+        /// <summary>The playlist's entries that aren't installed at all, in playlist order, deduped.</summary>
+        public static List<string> GetMissingStems(string playlistName)
+        {
+            Playlist pl = GetPlaylist(playlistName);
+            if (pl == null || pl.songs == null) return new List<string>();
+            return GetMissingStems(pl, BuildStemToSongData(), BuildInstalledStems());
+        }
+
+        private static List<string> GetMissingStems(Playlist pl, Dictionary<string, SongList.SongData> visible,
+                                                    HashSet<string> installed)
+        {
+            var result = new List<string>();
+            var seen = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+            foreach (string stem in pl.songs)
+            {
+                if (string.IsNullOrEmpty(stem) || !seen.Add(stem)) continue;
+                if (visible.ContainsKey(stem) || installed.Contains(stem)) continue;
+                result.Add(stem);
+            }
+            return result;
+        }
+
+        private static Playlist GetPlaylist(string playlistName)
+        {
+            if (playlistName == null || PlaylistManager.playlists == null) return null;
+            return PlaylistManager.playlists.TryGetValue(playlistName, out Playlist pl) ? pl : null;
         }
 
         /// <summary>The playlist's songs that are installed locally, in playlist order.</summary>
@@ -107,10 +175,13 @@ namespace ExScoringMod
 
         // ── Helpers ───────────────────────────────────────────────────────────
 
-        /// <summary>filename stem (no ".audica") -> SongData, for installed, non-hidden songs.</summary>
+        /// <summary>
+        /// filename stem (no ".audica") -> SongData, for installed, non-hidden songs.
+        /// Case-insensitive: maudica's filename casing can differ from the playlist's stem.
+        /// </summary>
         private static Dictionary<string, SongList.SongData> BuildStemToSongData()
         {
-            var map = new Dictionary<string, SongList.SongData>();
+            var map = new Dictionary<string, SongList.SongData>(System.StringComparer.OrdinalIgnoreCase);
             var songs = SongList.I != null ? SongList.I.songs : null;
             if (songs == null) return map;
 
@@ -119,13 +190,38 @@ namespace ExScoringMod
                 var sd = songs[i];
                 if (sd == null || sd.hidden) continue;
 
-                string fn = Path.GetFileName(sd.zipPath);
+                string fn = StemOf(sd);
                 if (string.IsNullOrEmpty(fn)) continue;
-                if (fn.EndsWith(".audica")) fn = fn.Substring(0, fn.Length - ".audica".Length);
 
                 if (!map.ContainsKey(fn)) map[fn] = sd;
             }
             return map;
+        }
+
+        /// <summary>Stems of every installed song, hidden ones included (case-insensitive).</summary>
+        private static HashSet<string> BuildInstalledStems()
+        {
+            var set = new HashSet<string>(System.StringComparer.OrdinalIgnoreCase);
+            var songs = SongList.I != null ? SongList.I.songs : null;
+            if (songs == null) return set;
+
+            for (int i = 0; i < songs.Count; i++)
+            {
+                var sd = songs[i];
+                if (sd == null) continue;
+                string fn = StemOf(sd);
+                if (!string.IsNullOrEmpty(fn)) set.Add(fn);
+            }
+            return set;
+        }
+
+        private static string StemOf(SongList.SongData sd)
+        {
+            string fn = Path.GetFileName(sd.zipPath);
+            if (string.IsNullOrEmpty(fn)) return null;
+            if (fn.EndsWith(".audica", System.StringComparison.OrdinalIgnoreCase))
+                fn = fn.Substring(0, fn.Length - ".audica".Length);
+            return fn;
         }
 
         private static void OnDelete(string playlistName)

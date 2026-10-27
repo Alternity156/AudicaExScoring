@@ -1,54 +1,52 @@
 using System.Collections.Generic;
-using MelonLoader;
 
 namespace ExScoringMod
 {
     /// <summary>
     /// Data behind the "Latest Maudica" virtual folder: the maudica.com catalog, newest upload
-    /// first (maudica's default listing order), loaded one page at a time.
+    /// first, served from the local catalog cache (MaudicaCatalog) one page at a time.
     ///
-    /// Fetch rules:
-    ///   - Nothing is fetched until the folder is first shot open.
-    ///   - Opening the folder fetches page 1 fresh only if nothing is loaded yet, the last load
-    ///     failed, a song has been played since the last fetch, or the page-size option changed.
-    ///     Closing and reopening without playing a song keeps every loaded page.
-    ///   - "Load more songs" appends the next page using the page size the list was started with,
-    ///     so paging offsets stay consistent even if the option changes mid-list.
+    /// Paging is local, so "Load more songs" is instant. The catalog itself is kept current by its
+    /// launch check; opening the folder after playing a song (or after a failed sync) also asks it
+    /// for a refresh (throttled, so this costs at most one small request a minute).
     ///
-    /// Row building and downloads live in FolderRowManager, like the search folder.
+    /// The public surface (Loaded / Loading / Refreshing / Error / results...) is unchanged, so the
+    /// row building and downloads in FolderRowManager work as before.
     /// </summary>
     internal static class LatestMaudica
     {
-        /// <summary>Loaded maudica entries in display order (newest first), deduped by song_id.</summary>
+        /// <summary>Entries shown so far, newest first (pages loaded × page size).</summary>
         public static readonly List<Song> results = new List<Song>();
 
-        /// <summary>Total maps in the maudica catalog, from the last successful response.</summary>
-        public static int TotalOnMaudica { get; private set; }
+        /// <summary>Total maps in the maudica catalog.</summary>
+        public static int TotalOnMaudica => MaudicaCatalog.Count;
 
-        /// <summary>True once at least page 1 has loaded successfully.</summary>
-        public static bool Loaded { get; private set; }
+        /// <summary>True once the catalog has data.</summary>
+        public static bool Loaded => MaudicaCatalog.IsReady;
 
-        /// <summary>True while any page request is in flight.</summary>
-        public static bool Loading { get; private set; }
+        /// <summary>True while the catalog is being fetched with nothing to show yet (a background
+        /// refresh of an existing catalog doesn't block "Load more").</summary>
+        public static bool Loading => MaudicaCatalog.IsSyncing && !MaudicaCatalog.IsReady;
 
-        /// <summary>True when the in-flight request is a fresh page-1 load (vs. Load more).</summary>
-        public static bool Refreshing { get; private set; }
+        /// <summary>True when a sync runs while a list is already shown.</summary>
+        public static bool Refreshing => MaudicaCatalog.IsSyncing && MaudicaCatalog.IsReady;
 
-        /// <summary>True when the most recent request failed.</summary>
-        public static bool Error { get; private set; }
+        /// <summary>True when the catalog couldn't be fetched and there is no cached copy. With a
+        /// cached copy, a failed refresh just keeps showing it.</summary>
+        public static bool Error => !MaudicaCatalog.IsSyncing && MaudicaCatalog.LastSyncFailed && !MaudicaCatalog.IsReady;
 
-        /// <summary>True when the failed request was a fresh page-1 load (vs. Load more).</summary>
-        public static bool ErrorWasRefresh { get; private set; }
+        /// <summary>Always false: a failed refresh with a cached catalog isn't shown as an error.</summary>
+        public static bool ErrorWasRefresh => false;
 
-        /// <summary>More catalog pages remain after what's loaded.</summary>
-        public static bool HasMorePages => Loaded && page < totalPages;
+        /// <summary>More catalog entries remain after what's shown.</summary>
+        public static bool HasMorePages => Loaded && nextIndex < MaudicaCatalog.Count;
 
-        private static int page = 0;
-        private static int totalPages = 1;
+        private static int pagesShown = 1;
         private static int pageSizeInUse = 0;
-        private static int generation = 0; // bumped per fresh load; stale callbacks bail
+        private static int builtForVersion = -1;
+        private static int nextIndex = 0; // first catalog entry not yet shown
         private static bool songPlayedSinceFetch = false;
-        private static readonly HashSet<string> seenIds = new HashSet<string>();
+        private static bool subscribed = false;
 
         // maudica song_id -> matched local songID ("" = not installed). Rebuilt whenever the
         // local song count changes (a download, delete or reload) or on explicit invalidation.
@@ -57,7 +55,7 @@ namespace ExScoringMod
 
         // ── Triggers ─────────────────────────────────────────────────────────
 
-        /// <summary>Called when a song is launched. The next folder open fetches fresh.</summary>
+        /// <summary>Called when a song is launched. The next folder open asks for a catalog refresh.</summary>
         public static void MarkSongPlayed()
         {
             songPlayedSinceFetch = true;
@@ -66,100 +64,72 @@ namespace ExScoringMod
         /// <summary>Called when the folder header is shot open (before the view is rebuilt).</summary>
         public static void OnFolderOpened()
         {
-            if (Loading && Refreshing) return; // a fresh load is already on its way
+            Subscribe();
 
-            bool needsFresh = !Loaded
-                || Error
-                || songPlayedSinceFetch
-                || pageSizeInUse != Config.LatestMaudicaPageSize;
+            if (pageSizeInUse != Config.LatestMaudicaPageSize)
+                pagesShown = 1;
 
-            if (needsFresh)
-                FetchFresh();
+            if (!Loaded || Error || songPlayedSinceFetch)
+            {
+                songPlayedSinceFetch = false;
+                MaudicaCatalog.RequestRefresh();
+            }
+            Rebuild();
         }
 
         /// <summary>
         /// Called when the song list is (re)built with this folder still open, e.g. coming back
-        /// to song select. Loads only if nothing has been loaded and no attempt is pending or failed,
-        /// so the list (and the selected song in it) stays put after playing.
+        /// to song select. Keeps the shown list (and the selected song in it) as it is.
         /// </summary>
         public static void EnsureLoaded()
         {
-            if (!Loaded && !Loading && !Error)
-                FetchFresh();
+            Subscribe();
+            MaudicaCatalog.Initialize();
+            if (builtForVersion != MaudicaCatalog.Version) Rebuild();
         }
 
-        /// <summary>Retry after a failure: redo a failed fresh load, otherwise the next page.</summary>
+        /// <summary>Retry after a failure: forces a catalog refresh.</summary>
         public static void Retry()
         {
-            if (Loading) return;
-            if (!Loaded || ErrorWasRefresh) FetchFresh();
-            else LoadMore();
+            MaudicaCatalog.RequestRefresh(null, true);
         }
 
-        /// <summary>Fetch and append the next page (the "Load more songs" row).</summary>
+        /// <summary>Show the next page (the "Load more songs" row). Instant: the catalog is local.</summary>
         public static void LoadMore()
         {
-            if (Loading || !HasMorePages) return;
-            Fetch(page + 1, false, pageSizeInUse, generation);
+            if (!HasMorePages) return;
+            pagesShown++;
+            Rebuild();
         }
 
-        // ── Fetching ─────────────────────────────────────────────────────────
+        // ── Building ─────────────────────────────────────────────────────────
 
-        /// <summary>Start a page-1 load. Already-loaded rows stay visible until it lands.</summary>
-        private static void FetchFresh()
+        private static void Subscribe()
         {
-            songPlayedSinceFetch = false;
-            Fetch(1, true, Config.LatestMaudicaPageSize, ++generation);
+            if (subscribed) return;
+            subscribed = true;
+            MaudicaCatalog.Changed += Rebuild;
         }
 
-        private static void Fetch(int pageToLoad, bool fresh, int pageSize, int gen)
+        private static void Rebuild()
         {
-            Loading = true;
-            Refreshing = fresh;
-            Error = false;
+            pageSizeInUse = Config.LatestMaudicaPageSize;
+            int want = pagesShown * pageSizeInUse;
 
-            DebugLog.Log($"[LatestMaudica] Fetching page {pageToLoad} ({pageSize} per page, fresh={fresh})");
-
-            MelonCoroutines.Start(SongDownloader.DoSongWebSearch("", (search, result) =>
+            results.Clear();
+            var seen = new HashSet<string>();
+            var all = MaudicaCatalog.NewestFirst;
+            int i = 0;
+            for (; i < all.Count && results.Count < want; i++)
             {
-                if (gen != generation) return; // superseded by a newer fresh load
+                Song s = all[i].ToSong();
+                if (string.IsNullOrEmpty(s.song_id)) continue;
+                // Two maps can share a filename; list it once (rows key on song_id).
+                if (seen.Add(s.song_id)) results.Add(s);
+            }
+            nextIndex = i;
 
-                Loading = false;
-                Refreshing = false;
-
-                if (result == null || result.songs == null)
-                {
-                    Error = true;
-                    ErrorWasRefresh = fresh;
-                    DebugLog.Log($"[LatestMaudica] Page {pageToLoad} failed");
-                    FolderRowManager.RefreshList();
-                    return;
-                }
-
-                if (fresh)
-                {
-                    results.Clear();
-                    seenIds.Clear();
-                    pageSizeInUse = pageSize;
-                    Loaded = true;
-                }
-
-                page = pageToLoad;
-                totalPages = result.total_pages < 1 ? 1 : result.total_pages;
-                TotalOnMaudica = result.song_count;
-
-                foreach (var s in result.songs)
-                {
-                    if (s == null || string.IsNullOrEmpty(s.song_id)) continue;
-                    // New uploads between page requests shift the listing, so a later page
-                    // can repeat entries from an earlier one.
-                    if (seenIds.Add(s.song_id))
-                        results.Add(s);
-                }
-
-                DebugLog.Log($"[LatestMaudica] Page {page}/{totalPages} loaded: {results.Count} of {TotalOnMaudica} shown");
-                FolderRowManager.RefreshList();
-            }, DifficultyFilter.All, false, pageToLoad, false, pageSize));
+            builtForVersion = MaudicaCatalog.Version;
         }
 
         // ── Local matching ───────────────────────────────────────────────────

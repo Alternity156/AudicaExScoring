@@ -1,4 +1,6 @@
 ﻿using System;
+using System.Collections;
+using System.Collections.Generic;
 using System.Reflection;
 using System.Text.RegularExpressions;
 using Harmony;
@@ -119,7 +121,7 @@ namespace ExScoringMod
                         ? (parsedUserIdField.GetValue(eventArgs) as string ?? "") : "";
                     pendingIdContext[q.MaudicaId] = requestedBy;
                     DebugLog.Log($"[SongRequestInterceptor] -id request caught: {q.MaudicaId} → looking up.");
-                    MelonCoroutines.Start(SongDownloader.DoMaudicaIDSearch(q.MaudicaId, OnIdSearchResult));
+                    MelonCoroutines.Start(ResolveIdCo(q.MaudicaId));
                     return;
                 }
                 // Title misses are handled at the SendMessage seam; local matches are SongRequest's job.
@@ -193,9 +195,62 @@ namespace ExScoringMod
                 yield break;
             }
 
+            // Local maudica catalog first; refresh it once if nothing matches (a fresh upload).
+            if (MaudicaCatalog.IsReady)
+            {
+                Song best = PickBestMatch(MaudicaCatalog.SearchSongs(term), q);
+                if (best == null && MaudicaCatalog.CanRefreshNow)
+                {
+                    yield return RefreshCatalogCo();
+                    best = PickBestMatch(MaudicaCatalog.SearchSongs(term), q);
+                }
+                DebugLog.Log($"[SongRequestInterceptor] catalog match for \"{term}\": {(best != null ? best.song_id : "none")}");
+                QueueResult(best, "", rawQuery);
+                yield break;
+            }
+
+            // No catalog yet (first launch still downloading it, or offline with no cache): maudica's search.
             // capture the original query so the result handler can re-emit an accurate "not found"
             pendingQueryByTerm[term] = rawQuery;
             yield return MelonCoroutines.Start(SongDownloader.DoSongWebSearch(term, OnTitleSearchResult, DifficultyFilter.All));
+        }
+
+        /// <summary>
+        /// "-id N": the map from the local catalog (refreshed once if it isn't there yet), falling
+        /// back to maudica's by-id lookup when the catalog doesn't have it. Runs on the coroutine
+        /// pump, since chat messages can arrive on a background thread.
+        /// </summary>
+        private static IEnumerator ResolveIdCo(string id)
+        {
+            yield return null;
+
+            if (MaudicaCatalog.IsReady)
+            {
+                CatalogMap map = MaudicaCatalog.GetById(id);
+                if (map == null && MaudicaCatalog.CanRefreshNow)
+                {
+                    yield return RefreshCatalogCo();
+                    map = MaudicaCatalog.GetById(id);
+                }
+                if (map != null)
+                {
+                    string requestedBy = pendingIdContext.TryGetValue(id, out string by) ? by : "";
+                    pendingIdContext.Remove(id);
+                    DebugLog.Log($"[SongRequestInterceptor] -id {id} found in catalog: {map.filename}");
+                    QueueResult(map.ToSong(), requestedBy, "-id " + id);
+                    yield break;
+                }
+            }
+
+            MelonCoroutines.Start(SongDownloader.DoMaudicaIDSearch(id, OnIdSearchResult));
+        }
+
+        /// <summary>Waits for a (throttled) catalog refresh to finish.</summary>
+        private static IEnumerator RefreshCatalogCo()
+        {
+            bool done = false;
+            MaudicaCatalog.RequestRefresh(() => done = true);
+            while (!done) yield return null;
         }
 
         private static readonly System.Collections.Generic.Dictionary<string, string> pendingQueryByTerm
@@ -282,11 +337,17 @@ namespace ExScoringMod
         private static Song PickBestMatch(APISongList response, ParsedQuery q)
         {
             if (response?.songs == null) return null;
+            return PickBestMatch(response.songs, q);
+        }
+
+        private static Song PickBestMatch(IEnumerable<Song> songs, ParsedQuery q)
+        {
+            if (songs == null) return null;
 
             Song best = null;
             bool any = false, better = false, exact = false;
 
-            foreach (Song s in response.songs)
+            foreach (Song s in songs)
             {
                 if (s == null) continue;
                 string title = s.title?.ToLowerInvariant() ?? "";

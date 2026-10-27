@@ -62,6 +62,7 @@ namespace ExScoringMod
         public static readonly ColorSetting RowOptionCategory = new ColorSetting("ColorRowOptionCategory", "Option Categories", C(0.26f, 0.26f, 0.30f), ColorSection.SongList);
         public static readonly ColorSetting RowPlaylists = new ColorSetting("ColorRowPlaylists", "Playlists", C(0.30f, 0.30f, 0.30f), ColorSection.SongList);
         public static readonly ColorSetting RowPlaylistEntry = new ColorSetting("ColorRowPlaylistEntry", "Playlist Entries", C(0.30f, 0.30f, 0.30f), ColorSection.SongList);
+        public static readonly ColorSetting RowPlaylistTitle = new ColorSetting("ColorRowPlaylistTitle", "Playlist Title", C(0.30f, 0.30f, 0.30f), ColorSection.SongList);
         public static readonly ColorSetting RowBack = new ColorSetting("ColorRowBack", "Back", C(0.20f, 0.24f, 0.34f), ColorSection.SongList);
         public static readonly ColorSetting RowCreate = new ColorSetting("ColorRowCreate", "Create Playlist", C(0.10f, 0.30f, 0.14f), ColorSection.SongList);
         public static readonly ColorSetting RowDelete = new ColorSetting("ColorRowDelete", "Delete", C(0.34f, 0.10f, 0.10f), ColorSection.SongList);
@@ -87,7 +88,7 @@ namespace ExScoringMod
             FolderFavorites, FolderAudica, FolderAudicaDLC, FolderUnsorted,
             FolderSongRequests, FolderLatestMaudica, FolderSearch, FolderOther,
 
-            RowOptions, RowOptionCategory, RowPlaylists, RowPlaylistEntry,
+            RowOptions, RowOptionCategory, RowPlaylists, RowPlaylistEntry, RowPlaylistTitle,
             RowBack, RowCreate, RowDelete, RowConfirmDelete, RowMarathon,
 
             RowDownloadable, RowDownloadAll, RowLoadMore,

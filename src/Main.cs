@@ -289,45 +289,38 @@ namespace ExScoringMod
 
         // ── Song count notification ──
 
+        /// <summary>
+        /// Shows the result of the launch-time maudica check (MaudicaCatalog) on the song page panel:
+        /// how many maps were uploaded since the catalog was last updated. Started on every song-page
+        /// visit; waits for the check if it's still running, and shows the same message all session.
+        /// </summary>
         public static IEnumerator UpdateLastSongCount()
         {
-            yield return new WaitForSeconds(0.5f);
-            WWW www = new WWW(SongDownloader.apiUrl);
-            yield return www;
-            try
+            MaudicaCatalog.Initialize();
+            while (!MaudicaCatalog.LaunchCheckDone) yield return null;
+
+            if (SongListNotification.notificationPanel == null) yield break;
+
+            string text;
+            if (MaudicaCatalog.LaunchCheckFailed)
             {
-                DebugLog.Log($"[SongCount] API response length: {www.text?.Length}");
-                int newSongCount = MelonLoader.TinyJSON.JSON.Load(www.text).Make<NewAPISongList>().count;
-                DebugLog.Log($"[SongCount] API count: {newSongCount}, LastSongCount: {Config.LastSongCount}");
-                DebugLog.Log($"[SongCount] notificationPanel null? {SongListNotification.notificationPanel == null}");
-                if (SongListNotification.notificationPanel != null)
-                {
-                    if (Config.LastSongCount == 0)
-                    {
-                        Config.UpdateSongCount(newSongCount);
-                        DebugLog.Log("[SongCount] First run, storing count");
-                    }
-                    else if (Config.LastSongCount == newSongCount)
-                    {
-                        SongListNotification.SetText("There are no new songs available");
-                        DebugLog.Log("[SongCount] No new songs");
-                    }
-                    else
-                    {
-                        int diff = newSongCount - Config.LastSongCount;
-                        bool isSingular = diff == 1;
-                        string pre = isSingular ? "is " : "are ";
-                        string noun = isSingular ? "song" : "songs";
-                        SongListNotification.SetText("There " + pre + diff.ToString() + " new " + noun + " available");
-                        DebugLog.Log($"[SongCount] {diff} new songs");
-                    }
-                    Config.UpdateSongCount(newSongCount);
-                }
+                text = MaudicaCatalog.IsReady
+                    ? "Couldn't check Maudica for new songs"
+                    : "Couldn't reach Maudica";
             }
-            catch (Exception e)
+            else if (MaudicaCatalog.LaunchWasFirstSync)
             {
-                DebugLog.Log($"[WARNING] Could not fetch song count: {e.Message}");
+                text = $"Maudica song list downloaded ({MaudicaCatalog.Count} songs)";
             }
+            else
+            {
+                int n = MaudicaCatalog.LaunchNewMaps;
+                if (n <= 0) text = "There are no new songs available";
+                else if (n == 1) text = "There is 1 new song available";
+                else text = $"There are {n} new songs available";
+            }
+
+            SongListNotification.SetText(text);
         }
 
         public override void OnApplicationQuit()

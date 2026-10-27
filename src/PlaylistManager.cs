@@ -1,7 +1,6 @@
 ﻿using System.Collections.Generic;
 using System.IO;
 using MelonLoader;
-using TMPro;
 using UnityEngine;
 
 namespace ExScoringMod
@@ -15,12 +14,10 @@ namespace ExScoringMod
         public static List<SongList.SongData> internalSongList { get; private set; }
         public static Song[] apiSongList { get; set; }
 
-        private static PlaylistDownloadManager downloadManager;
         private static PlaylistIOHandler ioHandler;
 
         public static void OnApplicationStart()
         {
-            downloadManager = new PlaylistDownloadManager();
             ioHandler = new PlaylistIOHandler();
 
             LoadPlaylists();
@@ -30,11 +27,6 @@ namespace ExScoringMod
         {
             playlists = ioHandler.LoadPlaylists();
             SavePlaylistData();
-        }
-
-        public static void SetCampaignSongs(List<string> songs)
-        {
-            PlaylistDownloadManager.campaignSongs = songs;
         }
 
         public static void MoveSongUp(string song)
@@ -71,26 +63,6 @@ namespace ExScoringMod
             {
                 playlist.PopulateSongNames();
             }
-        }
-
-        public static void DownloadSingleSong(string songName, bool showPopup, GunButton button, TextMeshPro label)
-        {
-            downloadManager.DownloadSingleSong(songName, showPopup, button, label);
-        }
-
-        public static void DownloadSongs(List<string> songs, bool showPopup, GunButton button, TextMeshPro label)
-        {
-            downloadManager.DownloadSongs(songs, showPopup, button, label);
-        }
-
-        public static void DownloadMissingSongs()
-        {
-            downloadManager.DownloadMissingSongs();
-        }
-
-        public static void EnableBackButton()
-        {
-            downloadManager.EnableBackButton();
         }
 
         public static void SavePlaylistData()

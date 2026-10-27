@@ -1883,6 +1883,7 @@ namespace ExScoringMod
                 if (state == StartupLogo.State.Done)
                 {
                     PlaylistManager.OnApplicationStart();
+                    MaudicaCatalog.Initialize(); // load the maudica cache + check for new uploads
                     FavoritesStore.Load();
                     SongDownloadTracker.StartSongListUpdate();
                 }
@@ -1941,7 +1942,6 @@ namespace ExScoringMod
             {
                 SongListNotification.Setup();
                 PlaylistManager.PopulatePlaylistsSongNames();
-                PlaylistManager.DownloadMissingSongs();
                 MelonCoroutines.Start(UpdateLastSongCount());
 
                 // Default to the Main filter (where the folder system works) instead of All

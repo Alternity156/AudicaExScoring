@@ -531,6 +531,7 @@ namespace ExScoringMod
                 AddColorRows(
                     ColorSettings.RowOptions, ColorSettings.RowOptionCategory,
                     ColorSettings.RowPlaylists, ColorSettings.RowPlaylistEntry,
+                    ColorSettings.RowPlaylistTitle,
                     ColorSettings.RowBack, ColorSettings.RowCreate,
                     ColorSettings.RowDelete, ColorSettings.RowConfirmDelete,
                     ColorSettings.RowMarathon);

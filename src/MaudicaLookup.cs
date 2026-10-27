@@ -12,11 +12,14 @@ namespace ExScoringMod
     /// (the Suggested Songs folder), so a song is only searched once.
     ///
     /// Search order, first hit wins:
-    ///  1. ?audica_id= the in-game song id: the exact version of the map, trusted as is.
-    ///  2. ?id= the song ref's maudicaId, when the server filled one in.
-    ///  3. ?search= the title, keeping only a map with the same song id, or the same title + artist
+    ///  1. ?audica_id= the in-game song id: the exact version of the map, trusted as is. This one
+    ///     stays a network request: the maudica listing (and so the catalog) has no audica_id.
+    ///  2. The song ref's maudicaId, when the server filled one in.
+    ///  3. The title, keeping only a map with the same song id, or the same title + artist
     ///     + mapper (case-insensitive, trimmed).
-    /// Each step gives up after StepTimeoutSeconds (a failed request never calls back).
+    /// Steps 2 and 3 are answered from the local maudica catalog (MaudicaCatalog) when it's ready,
+    /// and only go to maudica's ?id= / ?search= when there's no catalog yet.
+    /// Each network step gives up after StepTimeoutSeconds (a failed request never calls back).
     ///
     /// Results are cached per song id for the session. "Not found" is only kept for
     /// NotFoundRetrySeconds, so a network hiccup doesn't make a song unavailable for good.
@@ -111,8 +114,27 @@ namespace ExScoringMod
             found = First(list);
             if (found != null) how = "audica_id";
 
+            // 2. The server's Maudica id: catalog first.
+            if (found == null && song.maudicaId.HasValue && MaudicaCatalog.IsReady)
+            {
+                CatalogMap map = MaudicaCatalog.GetById(song.maudicaId.Value.ToString());
+                if (map != null)
+                {
+                    found = map.ToSong();
+                    how = "maudicaId " + map.id + " (catalog)";
+                }
+            }
+
+            // 3. Title match from the catalog.
+            if (found == null && !string.IsNullOrEmpty(song.title) && MaudicaCatalog.IsReady)
+            {
+                found = MatchByMetadata(MaudicaCatalog.SearchSongs(song.title), song);
+                if (found != null) how = "title (catalog)";
+            }
+
+            // No catalog yet: the same two steps through maudica's own lookups.
             // 2. The server's Maudica id.
-            if (found == null && song.maudicaId.HasValue)
+            if (found == null && song.maudicaId.HasValue && !MaudicaCatalog.IsReady)
             {
                 list = null;
                 done = false;
@@ -125,7 +147,7 @@ namespace ExScoringMod
             }
 
             // 3. Title search, matched on song id or title + artist + mapper.
-            if (found == null && !string.IsNullOrEmpty(song.title))
+            if (found == null && !string.IsNullOrEmpty(song.title) && !MaudicaCatalog.IsReady)
             {
                 list = null;
                 done = false;
@@ -183,13 +205,19 @@ namespace ExScoringMod
         private static Song MatchByMetadata(APISongList list, MpSongRef song)
         {
             if (list == null || list.songs == null) return null;
+            return MatchByMetadata(list.songs, song);
+        }
 
-            foreach (Song s in list.songs)
+        private static Song MatchByMetadata(IEnumerable<Song> songs, MpSongRef song)
+        {
+            if (songs == null) return null;
+
+            foreach (Song s in songs)
             {
                 if (s != null && !string.IsNullOrEmpty(s.song_id) && s.song_id == song.songId) return s;
             }
 
-            foreach (Song s in list.songs)
+            foreach (Song s in songs)
             {
                 if (s == null) continue;
                 if (Same(s.title, song.title) && Same(s.artist, song.artist) && Same(s.author, song.mapper)) return s;

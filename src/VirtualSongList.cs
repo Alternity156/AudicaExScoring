@@ -34,6 +34,7 @@ namespace ExScoringMod
         public bool starHeader;   // true = render star icons (incl. pips-only); false = text title
         public string titleOverride; // song: text shown instead of the song's own title (e.g. "Destiny (Suggested by Bob)")
         public bool disabled;     // action/downloadable: shown but not shootable
+        public bool labelOnly;    // action: plain label (e.g. playlist title) — not dimmed, colliders off so the gun can't highlight or hit it
 
         /// <summary>Default folder-header grey. Action rows override via their own color.</summary>
         public static Color FolderColor => ColorSettings.FolderOther.Value; // customisable (Options > Colors)
@@ -56,6 +57,14 @@ namespace ExScoringMod
         /// <summary>An action-style row that can't be shot (e.g. a song that can't be downloaded).</summary>
         public static ViewRow DisabledRow(string label, Color color, string subLabel = null, string actionId = null)
             => new ViewRow { kind = ViewRowKind.Action, label = label, color = color, subLabel = subLabel, actionId = actionId, disabled = true };
+
+        /// <summary>
+        /// A plain label row (e.g. the playlist title): drawn like an action row at full brightness,
+        /// but its colliders are turned off so the gun can't highlight or shoot it, and it never
+        /// gets the selection indicator (no actionId).
+        /// </summary>
+        public static ViewRow LabelRow(string label, Color color, string subLabel = null)
+            => new ViewRow { kind = ViewRowKind.Action, label = label, color = color, subLabel = subLabel, labelOnly = true };
 
         public static ViewRow ActionRow(string label, Color color, Action onHit, string subLabel = null, string actionId = null)
             => new ViewRow { kind = ViewRowKind.Action, label = label, color = color, onHit = onHit, subLabel = subLabel, actionId = actionId };
@@ -350,6 +359,8 @@ namespace ExScoringMod
             public GunButton button;
             public Material quadMat;   // recolored per bind
             public bool inUse;
+            public List<Collider> colliders; // cached on first bind; turned off for label rows
+            public bool collidersEnabled = true;
 
             // Star-display reuse (star-sort headers). Cached once at creation; toggled per bind.
             public GameObject starDisplay;                 // Canvas/StarDisplay (kept off except on star headers)
@@ -975,6 +986,10 @@ namespace ExScoringMod
                 // Default: star icons off (header pool is shared with text folders / action rows).
                 if (hi.starDisplay != null) hi.starDisplay.SetActive(false);
 
+                // Label rows can't be hit or highlighted; every other row turns its colliders back
+                // on, so a pooled item that last showed a label never stays unshootable.
+                SetHeaderCollidersEnabled(hi, !(row.kind == ViewRowKind.Action && row.labelOnly));
+
                 if (row.kind == ViewRowKind.FolderHeader)
                 {
                     if (row.starHeader && hi.starDisplay != null && hi.starObjs != null)
@@ -1006,11 +1021,12 @@ namespace ExScoringMod
 
                     if (hi.button != null)
                     {
-                        Action cb = row.disabled ? null : row.onHit;
+                        Action cb = (row.disabled || row.labelOnly) ? null : row.onHit;
                         hi.button.onHitEvent = new UnityEvent();
                         hi.button.onHitEvent.AddListener(new Action(() => cb?.Invoke()));
                         // Pooled: always set, so a disabled row's state never leaks to the next bind.
-                        hi.button.SetInteractable(!row.disabled);
+                        // Label rows stay "interactable" so they aren't dimmed; their colliders are off instead.
+                        hi.button.SetInteractable(row.labelOnly || !row.disabled);
                     }
                 }
 
@@ -1045,6 +1061,31 @@ namespace ExScoringMod
                 }
             }
             catch (Exception e) { DebugLog.Log("[VList] ApplyTitleOverride failed: " + e.Message); }
+        }
+
+        /// <summary>Turns a header-pool item's colliders on/off (cached on first use).</summary>
+        private static void SetHeaderCollidersEnabled(HeaderPoolItem hi, bool enabled)
+        {
+            try
+            {
+                if (hi.colliders == null)
+                {
+                    hi.colliders = new List<Collider>();
+                    var found = hi.go.GetComponentsInChildren<Collider>(true);
+                    for (int i = 0; i < found.Length; i++)
+                    {
+                        if (found[i] != null) hi.colliders.Add(found[i]);
+                    }
+                }
+                if (hi.collidersEnabled == enabled) return;
+
+                for (int i = 0; i < hi.colliders.Count; i++)
+                {
+                    if (hi.colliders[i] != null) hi.colliders[i].enabled = enabled;
+                }
+                hi.collidersEnabled = enabled;
+            }
+            catch (Exception e) { DebugLog.Log("[VList] SetHeaderCollidersEnabled failed: " + e.Message); }
         }
 
         // ── Selection indicators ───────────────────────────────────────────────

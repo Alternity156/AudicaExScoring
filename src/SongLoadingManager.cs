@@ -73,8 +73,7 @@ namespace ExScoringMod
         public static void UpdateUI()
         {
             if (!Config.SafeSongListReload) return;
-            if ((!searching || disabled || MenuState.GetState() != MenuState.State.MainPage) &&
-                !PlaylistDownloadManager.IsDownloadingMissing) return;
+            if (!searching || disabled || MenuState.GetState() != MenuState.State.MainPage) return;
 
             DebugLog.Log("SongLoadingManager: Disabling buttons");
             disabled = true;
