@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Text;
+using Harmony;
 using MelonLoader;
 using Newtonsoft.Json.Linq;
 using TMPro;
@@ -15,8 +16,9 @@ namespace ExScoringMod
     /// screen doesn't count as in the song (MpGameplay.OnResultsScreen, location "ResultsPage"), so
     /// presence resumes there; gun colours still wait until the menus.
     ///
-    /// Sending (in a lobby, presence on, not in a song): ~15 poses a second, every part as its
-    /// world pose [px,py,pz, qx,qy,qz,qw]:
+    /// Sending (in a lobby, presence on, not in a song): MpSession.PoseRateHz poses a second (the
+    /// server's poseRateHz since v2.40, 15 without it), on a fixed schedule so the average rate
+    /// holds even when frames don't line up with it. Every part as its world pose [px,py,pz, qx,qy,qz,qw]:
     ///  - head  = OVRCameraRig.centerEyeAnchor
     ///  - hands = the KataHand objects (HandLeft / HandRight)
     ///  - guns  = GunLeft/GunRight's tricks/mesh, falling back to the Gun object itself. Gun tricks
@@ -25,7 +27,28 @@ namespace ExScoringMod
     ///            a trick it follows the spin. A throw takes "tricks" out from under the Gun, so the
     ///            last mesh found is kept and sent wherever it is until it is back under the Gun
     ///  - triggers = Gun.GetTriggerPullAmount() >= Gun.GetTriggerThreshold()
+    ///  - pulls    = Gun.GetTriggerPullAmount(), clamped 0..1, 2 decimals (v2.40)
+    ///  - shots    = running count per hand of registered presses (Gun.UpdateTrigger returning
+    ///               true, the same moment the gun fires), reset on every welcome since the
+    ///               contract counts "since the connection opened" (v2.40)
     /// plus the gun colours (read from the prefs twice a second, sent by MpSession only on change).
+    ///
+    /// Shots from others (v2.40, 19.13.4): each hand's count is read as render time passes each
+    /// sample. The first sample (or the first after the player was hidden) only sets the baseline;
+    /// a count that goes down (they reconnected) resets it; a rise fires that many shots, at most
+    /// MaxShotsPerJump. Without counts (a v2.39 sender or server) a false -> true trigger change
+    /// is one shot. Trigger pull is interpolated like the parts (bool 0/1 without a pull) and kept
+    /// per player for the finger animation (not drawn yet).
+    ///
+    /// Each shot is shown the way the game shows its own (Gun.Fire, PlayShot): the success beam
+    /// from the gun copy's firepoint (a marker placed from the local gun's firepoint), the muzzle
+    /// flash and the beam dust. Per remote hand, 5 beams and a muzzle flash are built on the first
+    /// shot from the local gun of the same hand (as Gun.SetUp / CreateMuzzleFlash do), living
+    /// under KataConfig like the game's own, destroyed with the avatar. The beam carries that
+    /// player's gun colour: a copy of the native beam texture repainted with TargetColorSetter's
+    /// CreateTexturesBeam + ShiftTextureColors, on copies of the beam quads' materials. The muzzle
+    /// flash and dust use the game's per-hand colour slot, so they show this player's own colour
+    /// for that hand.
     ///
     /// Drawing: each remote player's samples are buffered and drawn RenderDelayMs behind server
     /// time, interpolating on each sample's t (lerp / slerp, holding the last pose if nothing newer
@@ -108,8 +131,15 @@ namespace ExScoringMod
     /// </summary>
     public static class MpPresence
     {
-        private const long SendIntervalMs = 67;          // ~15 Hz; the server accepts up to 20/s
-        private const long RenderDelayMs = 100;          // contract: buffer ~100 ms behind serverTime
+        // Send rate: MpSession.PoseRateHz (19.13.3). The server allows 1.5x that per second.
+        private const long RenderDelayMs = 100;          // contract: buffer ~100 ms behind serverTime (3 samples at 30 Hz)
+        private const int MaxShotsPerJump = 5;           // 19.13.4: a burst after a stall stays readable
+
+        // Shot effects, the game's own numbers (Ghidra, 2026-10-29).
+        private const int BeamPoolSize = 5;              // Gun.SetUp: 5 beams per pool
+        private const int BeamDustBurst = 3500;          // Gun.DoBeamDust: burstNum += 0xdac
+        private const int BeamDustEmitterShape = 6;      // Gun.DoBeamDust: SetBeamEmitterShape(6)
+        private const string FirepointName = "Firepoint";
         private const long SampleKeepMs = 1000;
         private const float GunColorPollSeconds = 0.5f;
         private const float RigLookupRetrySeconds = 2f;
@@ -184,6 +214,53 @@ namespace ExScoringMod
             public readonly bool[] Has = new bool[PartCount];
             public bool LTrigger;
             public bool RTrigger;
+
+            // v2.40, index 0 = left, 1 = right. Has* false when the sender sent null (v2.39 mod or server).
+            public readonly float[] Pull = new float[2];
+            public readonly bool[] HasPull = new bool[2];
+            public readonly long[] Shots = new long[2];
+            public readonly bool[] HasShots = new bool[2];
+
+            public bool Trigger(int hand) => hand == 0 ? LTrigger : RTrigger;
+        }
+
+        /// <summary>
+        /// One remote hand's shot effects, built like the game builds a gun's own (Gun.SetUp,
+        /// Gun.CreateMuzzleFlash) from the local gun of the same hand. The beams and muzzle flash
+        /// live where the game keeps its own (under KataConfig and its instantiateParent), not
+        /// under the avatar, so they are destroyed with the avatar by hand (DestroyShotFx).
+        /// </summary>
+        private class ShotFx
+        {
+            /// <summary>The local same-hand gun's successBeamPrefab: scale and speed are copied from it on every shot, as Gun.Fire does.</summary>
+            public GunBeam Prefab;
+            public GunBeam[] Beams;
+            public int Cycle;
+            public MuzzleFlash Muzzle;
+            /// <summary>This player's beam texture: a copy of the native one, repainted in their gun colour.</summary>
+            public RenderTexture Texture;
+            public string TextureColorKey;
+            /// <summary>The beam quads' material copies, one per prefab material, each using Texture.</summary>
+            public readonly Dictionary<IntPtr, Material> Materials = new Dictionary<IntPtr, Material>();
+        }
+
+        /// <summary>Per hand of a remote player: what the shot detection has seen so far.</summary>
+        private class ShotState
+        {
+            /// <summary>The last count read. Only meaningful while HasBaseline.</summary>
+            public long Baseline;
+            public bool HasBaseline;
+            /// <summary>Trigger fallback (no counts): the last trigger value read.</summary>
+            public bool LastTrigger;
+            public bool HasLastTrigger;
+            /// <summary>Shots fired for this hand since the avatar was created (debug dump).</summary>
+            public long Fired;
+
+            public void Reset()
+            {
+                HasBaseline = false;
+                HasLastTrigger = false;
+            }
         }
 
         private class Remote
@@ -196,6 +273,10 @@ namespace ExScoringMod
             // Built lazily, once templates exist.
             public GameObject Root;
             public Transform Head, Body, LHand, RHand, LGun, RGun;
+            /// <summary>Firepoint markers on the gun copies (FirepointName), where shots leave from.</summary>
+            public Transform LFire, RFire;
+            /// <summary>Beams, muzzle flash and beam texture per hand (0 = left, 1 = right), made on the first shot.</summary>
+            public readonly ShotFx[] Fx = new ShotFx[2];
             /// <summary>Platform copy, or null when the environment has none.</summary>
             public Transform Disc;
             public readonly List<Material> TintLeft = new List<Material>();
@@ -212,14 +293,32 @@ namespace ExScoringMod
             public bool BodyInit;
             public Vector3 BodyPos;
             public Quaternion BodyRot = Quaternion.identity;
+
+            // v2.40 shots: the newest sample time already read, and each hand's state (0 = left, 1 = right).
+            public long ShotsReadUpTo;
+            public readonly ShotState[] Shot = { new ShotState(), new ShotState() };
+            /// <summary>Interpolated trigger pull per hand, 0..1 (for the finger animation).</summary>
+            public readonly float[] Pull = new float[2];
+
+            /// <summary>Forgets what was read, so the next sample only sets a new baseline.</summary>
+            public void ResetShots()
+            {
+                ShotsReadUpTo = 0;
+                Shot[0].Reset();
+                Shot[1].Reset();
+            }
         }
 
         private static readonly Dictionary<string, Remote> remotes = new Dictionary<string, Remote>();
 
         private static bool subscribed;
         private static bool wasInSong;
-        private static long lastPoseSentMs;
+        private static long nextPoseAtMs;
         private static float nextGunColorPoll;
+
+        // This player's shots per hand (0 = left, 1 = right), counted by the Gun.UpdateTrigger
+        // postfix below and reset on every welcome (v2.40: "since the connection opened").
+        private static readonly long[] localShots = new long[2];
 
         // Local rig (for sending, and as the template source).
         private static Transform localHead;
@@ -256,6 +355,7 @@ namespace ExScoringMod
         private static readonly Vector3[] curPos = new Vector3[PartCount];
         private static readonly Quaternion[] curRot = new Quaternion[PartCount];
         private static readonly bool[] curHas = new bool[PartCount];
+        private static readonly float[] curPull = new float[2];
 
         // ── Per frame ──
 
@@ -266,6 +366,14 @@ namespace ExScoringMod
             {
                 subscribed = true;
                 MpSession.OnPoses += HandlePoses;
+                // A new connection counts shots from 0 (19.13.4); receivers re-baseline on the drop.
+                MpSession.OnConnected += _ =>
+                {
+                    localShots[0] = 0;
+                    localShots[1] = 0;
+                };
+                // A new rate starts its schedule now rather than waiting out the old interval.
+                MpSession.OnPoseRateChanged += _ => nextPoseAtMs = 0;
             }
 
             if (!MpSession.InLobby)
@@ -316,14 +424,22 @@ namespace ExScoringMod
 
         // ── Sending ──
 
+        /// <summary>
+        /// One pose every 1000 / PoseRateHz ms. The next send time steps by exactly one interval, so
+        /// the average rate is right even though sends can only happen on frames (at 30 Hz and
+        /// 90 fps a plain "time since last send" check drifts down to ~22/s). After a stall it
+        /// restarts from now instead of catching up in a burst, so the server's 1.5x limit is never
+        /// approached.
+        /// </summary>
         private static void SendPoseIfDue()
         {
             long now = MpSession.LocalNowMs;
-            if (now - lastPoseSentMs < SendIntervalMs) return;
+            if (now < nextPoseAtMs) return;
             if (!MpSession.IsConnected) return;
             if (!FindLocalRig()) return;
 
-            lastPoseSentMs = now;
+            long interval = Math.Max(1, (long)Math.Round(1000.0 / Math.Max(1, MpSession.PoseRateHz)));
+            nextPoseAtMs = nextPoseAtMs <= 0 || now - nextPoseAtMs >= interval ? now + interval : nextPoseAtMs + interval;
 
             JObject pose = new JObject
             {
@@ -334,9 +450,57 @@ namespace ExScoringMod
                 ["lGun"] = PartJson(GunPoseTransform(localGunL, ref localGunPoseL)),
                 ["rGun"] = PartJson(GunPoseTransform(localGunR, ref localGunPoseR)),
                 ["lTrigger"] = TriggerDown(localGunL),
-                ["rTrigger"] = TriggerDown(localGunR)
+                ["rTrigger"] = TriggerDown(localGunR),
+                ["lPull"] = PullJson(localGunL),
+                ["rPull"] = PullJson(localGunR),
+                ["lShots"] = localShots[0],
+                ["rShots"] = localShots[1]
             };
             MpSession.SendPose(pose);
+        }
+
+        /// <summary>Trigger pull 0..1 with 2 decimals (what the server keeps), or null without a gun.</summary>
+        private static JToken PullJson(Gun gun)
+        {
+            if (gun == null) return JValue.CreateNull();
+            try
+            {
+                float pull = gun.GetTriggerPullAmount();
+                if (float.IsNaN(pull) || float.IsInfinity(pull)) return JValue.CreateNull();
+                return Math.Round((double)Mathf.Clamp01(pull), 2);
+            }
+            catch
+            {
+                return JValue.CreateNull();
+            }
+        }
+
+        /// <summary>
+        /// A registered press (the gun fires) on one of this player's guns: +1 to that hand's count.
+        /// Called from the Gun.UpdateTrigger postfix, in menus and in songs alike; counts go out with
+        /// the next pose, so shots in a song are never seen by anyone (receivers re-baseline after
+        /// a song, as they hid this player).
+        /// </summary>
+        private static void CountLocalShot(Gun gun)
+        {
+            int hand = HandOf(gun);
+            if (hand < 0) return;
+            if (localShots[hand] < int.MaxValue) localShots[hand]++; // the contract caps counts at 2^31 - 1
+        }
+
+        /// <summary>
+        /// 0 = left, 1 = right, -1 = not one of the player's two guns. Matched against the rig when
+        /// it's known, else Gun.controller (1 = left, 2 = right, as in PreciseTiming).
+        /// </summary>
+        private static int HandOf(Gun gun)
+        {
+            if (gun == null) return -1;
+            if (localGunL != null && gun.Pointer == localGunL.Pointer) return 0;
+            if (localGunR != null && gun.Pointer == localGunR.Pointer) return 1;
+            int controller = (int)gun.controller;
+            if (controller == 1) return 0;
+            if (controller == 2) return 1;
+            return -1;
         }
 
         private static JToken PartJson(Transform t)
@@ -364,12 +528,15 @@ namespace ExScoringMod
             return cached != null ? cached : gun.transform;
         }
 
-        private static bool IsAlive(Transform t)
+        /// <summary>Not null, not destroyed by Unity, and its managed wrapper not collected (a Component also needs its GameObject).</summary>
+        private static bool IsAlive(UnityEngine.Object o)
         {
-            if (t == null) return false;
+            if (o == null) return false;
             try
             {
-                return !t.WasCollected && t.gameObject != null;
+                if (o.WasCollected) return false;
+                Component component = o.TryCast<Component>();
+                return component == null || component.gameObject != null;
             }
             catch
             {
@@ -490,6 +657,7 @@ namespace ExScoringMod
                 remote.Present = false;
                 remote.Samples.Clear();
                 remote.BodyInit = false;
+                remote.ResetShots(); // coming back, their count only sets a new baseline
             }
         }
 
@@ -504,6 +672,10 @@ namespace ExScoringMod
             ReadPart(entry.rHand, sample, PartRHand);
             ReadPart(entry.lGun, sample, PartLGun);
             ReadPart(entry.rGun, sample, PartRGun);
+            ReadPull(entry.lPull, sample, 0);
+            ReadPull(entry.rPull, sample, 1);
+            ReadShots(entry.lShots, sample, 0);
+            ReadShots(entry.rShots, sample, 1);
             samples.Add(sample);
 
             // Keep about a second, never fewer than two.
@@ -527,6 +699,18 @@ namespace ExScoringMod
             sample.Pos[part] = new Vector3(a[0], a[1], a[2]);
             sample.Rot[part] = new Quaternion(q.x / mag, q.y / mag, q.z / mag, q.w / mag);
             sample.Has[part] = true;
+        }
+
+        private static void ReadPull(float? value, Sample sample, int hand)
+        {
+            sample.HasPull[hand] = value.HasValue && !float.IsNaN(value.Value) && !float.IsInfinity(value.Value);
+            sample.Pull[hand] = sample.HasPull[hand] ? Mathf.Clamp01(value.Value) : 0f;
+        }
+
+        private static void ReadShots(long? value, Sample sample, int hand)
+        {
+            sample.HasShots[hand] = value.HasValue && value.Value >= 0;
+            sample.Shots[hand] = sample.HasShots[hand] ? value.Value : 0;
         }
 
         private static void RemoveRemotesNotInLobby()
@@ -557,13 +741,19 @@ namespace ExScoringMod
         {
             if (remotes.Count == 0) return;
 
+            long renderTime = MpSession.ServerNowMs - RenderDelayMs;
+
             if (!Config.ShowOtherPlayers)
             {
-                foreach (Remote remote in remotes.Values) SetVisible(remote, false);
+                foreach (Remote remote in remotes.Values)
+                {
+                    // Shots are still read, so the baselines stay current and turning it back on
+                    // doesn't replay a burst. Nothing fires while it's off.
+                    if (remote.Present && remote.Samples.Count > 0) ReadShotsUpTo(remote, renderTime, false);
+                    SetVisible(remote, false);
+                }
                 return;
             }
-
-            long renderTime = MpSession.ServerNowMs - RenderDelayMs;
             int mySeat = MpSession.MySeat;
             MpLobbyState lobby = MpSession.Lobby;
             float dt = Time.deltaTime;
@@ -581,7 +771,11 @@ namespace ExScoringMod
                     continue;
                 }
 
-                if (remote.Root == null && !BuildAvatar(remote)) continue;
+                if (remote.Root == null && !BuildAvatar(remote))
+                {
+                    ReadShotsUpTo(remote, renderTime, false); // keep the baselines while there's nothing to draw
+                    continue;
+                }
 
                 MpPlayerState player = lobby != null ? lobby.FindPlayer(remote.UserId) : null;
                 int seat = player != null ? player.seat : 0;
@@ -591,6 +785,8 @@ namespace ExScoringMod
                 ApplyColors(remote, player);
 
                 Interpolate(remote.Samples, renderTime);
+                remote.Pull[0] = curPull[0];
+                remote.Pull[1] = curPull[1];
                 UpdateBody(remote, dt);
 
                 SetPart(remote.Head, PartHead);
@@ -613,6 +809,9 @@ namespace ExScoringMod
                 UpdateNames(remote, player, headsetEye, spectatorEye);
 
                 SetVisible(remote, true);
+
+                // After the parts are placed and shown, so a beam leaves from this frame's gun.
+                ReadShotsUpTo(remote, renderTime, true);
             }
         }
 
@@ -797,6 +996,373 @@ namespace ExScoringMod
                     }
                 }
             }
+
+            // Trigger pull (v2.40): lerped when both sides have one, otherwise the nearer side's
+            // pull, or its trigger bool as 0/1 when it has none (a v2.39 sender).
+            for (int h = 0; h < 2; h++)
+            {
+                float pa = a.HasPull[h] ? a.Pull[h] : (a.Trigger(h) ? 1f : 0f);
+                float pb = b.HasPull[h] ? b.Pull[h] : (b.Trigger(h) ? 1f : 0f);
+                curPull[h] = a.HasPull[h] && b.HasPull[h] ? Mathf.Lerp(pa, pb, frac) : (frac < 0.5f ? pa : pb);
+            }
+        }
+
+        // ── Shots from others (v2.40, 19.13.4) ──
+
+        /// <summary>
+        /// Reads every sample render time has passed since the last call, in order, and fires the
+        /// shots they show. The very first read (or the first after the player was hidden) only
+        /// takes the newest passed sample as the baseline, so a player appearing never fires shots
+        /// from before they were drawn.
+        /// </summary>
+        private static void ReadShotsUpTo(Remote remote, long renderTime, bool fire)
+        {
+            List<Sample> samples = remote.Samples;
+
+            if (remote.ShotsReadUpTo == 0)
+            {
+                Sample newestPassed = null;
+                for (int i = 0; i < samples.Count && samples[i].T <= renderTime; i++) newestPassed = samples[i];
+                if (newestPassed == null) return; // nothing passed yet
+                for (int h = 0; h < 2; h++) ReadShotSample(remote, newestPassed, h, false, true);
+                remote.ShotsReadUpTo = newestPassed.T;
+                return;
+            }
+
+            for (int i = 0; i < samples.Count; i++)
+            {
+                Sample sample = samples[i];
+                if (sample.T > renderTime) break;
+                if (sample.T <= remote.ShotsReadUpTo) continue;
+                for (int h = 0; h < 2; h++) ReadShotSample(remote, sample, h, fire, false);
+                remote.ShotsReadUpTo = sample.T;
+            }
+        }
+
+        /// <summary>One hand of one sample: the count when the sender has one, else the trigger edge.</summary>
+        private static void ReadShotSample(Remote remote, Sample sample, int hand, bool fire, bool baselineOnly)
+        {
+            ShotState state = remote.Shot[hand];
+
+            if (sample.HasShots[hand])
+            {
+                state.HasLastTrigger = false; // switching back to the bool later starts it fresh
+                long count = sample.Shots[hand];
+
+                if (!state.HasBaseline || baselineOnly)
+                {
+                    state.Baseline = count;
+                    state.HasBaseline = true;
+                    return;
+                }
+
+                if (count < state.Baseline)
+                {
+                    // They reconnected and count from 0 again.
+                    Log($"{remote.UserId} shot count {HandName(hand)} went {state.Baseline} -> {count} (reconnected?), new baseline");
+                    state.Baseline = count;
+                    return;
+                }
+
+                long rise = count - state.Baseline;
+                state.Baseline = count;
+                if (rise > 0) FireShots(remote, hand, (int)Math.Min(rise, MaxShotsPerJump), rise, fire);
+                return;
+            }
+
+            // No count: one shot per false -> true trigger change.
+            state.HasBaseline = false;
+            bool trigger = sample.Trigger(hand);
+            if (!baselineOnly && state.HasLastTrigger && !state.LastTrigger && trigger) FireShots(remote, hand, 1, 1, fire);
+            state.LastTrigger = trigger;
+            state.HasLastTrigger = true;
+        }
+
+        /// <summary>
+        /// count shots on one hand (rise = what the count went up by, before the cap): logged, and
+        /// shown on the avatar's gun the way the game shows its own (PlayShot).
+        /// </summary>
+        private static void FireShots(Remote remote, int hand, int count, long rise, bool fire)
+        {
+            if (!fire || count <= 0) return;
+            ShotState state = remote.Shot[hand];
+            state.Fired += count;
+
+            string capped = rise > count ? $" (count rose by {rise}, capped at {MaxShotsPerJump})" : "";
+            string source = remote.Samples.Count > 0 && remote.Samples[remote.Samples.Count - 1].HasShots[hand] ? "count" : "trigger";
+            Log($"{remote.UserId} shot {HandName(hand)}{(count > 1 ? " x" + count : "")}{capped} [{source}], {state.Fired} so far");
+
+            try
+            {
+                PlayShot(remote, hand, count);
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Log($"[MpPresence] shot effect for {remote.UserId} {HandName(hand)} failed: {ex}");
+            }
+        }
+
+        // ── Shot effects (the game's success beam, muzzle flash and beam dust) ──
+
+        /// <summary>
+        /// What Gun.Fire shows for a shot, from the remote gun's firepoint (Ghidra, 2026-10-29; the
+        /// same steps checked in game from the UnityExplorer console the same day):
+        ///  - beam: the next of BeamPoolSize success beams, at the firepoint, forward along it, roll
+        ///    = the gun's world z angle (Quaternion.Euler(local x, local y, roll)), prefab scale and
+        ///    speed, then GunBeam.Fire (it animates and switches itself off)
+        ///  - muzzle flash: MuzzleFlash.Play(position, forward, roll)
+        ///  - beam dust: Gun.DoBeamDust's steps on UGPUManager's shared dust system for that hand
+        /// Only while the avatar and that gun are shown. The beam is in that player's gun colour; the
+        /// muzzle flash and dust take the game's per-hand colour slot, so they show this player's
+        /// own colours for that hand. One muzzle flash and one dust burst however many shots came at once.
+        /// </summary>
+        private static void PlayShot(Remote remote, int hand, int count)
+        {
+            if (remote.Root == null || !remote.Root.activeSelf) return;
+            Transform gunPart = hand == 0 ? remote.LGun : remote.RGun;
+            Transform firepoint = hand == 0 ? remote.LFire : remote.RFire;
+            if (gunPart == null || !gunPart.gameObject.activeSelf) return;
+            if (firepoint == null) firepoint = gunPart;
+
+            Gun local = hand == 0 ? localGunL : localGunR;
+            if (local == null) return;
+
+            ShotFx fx = EnsureShotFx(remote, hand, local);
+            if (fx == null) return;
+            PaintBeamTexture(fx, RemoteGunColor(remote, hand));
+
+            Vector3 position = firepoint.position;
+            Vector3 forward = firepoint.forward;
+            float roll = gunPart.eulerAngles.z;
+
+            int beams = Math.Min(count, BeamPoolSize);
+            for (int i = 0; i < beams; i++)
+            {
+                fx.Cycle = (fx.Cycle + 1) % fx.Beams.Length; // BeamPool.GetBeam
+                FireBeam(fx.Beams[fx.Cycle], fx.Prefab, position, forward, roll);
+            }
+
+            if (IsAlive(fx.Muzzle)) fx.Muzzle.Play(position, forward, roll);
+            PlayBeamDust(local, hand, position, forward);
+        }
+
+        /// <summary>Gun.Fire's placement of a pooled beam, then GunBeam.Fire.</summary>
+        private static void FireBeam(GunBeam beam, GunBeam prefab, Vector3 position, Vector3 forward, float roll)
+        {
+            if (!IsAlive(beam)) return;
+            Transform t = beam.transform;
+            t.position = position;
+            t.forward = forward;
+            Vector3 local = t.localEulerAngles;
+            t.localRotation = Quaternion.Euler(local.x, local.y, roll);
+            t.localScale = prefab.transform.localScale;
+            beam.speed = prefab.speed;
+            beam.Fire();
+        }
+
+        /// <summary>
+        /// Gun.DoBeamDust's steps at another position: the shared dust system for that hand moved
+        /// to the firepoint and pointed along the shot, the beam emitter shape, then a burst emitted
+        /// at once. SetBeamEmitterShape is called on the local gun of the same hand, which picks
+        /// the same system.
+        /// </summary>
+        private static void PlayBeamDust(Gun local, int hand, Vector3 position, Vector3 forward)
+        {
+            UGPUManager gpu = UGPUManager.I;
+            if (gpu == null) return;
+            GPUParticleSystem dust = hand == 0 ? gpu.beamDustLeft : gpu.beamDustRight;
+            if (dust == null) return;
+
+            Transform t = dust.transform;
+            t.position = position;
+            t.forward = forward;
+            local.SetBeamEmitterShape((GPUParticleSystem.EmitterShape)BeamDustEmitterShape);
+            if (!dust.gameObject.activeInHierarchy) return;
+            dust.burstNum += BeamDustBurst;
+            dust.Update();
+        }
+
+        /// <summary>
+        /// This remote hand's effects, built on first use (or again if something destroyed them, e.g.
+        /// a scene change took the muzzle flash's parent). Null while the local gun isn't set up yet.
+        /// </summary>
+        private static ShotFx EnsureShotFx(Remote remote, int hand, Gun local)
+        {
+            ShotFx fx = remote.Fx[hand];
+            if (fx != null && ShotFxAlive(fx)) return fx;
+            if (fx != null)
+            {
+                Log($"{remote.UserId} {HandName(hand)}: shot effects were destroyed, rebuilding");
+                DestroyShotFx(fx);
+                remote.Fx[hand] = null;
+            }
+
+            KataConfig config = KataConfig.I;
+            GunBeam prefab = local.successBeamPrefab;
+            if (config == null || prefab == null) return null;
+
+            fx = new ShotFx { Prefab = prefab, Beams = new GunBeam[BeamPoolSize] };
+            try
+            {
+                // The texture first, so the beams' materials can use it from the start.
+                if (!PaintBeamTexture(fx, RemoteGunColor(remote, hand)))
+                {
+                    Log($"{remote.UserId} {HandName(hand)}: no beam texture yet, beams keep the prefab look");
+                }
+
+                // Gun.SetUp: Instantiate under KataConfig, Init, hidden until fired.
+                for (int i = 0; i < BeamPoolSize; i++)
+                {
+                    GunBeam beam = UnityEngine.Object.Instantiate<GunBeam>(prefab, config.transform);
+                    beam.name = $"MpBeam {HandName(hand)} {remote.UserId}";
+                    beam.Init();
+                    UseBeamMaterials(fx, beam);
+                    beam.gameObject.SetActive(false);
+                    fx.Beams[i] = beam;
+                }
+
+                // Gun.CreateMuzzleFlash: under instantiateParent, linked to the local gun of the
+                // same hand for its colour slot.
+                if (local.muzzleFlashPrefab != null)
+                {
+                    Transform parent = config.instantiateParent;
+                    MuzzleFlash muzzle = parent != null
+                        ? UnityEngine.Object.Instantiate<MuzzleFlash>(local.muzzleFlashPrefab, parent)
+                        : UnityEngine.Object.Instantiate<MuzzleFlash>(local.muzzleFlashPrefab);
+                    muzzle.name = $"MpMuzzleFlash {HandName(hand)} {remote.UserId}";
+                    muzzle.mGun = local;
+                    muzzle.UpdateColor();
+                    fx.Muzzle = muzzle;
+                }
+
+                remote.Fx[hand] = fx;
+                Log($"{remote.UserId} {HandName(hand)}: shot effects built ({BeamPoolSize} beams, muzzle flash={fx.Muzzle != null}, texture={fx.Texture != null})");
+                return fx;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Log($"[MpPresence] building shot effects for {remote.UserId} {HandName(hand)} failed: {ex}");
+                DestroyShotFx(fx);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// TargetColorSetter.GetBeamMaterial with this player's texture: each beam quad gets a copy
+        /// of its own material (one copy per source material, shared by the pool) with mainTexture
+        /// set. The noise line keeps its shared white material, as on the game's own beams.
+        /// </summary>
+        private static void UseBeamMaterials(ShotFx fx, GunBeam beam)
+        {
+            if (fx.Texture == null) return;
+            var meshes = beam.meshes;
+            if (meshes == null) return;
+            for (int i = 0; i < meshes.Length; i++)
+            {
+                MeshRenderer quad = meshes[i];
+                if (quad == null) continue;
+                Material source = quad.sharedMaterial;
+                if (source == null) continue;
+                if (!fx.Materials.TryGetValue(source.Pointer, out Material copy) || copy == null)
+                {
+                    copy = new Material(source) { mainTexture = fx.Texture };
+                    fx.Materials[source.Pointer] = copy;
+                }
+                quad.sharedMaterial = copy;
+            }
+        }
+
+        /// <summary>
+        /// Paints fx.Texture in color, the way TargetColorSetter makes the player's own beam textures
+        /// (checked in game 2026-10-29): CreateTexturesBeam needs an existing texture (it doesn't
+        /// make one), so the first time the native one is copied, then CreateTexturesBeam and
+        /// ShiftTextureColors (from beamTextureRed) repaint it. Only repainted when the colour changes.
+        /// </summary>
+        private static bool PaintBeamTexture(ShotFx fx, Color color)
+        {
+            string key = $"{color.r:F3},{color.g:F3},{color.b:F3}";
+            if (fx.Texture != null && key == fx.TextureColorKey) return true;
+
+            TargetColorSetter setter = TargetColorSetter.I;
+            if (setter == null) return false;
+
+            if (fx.Texture == null)
+            {
+                RenderTexture source = setter.mBeamTextureRight != null ? setter.mBeamTextureRight : setter.mBeamTextureLeft;
+                if (source == null) return false;
+                fx.Texture = UnityEngine.Object.Instantiate<RenderTexture>(source);
+                fx.Texture.name = "MpBeamTexture";
+            }
+
+            RenderTexture texture = fx.Texture;
+            setter.CreateTexturesBeam(color, ref texture);
+            if (texture != null && texture.Pointer != fx.Texture.Pointer)
+            {
+                // The game handed back a different texture: use that one everywhere.
+                UnityEngine.Object.Destroy(fx.Texture);
+                fx.Texture = texture;
+                foreach (Material material in fx.Materials.Values)
+                {
+                    if (material != null) material.mainTexture = texture;
+                }
+            }
+            if (setter.beamTextureRed != null) setter.ShiftTextureColors(color, setter.beamTextureRed, fx.Texture);
+
+            fx.TextureColorKey = key;
+            return true;
+        }
+
+        /// <summary>That player's gun colour for one hand (0 = left), with the same defaults as their gun models.</summary>
+        private static Color RemoteGunColor(Remote remote, int hand)
+        {
+            MpPlayerState player = MpSession.Lobby?.FindPlayer(remote.UserId);
+            MpGunColors colors = player != null ? player.gunColors : null;
+            if (hand == 0) return ToColor(colors != null ? colors.left : null, DefaultLeftColor);
+            return ToColor(colors != null ? colors.right : null, DefaultRightColor);
+        }
+
+        private static bool ShotFxAlive(ShotFx fx)
+        {
+            if (fx.Beams == null) return false;
+            for (int i = 0; i < fx.Beams.Length; i++)
+            {
+                if (!IsAlive(fx.Beams[i])) return false;
+            }
+            return fx.Muzzle == null || IsAlive(fx.Muzzle);
+        }
+
+        private static void DestroyShotFx(ShotFx fx)
+        {
+            if (fx == null) return;
+            try
+            {
+                if (fx.Beams != null)
+                {
+                    foreach (GunBeam beam in fx.Beams)
+                    {
+                        if (IsAlive(beam)) UnityEngine.Object.Destroy(beam.gameObject);
+                    }
+                }
+                if (IsAlive(fx.Muzzle)) UnityEngine.Object.Destroy(fx.Muzzle.gameObject);
+                foreach (Material material in fx.Materials.Values)
+                {
+                    if (IsAlive(material)) UnityEngine.Object.Destroy(material);
+                }
+                if (IsAlive(fx.Texture)) UnityEngine.Object.Destroy(fx.Texture);
+            }
+            catch (Exception ex)
+            {
+                Log($"destroying shot effects failed: {ex.Message}");
+            }
+            fx.Materials.Clear();
+            fx.Beams = null;
+            fx.Muzzle = null;
+            fx.Texture = null;
+        }
+
+        private static string HandName(int hand)
+        {
+            return hand == 0 ? "L" : "R";
         }
 
         /// <summary>TorsoTrack.Update on the interpolated remote head and hands.</summary>
@@ -882,6 +1448,8 @@ namespace ExScoringMod
                 remote.RHand = CopyPart(tplHandR, root, "HandR");
                 remote.LGun = CopyPart(tplGunL, root, "GunL");
                 remote.RGun = CopyPart(tplGunR, root, "GunR");
+                remote.LFire = remote.LGun.Find(FirepointName);
+                remote.RFire = remote.RGun.Find(FirepointName);
                 remote.Disc = CopyDisc(root);
                 remote.NameHeadset = CreateNameLabel(root, "NameHeadset", remote.OwnedMaterials);
                 remote.NameSpectator = CreateNameLabel(root, "NameSpectator", remote.OwnedMaterials);
@@ -942,6 +1510,13 @@ namespace ExScoringMod
 
         private static void DestroyAvatar(Remote remote)
         {
+            for (int hand = 0; hand < 2; hand++)
+            {
+                DestroyShotFx(remote.Fx[hand]);
+                remote.Fx[hand] = null;
+            }
+            remote.LFire = remote.RFire = null;
+
             foreach (Material mat in remote.OwnedMaterials)
             {
                 if (mat != null) UnityEngine.Object.Destroy(mat);
@@ -975,6 +1550,7 @@ namespace ExScoringMod
                 remote.Present = false;
                 remote.Samples.Clear();
                 remote.BodyInit = false;
+                remote.ResetShots();
             }
             if (remotes.Count > 0) Log("song started, avatars hidden");
         }
@@ -1210,6 +1786,11 @@ namespace ExScoringMod
             OwnMaterials(tplGunL);
             OwnMaterials(tplGunR);
 
+            // Where shots leave from: the local gun's firepoint (GunX/tricks/firepoint), placed
+            // relative to the same anchor as the model.
+            AddFirepointMarker(tplGunL, localGunL, localGunPoseL);
+            AddFirepointMarker(tplGunR, localGunR, localGunPoseR);
+
             // Gun collisions: the solid collider on tricks, and a kinematic Rigidbody so the copy can
             // be moved every frame. A missing collider only costs the collisions, not the avatar.
             gunCollidersL = AddGunCollider(tplGunL, localGunL, localGunPoseL);
@@ -1241,6 +1822,27 @@ namespace ExScoringMod
 
             Strip(copy);
             return root;
+        }
+
+        /// <summary>
+        /// An empty FirepointName child of a gun template, placed relative to anchor (tricks/mesh)
+        /// exactly as the local gun's firepoint is (measured 2026-10-29: local (0, -0.13, 0.74),
+        /// no rotation, 1.55 cm from the mesh origin). Without a firepoint it sits on the root.
+        /// </summary>
+        private static void AddFirepointMarker(GameObject template, Gun gun, Transform anchor)
+        {
+            if (template == null) return;
+            GameObject marker = new GameObject(FirepointName);
+            marker.transform.SetParent(template.transform, false);
+
+            Transform firepoint = gun != null ? gun.firepoint : null;
+            if (firepoint == null || anchor == null)
+            {
+                Log($"{template.name}: no firepoint, shots leave from the gun's origin");
+                return;
+            }
+            marker.transform.localPosition = anchor.InverseTransformPoint(firepoint.position);
+            marker.transform.localRotation = Quaternion.Inverse(anchor.rotation) * firepoint.rotation;
         }
 
         /// <summary>Copies the gun's solid tricks collider into a gun template and makes its root kinematic.</summary>
@@ -1509,20 +2111,60 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] disc: template={tplDisc != null} source={(discSource != IntPtr.Zero ? "found" : "none")} collider={discCollider} mySpot={SpotNumber(MpSession.MySeat)}");
             sb.AppendLine($"[MpPresence] names: show={Config.ShowPlayerNames} spectatorCam={(spectatorCam != null ? "found" : "none")} split={splitNames}");
             sb.AppendLine($"[MpPresence] colliders: gunL={gunCollidersL} gunR={gunCollidersR} head={headColliders} body={bodyColliders}");
+            sb.AppendLine($"[MpPresence] sending: {MpSession.PoseRateHz} Hz ({(MpSession.PoseRateEnabled ? "server" : "default")}), my shots L={localShots[0]} R={localShots[1]}, pull L={PullJson(localGunL)} R={PullJson(localGunR)}");
             long renderTime = MpSession.ServerNowMs - RenderDelayMs;
             foreach (Remote remote in remotes.Values)
             {
                 MpPlayerState player = MpSession.Lobby?.FindPlayer(remote.UserId);
                 long newest = remote.Samples.Count > 0 ? remote.Samples[remote.Samples.Count - 1].T : 0;
                 sb.AppendLine($"[MpPresence]   {remote.UserId} \"{player?.nickname}\" seat={player?.seat} present={remote.Present} samples={remote.Samples.Count} " +
-                              $"newest={(newest > 0 ? (newest - renderTime) + " ms ahead of render" : "-")} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
+                              $"newest={(newest > 0 ? (newest - renderTime) + " ms ahead of render" : "-")} " +
+                              $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
             }
             foreach (string line in sb.ToString().TrimEnd().Split('\n')) MelonLogger.Log(line.TrimEnd('\r'));
+        }
+
+        /// <summary>For the debug dump: whether a hand's shot effects exist and are intact.</summary>
+        private static string FxDump(ShotFx fx)
+        {
+            if (fx == null) return "none";
+            return (ShotFxAlive(fx) ? "ok" : "broken") + $"(muzzle={fx.Muzzle != null} tex={fx.Texture != null} color={fx.TextureColorKey ?? "-"})";
+        }
+
+        /// <summary>For the debug dump: shots fired, and the baseline (or "trigger" for the bool fallback).</summary>
+        private static string ShotDump(Remote remote, int hand)
+        {
+            ShotState state = remote.Shot[hand];
+            string tracking = state.HasBaseline ? "at " + state.Baseline : (state.HasLastTrigger ? "trigger" : "none");
+            return $"{state.Fired} ({tracking})";
         }
 
         private static void Log(string message)
         {
             DebugLog.Log("[MpPresence] " + message);
+        }
+
+        /// <summary>
+        /// Counts this player's shots (v2.40): Gun.UpdateTrigger returns true on the frame a press
+        /// registers, which is when the gun fires (menus included). PreciseTiming has its own
+        /// postfix on the same method; the two are independent, so this works with Precise Shot
+        /// Timing off. Not Gun.Fire: patching that breaks shots that hit no target (PreciseTiming.cs).
+        /// </summary>
+        [HarmonyPatch(typeof(Gun), "UpdateTrigger")]
+        private static class Gun_UpdateTrigger_CountShots
+        {
+            private static void Postfix(Gun __instance, bool __result)
+            {
+                if (!__result) return;
+                try
+                {
+                    CountLocalShot(__instance);
+                }
+                catch (Exception ex)
+                {
+                    Log($"shot count failed: {ex.Message}");
+                }
+            }
         }
     }
 }

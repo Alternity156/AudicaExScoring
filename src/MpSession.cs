@@ -45,6 +45,14 @@ namespace ExScoringMod
 
         /// <summary>The v2.39 feature name asked for in hello.</summary>
         private const string PresenceFeature = "presence";
+        /// <summary>The v2.40 feature name (19.13.1): the server tells us the pose rate. Only granted with "presence".</summary>
+        private const string PoseRateFeature = "poseRate";
+
+        /// <summary>Pose rate without "poseRate" (a v2.39 server), as in v2.39.</summary>
+        public const int DefaultPoseRateHz = 15;
+        // The contract's range (19.13.2). A value outside it from the server is clamped, never trusted blindly.
+        private const int MinPoseRateHz = 15;
+        private const int MaxPoseRateHz = 90;
 
         // ── Public state ──
 
@@ -73,6 +81,18 @@ namespace ExScoringMod
         /// server that doesn't know the feature.
         /// </summary>
         public static bool PresenceEnabled { get; private set; }
+
+        /// <summary>
+        /// True when the last welcome listed "poseRate" (v2.40): the server sets the pose rate
+        /// (PoseRateHz) and relays trigger pull and shot counts. False with a v2.39 server.
+        /// </summary>
+        public static bool PoseRateEnabled { get; private set; }
+
+        /// <summary>
+        /// How many poses a second to send (v2.40, 19.13.3): from welcome, updated by presenceConfig.
+        /// DefaultPoseRateHz (15) without "poseRate" and after a disconnect.
+        /// </summary>
+        public static int PoseRateHz { get; private set; } = DefaultPoseRateHz;
 
         /// <summary>This player's seat in the current lobby (v2.39), or -1 outside a lobby.</summary>
         public static int MySeat => MyPlayer != null ? MyPlayer.seat : -1;
@@ -145,10 +165,14 @@ namespace ExScoringMod
         public static event Action<string> OnMatchAborted;
 
         /// <summary>
-        /// Every poses message (v2.39), ~15 Hz while not in a song. Not sent at all while this
-        /// player is in a song, so listeners must hide avatars on their own when a song starts.
+        /// Every poses message (v2.39), at PoseRateHz (~15 Hz without "poseRate") while not in a
+        /// song. Not sent at all while this player is in a song, so listeners must hide avatars on
+        /// their own when a song starts.
         /// </summary>
         public static event Action<MpPoses> OnPoses;
+
+        /// <summary>The pose rate changed (v2.40 presenceConfig, or a new connection). Argument: the new PoseRateHz.</summary>
+        public static event Action<int> OnPoseRateChanged;
 
         /// <summary>Server errors that no request callback was waiting for.</summary>
         public static event Action<MpError> OnError;
@@ -550,7 +574,7 @@ namespace ExScoringMod
 
         /// <summary>
         /// One pose (v2.39). Fire-and-forget, no reqId, never queued: dropped unless connected, in a
-        /// lobby and with presence on. The caller keeps it to ~15 a second and stops in songs.
+        /// lobby and with presence on. The caller keeps it to PoseRateHz and stops in songs.
         /// </summary>
         public static void SendPose(JObject pose)
         {
@@ -641,7 +665,7 @@ namespace ExScoringMod
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("[Mp] ===== MpSession =====");
-            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} seat={MySeat}");
+            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} seat={MySeat}");
             sb.AppendLine($"[Mp] clock: offset={ClockOffsetMs} ms, lastRtt={LastRttMs} ms, bestRtt={BestRttMs} ms, samples={clockSamples.Count}, serverNow={ServerNowMs}");
             sb.AppendLine($"[Mp] pending requests={pendingRequests.Count}, queued={queuedRequests.Count}, location=\"{currentLocation}\" browsing={currentBrowsingSongId ?? "none"}");
 
@@ -730,11 +754,11 @@ namespace ExScoringMod
                 ["modVersion"] = ExScoring.BuildInfo.Version,
                 ["platform"] = helloPlatform,
                 ["guestName"] = helloGuestName,
-                ["features"] = new JArray(PresenceFeature)
+                ["features"] = new JArray(PresenceFeature, PoseRateFeature)
             };
             if (!string.IsNullOrEmpty(resumeToken)) hello["resumeToken"] = resumeToken;
 
-            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}])");
+            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}, {PoseRateFeature}])");
             MpClient.Send(hello.ToString(Formatting.None));
         }
 
@@ -839,6 +863,10 @@ namespace ExScoringMod
                     }
                     break;
 
+                case "presenceConfig":
+                    HandlePresenceConfig(message.ToObject<MpPresenceConfig>(MpJson.Serializer));
+                    break;
+
                 case "ok":
                     break;
 
@@ -888,6 +916,8 @@ namespace ExScoringMod
 
             // Features belong to one connection; the next welcome says what the new one has.
             PresenceEnabled = false;
+            PoseRateEnabled = false;
+            SetPoseRate(DefaultPoseRateHz, "disconnected");
             lastSentGunColorsKey = null;
 
             LastDisconnect = info;
@@ -908,6 +938,9 @@ namespace ExScoringMod
             ApiKeyRejected = helloSentApiKey && welcome.guest;
             resumeToken = welcome.resumeToken;
             PresenceEnabled = welcome.features != null && Array.IndexOf(welcome.features, PresenceFeature) >= 0;
+            // "poseRate" only counts with "presence" (19.13.1), and only with a rate to go by.
+            PoseRateEnabled = PresenceEnabled && Array.IndexOf(welcome.features, PoseRateFeature) >= 0 && welcome.poseRateHz.HasValue;
+            SetPoseRate(PoseRateEnabled ? welcome.poseRateHz.Value : DefaultPoseRateHz, "welcome");
             lastSentGunColorsKey = null; // a new connection holds no colours yet
 
             // Rough offset until the first pong (no RTT correction).
@@ -919,7 +952,7 @@ namespace ExScoringMod
             MpClient.MarkWelcomed();
             nextPingAtMs = 0; // ping right away for a real clock sample
 
-            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled}");
+            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz" : "off (" + PoseRateHz + " Hz)")}");
 
             if (welcome.lobby != null)
             {
@@ -936,6 +969,30 @@ namespace ExScoringMod
             ReportStateIfChanged();
             SafeInvoke(OnConnected, welcome, "OnConnected");
             FlushQueuedRequests();
+        }
+
+        /// <summary>presenceConfig (v2.40): an admin changed the pose rate. Ignored without "poseRate".</summary>
+        private static void HandlePresenceConfig(MpPresenceConfig config)
+        {
+            if (config == null || !config.poseRateHz.HasValue) return;
+            if (!PoseRateEnabled)
+            {
+                Log("   presenceConfig ignored: this connection doesn't have poseRate");
+                return;
+            }
+            SetPoseRate(config.poseRateHz.Value, "presenceConfig");
+        }
+
+        /// <summary>Sets PoseRateHz (clamped to the contract's 15..90) and tells listeners when it changed.</summary>
+        private static void SetPoseRate(int hz, string why)
+        {
+            int clamped = hz < MinPoseRateHz ? MinPoseRateHz : (hz > MaxPoseRateHz ? MaxPoseRateHz : hz);
+            if (clamped == PoseRateHz) return;
+
+            int before = PoseRateHz;
+            PoseRateHz = clamped;
+            Log($"   pose rate {before} -> {clamped} Hz ({why}{(clamped != hz ? $", {hz} clamped" : "")})");
+            SafeInvoke(OnPoseRateChanged, clamped, "OnPoseRateChanged");
         }
 
         private static void HandlePong(JObject message)

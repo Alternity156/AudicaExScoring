@@ -143,12 +143,24 @@ namespace ExScoringMod
         public MpLobbyState lobby;
         /// <summary>Features the server turned on for this connection (v2.39). Null from an older server.</summary>
         public string[] features;
+        /// <summary>The pose rate (v2.40, 19.13.3). Only present when features contains "poseRate".</summary>
+        public int? poseRateHz;
+    }
+
+    /// <summary>presenceConfig (v2.40, 19.13.3): an admin changed the pose rate.</summary>
+    public class MpPresenceConfig
+    {
+        public int? poseRateHz;
     }
 
     /// <summary>
     /// poses.players entry (v2.39). Each part is [px, py, pz, qx, qy, qz, qw] in the sender's own
     /// Unity world space, or null when it isn't tracked. t is the sender's estimate of server time
     /// when the pose was sampled.
+    ///
+    /// v2.40 (19.13.4): lPull/rPull (trigger pull 0..1, 2 decimals) and lShots/rShots (running shot
+    /// counts since the sender's connection opened). Null when the sender is a v2.39 mod, sent an
+    /// invalid value, or the server is older and drops them.
     /// </summary>
     public class MpPoseEntry
     {
@@ -161,10 +173,14 @@ namespace ExScoringMod
         public float[] rGun;
         public bool lTrigger;
         public bool rTrigger;
+        public float? lPull;
+        public float? rPull;
+        public long? lShots;
+        public long? rShots;
     }
 
     /// <summary>
-    /// poses (v2.39), ~15 Hz while not in a song. Holds every OTHER lobby member with a fresh pose;
+    /// poses (v2.39), at poseRateHz (v2.40; ~15 Hz without "poseRate") while not in a song. Holds every OTHER lobby member with a fresh pose;
     /// anyone missing from it should be hidden.
     /// </summary>
     public class MpPoses
