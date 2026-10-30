@@ -31,14 +31,25 @@ namespace ExScoringMod
     ///  - shots    = running count per hand of registered presses (Gun.UpdateTrigger returning
     ///               true, the same moment the gun fires), reset on every welcome since the
     ///               contract counts "since the connection opened" (v2.40)
+    ///  - handAnim = [point, thumbsUp, spin] per hand (v2.42, 19.15): KataHand's own blends on
+    ///               Oculus-style controllers; on Knuckles (VRHardwareSetup hardware 4) worked out
+    ///               from the curls (1 - index, 1 - thumb, trick eased at HandBlendRate)
+    ///  - fingers  = [thumb, index, middle, ring, pinky] SteamVR curls, Knuckles only (v2.42)
     /// plus the gun colours (read from the prefs twice a second, sent by MpSession only on change).
     ///
     /// Shots from others (v2.40, 19.13.4): each hand's count is read as render time passes each
     /// sample. The first sample (or the first after the player was hidden) only sets the baseline;
     /// a count that goes down (they reconnected) resets it; a rise fires that many shots, at most
     /// MaxShotsPerJump. Without counts (a v2.39 sender or server) a false -> true trigger change
-    /// is one shot. Trigger pull is interpolated like the parts (bool 0/1 without a pull) and kept
-    /// per player for the finger animation (not drawn yet).
+    /// is one shot. Trigger pull is interpolated like the parts (bool 0/1 without a pull) and
+    /// feeds the hand animation.
+    ///
+    /// Hands from others (v2.42): each remote hand copy keeps the normal hand's Animator. With
+    /// finger curls (a Knuckles sender) the Animator is off and every finger bone is slerped
+    /// between that side's open and fist poses (sampled once from the Animator at Flex 0 and 1);
+    /// otherwise the Animator gets KataHand.UpdateAnimStates' values from HandAnim and the pull.
+    /// Neither: the rest pose. After each remote shot the gun copy's gun_slide replays the game's
+    /// gun_fire clip movement (sampled once from the local gun).
     ///
     /// Each shot is shown the way the game shows its own (Gun.Fire, PlayShot): the success beam
     /// from the gun copy's firepoint (a marker placed from the local gun's firepoint), the muzzle
@@ -59,11 +70,11 @@ namespace ExScoringMod
     /// (avatars[0] head/body, gun model "Gun1"), whatever anyone has selected:
     ///  - head  = 3rdPersonHead with only the default mask kept      (under CenterEyeAnchor)
     ///  - body  = the default torso, 0.39 m under the body point       (under 3rdPersonBody)
-    ///  - hands = KataHand.normalHand (*_hand_skeletal_lowres), static (under HandLeft/Right)
+    ///  - hands = KataHand.normalHand (*_hand_skeletal_lowres), Animator kept (under HandLeft/Right)
     ///  - guns  = tricks/mesh/Gun1 with its offset and 0.021 scale     (under tricks/mesh)
     /// The copies are made under an inactive holder (so no Awake runs and the game's singletons
     /// stay untouched) and stripped of every component but Transform / MeshFilter / MeshRenderer /
-    /// SkinnedMeshRenderer; muzzle, form indicator and multiplier display objects are removed.
+    /// SkinnedMeshRenderer (plus the hands' Animator); muzzle, form indicator and multiplier display objects are removed.
     /// Head and body go to layer 0 (the local ones sit on ThirdPersonAvatar, which the headset
     /// never renders); hands and guns keep their layers. All are visible to the spectator camera.
     ///
@@ -140,6 +151,16 @@ namespace ExScoringMod
         private const int BeamDustBurst = 3500;          // Gun.DoBeamDust: burstNum += 0xdac
         private const int BeamDustEmitterShape = 6;      // Gun.DoBeamDust: SetBeamEmitterShape(6)
         private const string FirepointName = "Firepoint";
+
+        // Hand animation (v2.42) and the gun slide, the game's own numbers (Ghidra / in-game dumps, 2026-10-30).
+        private const float HandBlendRate = 20f;         // KataHand.INPUT_RATE_CHANGE: a blend moves 20 per second
+        private const int KnucklesHardware = 4;          // VRHardwareSetup hardware 4 = Knuckles
+        private const float FingerPoseMinAngle = 5f;     // open vs fist must differ at least this much to be usable
+        private const string GunFireClipName = "gun_fire";
+        private const string SlideName = "gun_slide";    // under the default model (tricks/mesh/Gun1/gun_slide)
+        private const int SlideSamplesPerSecond = 90;
+        private const int SampleSteps = 10;              // finger pose sampling: Animator steps per pose
+        private const float SampleStepSeconds = 0.05f;   // 10 x 0.05 s = half a second per pose
         private const long SampleKeepMs = 1000;
         private const float GunColorPollSeconds = 0.5f;
         private const float RigLookupRetrySeconds = 2f;
@@ -221,7 +242,43 @@ namespace ExScoringMod
             public readonly long[] Shots = new long[2];
             public readonly bool[] HasShots = new bool[2];
 
+            // v2.42 (19.15): [point, thumbsUp, spin] and [thumb, index, middle, ring, pinky] curls.
+            public readonly float[][] HandAnim = { new float[3], new float[3] };
+            public readonly bool[] HasHandAnim = new bool[2];
+            public readonly float[][] Fingers = { new float[5], new float[5] };
+            public readonly bool[] HasFingers = new bool[2];
+
             public bool Trigger(int hand) => hand == 0 ? LTrigger : RTrigger;
+        }
+
+        /// <summary>
+        /// One remote hand copy's animation (v2.42): its own Animator (kept from the normal hand,
+        /// driven like KataHand.UpdateAnimStates) and its skinned bones, posed one finger at a time
+        /// from finger curls when the sender has finger tracking.
+        /// </summary>
+        private class HandRig
+        {
+            public Animator Animator;
+            /// <summary>-2 = not looked up yet (needs the Animator active), -1 = the controller has no such layer.</summary>
+            public int PointLayer = -2, ThumbLayer = -2;
+            /// <summary>SkinnedMeshRenderer.bones, the same order as fingerPoses.</summary>
+            public Transform[] Bones;
+            /// <summary>For the debug dump: "anim", "fingers" or "-".</summary>
+            public string Mode = "-";
+        }
+
+        /// <summary>
+        /// One hand side's finger poses, sampled once from the hand template's own Animator: per
+        /// skinned bone, which finger it belongs to (0 thumb .. 4 pinky, -1 none) and its local
+        /// rotation with the hand open (Flex 0) and as a fist (Flex 1).
+        /// </summary>
+        private class FingerPoses
+        {
+            public int[] Finger;
+            public Quaternion[] Open;
+            public Quaternion[] Fist;
+            public int FingerBones;
+            public float MaxAngle;
         }
 
         /// <summary>
@@ -300,6 +357,14 @@ namespace ExScoringMod
             /// <summary>Interpolated trigger pull per hand, 0..1 (for the finger animation).</summary>
             public readonly float[] Pull = new float[2];
 
+            // v2.42 hand animation, and the gun slide replayed on each shot (0 = left, 1 = right).
+            public readonly HandRig[] Hands = new HandRig[2];
+            public readonly Transform[] Slide = new Transform[2];
+            public readonly Vector3[] SlideRestPos = new Vector3[2];
+            public readonly Quaternion[] SlideRestRot = new Quaternion[2];
+            /// <summary>Time.time of the last shot per hand, or -1 while the slide is at rest.</summary>
+            public readonly float[] SlideStart = { -1f, -1f };
+
             /// <summary>Forgets what was read, so the next sample only sets a new baseline.</summary>
             public void ResetShots()
             {
@@ -356,6 +421,20 @@ namespace ExScoringMod
         private static readonly Quaternion[] curRot = new Quaternion[PartCount];
         private static readonly bool[] curHas = new bool[PartCount];
         private static readonly float[] curPull = new float[2];
+        private static readonly float[][] curHandAnim = { new float[3], new float[3] };
+        private static readonly float[][] curFingers = { new float[5], new float[5] };
+        private static readonly bool[] curHasFingers = new bool[2];
+
+        // v2.42: finger poses per hand side (null until sampled, or when sampling found nothing usable).
+        private static readonly FingerPoses[] fingerPoses = new FingerPoses[2];
+        // The gun slide's movement in the game's gun_fire clip, sampled once (null when unavailable).
+        private static Vector3[] slidePos;
+        private static Quaternion[] slideRot;
+        private static float slideLength;
+        // Knuckles: this player's own eased "spin" per hand, since the game doesn't compute one there.
+        private static readonly float[] localSpin = new float[2];
+        // The hand Animator's parameter and layer names, read once from KataHand's statics.
+        private static string animFlex, animPinch, animPointLayer, animThumbLayer;
 
         // ── Per frame ──
 
@@ -403,6 +482,7 @@ namespace ExScoringMod
 
             RemoveRemotesNotInLobby();
             CheckDisc();
+            UpdateLocalSpin();
             SendPoseIfDue();
             // Not on the end screen either: another mod's temporary in-song colours must never go out.
             if (!InSongScene()) PollGunColors();
@@ -456,7 +536,99 @@ namespace ExScoringMod
                 ["lShots"] = localShots[0],
                 ["rShots"] = localShots[1]
             };
+
+            // v2.42 (19.15.3): hand animation, and finger curls with finger tracking.
+            bool knuckles = UsingKnuckles();
+            pose["lHandAnim"] = HandAnimJson(localKataL, 0, knuckles);
+            pose["rHandAnim"] = HandAnimJson(localKataR, 1, knuckles);
+            pose["lFingers"] = FingersJson(localKataL, knuckles);
+            pose["rFingers"] = FingersJson(localKataR, knuckles);
             MpSession.SendPose(pose);
+        }
+
+        /// <summary>The same check KataHand.Update makes: VRHardwareSetup hardware 4 poses the hands from the SteamVR skeleton.</summary>
+        private static bool UsingKnuckles()
+        {
+            try
+            {
+                VRHardwareSetup setup = VRHardwareSetup.I;
+                return setup != null && (int)setup.hardware == KnucklesHardware;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Knuckles: this player's own "spin" per hand, eased like KataHand's blends (InputValueRateChange:
+        /// 20 per second toward 1 while the gun does a trick, toward 0 otherwise). The game only
+        /// computes m_spinningBlend for the normal hand.
+        /// </summary>
+        private static void UpdateLocalSpin()
+        {
+            float step = HandBlendRate * Time.deltaTime;
+            for (int h = 0; h < 2; h++)
+            {
+                Gun gun = h == 0 ? localGunL : localGunR;
+                bool tricking = false;
+                try
+                {
+                    tricking = gun != null && (int)gun.GetCurrentTrick() != 0;
+                }
+                catch
+                {
+                    // leave it at false
+                }
+                localSpin[h] = Mathf.MoveTowards(localSpin[h], tricking ? 1f : 0f, step);
+            }
+        }
+
+        /// <summary>
+        /// [point, thumbsUp, spin] for one hand (19.15.3). Normal hand: KataHand's own blends.
+        /// Knuckles: worked out from the curls (point = 1 - index, thumbsUp = 1 - thumb) and the eased
+        /// spin. Null for a missing or inactive hand.
+        /// </summary>
+        private static JToken HandAnimJson(KataHand hand, int h, bool knuckles)
+        {
+            if (hand == null || !hand.gameObject.activeInHierarchy) return JValue.CreateNull();
+            try
+            {
+                if (knuckles)
+                {
+                    Valve.VR.SteamVR_Behaviour_Skeleton skeleton = hand.knucklesHand;
+                    if (skeleton == null || !skeleton.gameObject.activeInHierarchy) return JValue.CreateNull();
+                    return new JArray(Round2(1f - skeleton.indexCurl), Round2(1f - skeleton.thumbCurl), Round2(localSpin[h]));
+                }
+                return new JArray(Round2(hand.m_pointBlend), Round2(hand.m_thumbsUpBlend), Round2(hand.m_spinningBlend));
+            }
+            catch
+            {
+                return JValue.CreateNull();
+            }
+        }
+
+        /// <summary>[thumb, index, middle, ring, pinky] curls from the SteamVR skeleton (Knuckles only), else null.</summary>
+        private static JToken FingersJson(KataHand hand, bool knuckles)
+        {
+            if (!knuckles || hand == null || !hand.gameObject.activeInHierarchy) return JValue.CreateNull();
+            try
+            {
+                Valve.VR.SteamVR_Behaviour_Skeleton skeleton = hand.knucklesHand;
+                if (skeleton == null || !skeleton.gameObject.activeInHierarchy) return JValue.CreateNull();
+                return new JArray(Round2(skeleton.thumbCurl), Round2(skeleton.indexCurl), Round2(skeleton.middleCurl),
+                                  Round2(skeleton.ringCurl), Round2(skeleton.pinkyCurl));
+            }
+            catch
+            {
+                return JValue.CreateNull();
+            }
+        }
+
+        private static double Round2(float v)
+        {
+            if (float.IsNaN(v) || float.IsInfinity(v)) v = 0f;
+            return Math.Round((double)Mathf.Clamp01(v), 2);
         }
 
         /// <summary>Trigger pull 0..1 with 2 decimals (what the server keeps), or null without a gun.</summary>
@@ -676,6 +848,10 @@ namespace ExScoringMod
             ReadPull(entry.rPull, sample, 1);
             ReadShots(entry.lShots, sample, 0);
             ReadShots(entry.rShots, sample, 1);
+            sample.HasHandAnim[0] = ReadUnitValues(entry.lHandAnim, sample.HandAnim[0]);
+            sample.HasHandAnim[1] = ReadUnitValues(entry.rHandAnim, sample.HandAnim[1]);
+            sample.HasFingers[0] = ReadUnitValues(entry.lFingers, sample.Fingers[0]);
+            sample.HasFingers[1] = ReadUnitValues(entry.rFingers, sample.Fingers[1]);
             samples.Add(sample);
 
             // Keep about a second, never fewer than two.
@@ -705,6 +881,18 @@ namespace ExScoringMod
         {
             sample.HasPull[hand] = value.HasValue && !float.IsNaN(value.Value) && !float.IsInfinity(value.Value);
             sample.Pull[hand] = sample.HasPull[hand] ? Mathf.Clamp01(value.Value) : 0f;
+        }
+
+        /// <summary>v2.42: an array of exactly dest.Length finite numbers, clamped to 0..1. False (dest untouched) otherwise.</summary>
+        private static bool ReadUnitValues(float[] source, float[] dest)
+        {
+            if (source == null || source.Length != dest.Length) return false;
+            for (int i = 0; i < source.Length; i++)
+            {
+                if (float.IsNaN(source[i]) || float.IsInfinity(source[i])) return false;
+            }
+            for (int i = 0; i < source.Length; i++) dest[i] = Mathf.Clamp01(source[i]);
+            return true;
         }
 
         private static void ReadShots(long? value, Sample sample, int hand)
@@ -812,7 +1000,122 @@ namespace ExScoringMod
 
                 // After the parts are placed and shown, so a beam leaves from this frame's gun.
                 ReadShotsUpTo(remote, renderTime, true);
+
+                for (int h = 0; h < 2; h++)
+                {
+                    UpdateHand(remote, h);
+                    UpdateSlide(remote, h);
+                }
             }
+        }
+
+        // ── Hand animation (v2.42) and gun slide ──
+
+        /// <summary>
+        /// Poses one remote hand copy from this frame's interpolated values (19.15.4):
+        ///  - finger curls (a finger-tracking sender): the copy's Animator off, every finger bone set
+        ///    between its sampled open and fist rotation by its finger's curl
+        ///  - otherwise the copy's Animator, driven exactly like KataHand.UpdateAnimStates (Ghidra
+        ///    2026-10-30) from HandAnim and the trigger pull, the grip axis taken as 0 (it isn't sent
+        ///    and only moves Flex between 0.2 and 0.25):
+        ///      Flex   = Lerp(Lerp(0.2, 0.25, grip), 0, spin)
+        ///      Pinch  = Lerp(Lerp(0, 0.5, trigger), 0.3, spin)
+        ///      Point Layer weight = Lerp(Lerp(0, 0.2, 1 - trigger) + Lerp(0, 0.1, point), 0, spin)
+        ///      Thumb Layer weight = Lerp(Lerp(0, 0.2, thumbsUp), 1, spin)
+        /// </summary>
+        private static void UpdateHand(Remote remote, int h)
+        {
+            HandRig rig = remote.Hands[h];
+            Transform part = h == 0 ? remote.LHand : remote.RHand;
+            if (rig == null || part == null || !part.gameObject.activeInHierarchy) return;
+
+            FingerPoses poses = fingerPoses[h];
+            if (curHasFingers[h] && poses != null && rig.Bones != null && rig.Bones.Length == poses.Finger.Length)
+            {
+                if (rig.Animator != null && rig.Animator.enabled) rig.Animator.enabled = false;
+                float[] curls = curFingers[h];
+                for (int i = 0; i < rig.Bones.Length; i++)
+                {
+                    int finger = poses.Finger[i];
+                    Transform bone = rig.Bones[i];
+                    if (finger < 0 || bone == null) continue;
+                    bone.localRotation = Quaternion.Slerp(poses.Open[i], poses.Fist[i], curls[finger]);
+                }
+                rig.Mode = "fingers";
+                return;
+            }
+
+            Animator animator = rig.Animator;
+            if (animator == null || !ReadAnimNames())
+            {
+                rig.Mode = "-";
+                return;
+            }
+            if (!animator.enabled) animator.enabled = true;
+            if (rig.PointLayer == -2)
+            {
+                rig.PointLayer = animator.GetLayerIndex(animPointLayer);
+                rig.ThumbLayer = animator.GetLayerIndex(animThumbLayer);
+            }
+
+            float[] values = curHandAnim[h];
+            float point = values[0], thumbsUp = values[1], spin = values[2];
+            float trigger = remote.Pull[h];
+            const float grip = 0f;
+
+            animator.SetFloat(animFlex, Mathf.Lerp(Mathf.Lerp(0.2f, 0.25f, grip), 0f, spin));
+            animator.SetFloat(animPinch, Mathf.Lerp(Mathf.Lerp(0f, 0.5f, trigger), 0.3f, spin));
+            if (rig.PointLayer >= 0)
+                animator.SetLayerWeight(rig.PointLayer, Mathf.Lerp(Mathf.Lerp(0f, 0.2f, 1f - trigger) + Mathf.Lerp(0f, 0.1f, point), 0f, spin));
+            if (rig.ThumbLayer >= 0)
+                animator.SetLayerWeight(rig.ThumbLayer, Mathf.Lerp(Mathf.Lerp(0f, 0.2f, thumbsUp), 1f, spin));
+            rig.Mode = "anim";
+        }
+
+        /// <summary>The hand Animator's names from KataHand's statics ("Flex", "Pinch", "Point Layer", "Thumb Layer"), read once.</summary>
+        private static bool ReadAnimNames()
+        {
+            if (animFlex != null) return true;
+            try
+            {
+                animFlex = KataHand.ANIM_PARAM_NAME_FLEX;
+                animPinch = KataHand.ANIM_PARAM_NAME_PINCH;
+                animPointLayer = KataHand.ANIM_LAYER_NAME_POINT;
+                animThumbLayer = KataHand.ANIM_LAYER_NAME_THUMB;
+            }
+            catch (Exception ex)
+            {
+                Log($"hand animator names unreadable: {ex.Message}");
+                animFlex = null;
+            }
+            return animFlex != null;
+        }
+
+        /// <summary>
+        /// Replays the game's gun_fire slide movement (sampled once, SampleGunSlide) on a remote gun
+        /// copy's gun_slide after each of its shots, then puts it back at rest. The recoil kick
+        /// itself (tricks/mesh) already arrives with the sender's gun pose.
+        /// </summary>
+        private static void UpdateSlide(Remote remote, int h)
+        {
+            Transform slide = remote.Slide[h];
+            float start = remote.SlideStart[h];
+            if (slide == null || start < 0f) return;
+
+            float t = Time.time - start;
+            if (slidePos == null || slidePos.Length < 2 || t >= slideLength)
+            {
+                slide.localPosition = remote.SlideRestPos[h];
+                slide.localRotation = remote.SlideRestRot[h];
+                remote.SlideStart[h] = -1f;
+                return;
+            }
+
+            float at = Mathf.Clamp01(t / slideLength) * (slidePos.Length - 1);
+            int i0 = Mathf.Min((int)at, slidePos.Length - 2);
+            float f = at - i0;
+            slide.localPosition = Vector3.Lerp(slidePos[i0], slidePos[i0 + 1], f);
+            slide.localRotation = Quaternion.Slerp(slideRot[i0], slideRot[i0 + 1], f);
         }
 
         // ── Name labels ──
@@ -1004,7 +1307,25 @@ namespace ExScoringMod
                 float pa = a.HasPull[h] ? a.Pull[h] : (a.Trigger(h) ? 1f : 0f);
                 float pb = b.HasPull[h] ? b.Pull[h] : (b.Trigger(h) ? 1f : 0f);
                 curPull[h] = a.HasPull[h] && b.HasPull[h] ? Mathf.Lerp(pa, pb, frac) : (frac < 0.5f ? pa : pb);
+
+                // v2.42 (19.15.4): lerped; with one side only, that side; with neither, the rest
+                // values (HandAnim [0, 0, 0], no fingers).
+                LerpUnitValues(a.HasHandAnim[h], a.HandAnim[h], b.HasHandAnim[h], b.HandAnim[h], frac, curHandAnim[h]);
+                curHasFingers[h] = LerpUnitValues(a.HasFingers[h], a.Fingers[h], b.HasFingers[h], b.Fingers[h], frac, curFingers[h]);
             }
+        }
+
+        /// <summary>Fills dest from two samples' values (see Interpolate). Returns whether either side had any.</summary>
+        private static bool LerpUnitValues(bool hasA, float[] a, bool hasB, float[] b, float frac, float[] dest)
+        {
+            for (int i = 0; i < dest.Length; i++)
+            {
+                if (hasA && hasB) dest[i] = Mathf.Lerp(a[i], b[i], frac);
+                else if (hasA) dest[i] = a[i];
+                else if (hasB) dest[i] = b[i];
+                else dest[i] = 0f;
+            }
+            return hasA || hasB;
         }
 
         // ── Shots from others (v2.40, 19.13.4) ──
@@ -1144,6 +1465,7 @@ namespace ExScoringMod
 
             if (IsAlive(fx.Muzzle)) fx.Muzzle.Play(position, forward, roll);
             PlayBeamDust(local, hand, position, forward);
+            remote.SlideStart[hand] = Time.time; // the gun slide's fire movement (UpdateSlide)
         }
 
         /// <summary>Gun.Fire's placement of a pooled beam, then GunBeam.Fire.</summary>
@@ -1450,6 +1772,17 @@ namespace ExScoringMod
                 remote.RGun = CopyPart(tplGunR, root, "GunR");
                 remote.LFire = remote.LGun.Find(FirepointName);
                 remote.RFire = remote.RGun.Find(FirepointName);
+                remote.Hands[0] = MakeHandRig(remote.LHand);
+                remote.Hands[1] = MakeHandRig(remote.RHand);
+                for (int h = 0; h < 2; h++)
+                {
+                    Transform slide = FindChildNamed(h == 0 ? remote.LGun : remote.RGun, SlideName);
+                    remote.Slide[h] = slide;
+                    remote.SlideStart[h] = -1f;
+                    if (slide == null) continue;
+                    remote.SlideRestPos[h] = slide.localPosition;
+                    remote.SlideRestRot[h] = slide.localRotation;
+                }
                 remote.Disc = CopyDisc(root);
                 remote.NameHeadset = CreateNameLabel(root, "NameHeadset", remote.OwnedMaterials);
                 remote.NameSpectator = CreateNameLabel(root, "NameSpectator", remote.OwnedMaterials);
@@ -1516,6 +1849,12 @@ namespace ExScoringMod
                 remote.Fx[hand] = null;
             }
             remote.LFire = remote.RFire = null;
+            for (int hand = 0; hand < 2; hand++)
+            {
+                remote.Hands[hand] = null;
+                remote.Slide[hand] = null;
+                remote.SlideStart[hand] = -1f;
+            }
 
             foreach (Material mat in remote.OwnedMaterials)
             {
@@ -1771,10 +2110,13 @@ namespace ExScoringMod
             if (headColliders == 0 || bodyColliders == 0)
                 Log($"head/body colliders missing (head={headColliders} body={bodyColliders}), those parts won't collide");
 
-            // Hands: normalHand under HandLeft/HandRight. Animator stripped, so they stay in the pose
-            // they had when copied.
-            tplHandL = MakeTemplate("TplHandL", localKataL.transform, handL.transform);
-            tplHandR = MakeTemplate("TplHandR", localKataR.transform, handR.transform);
+            // Hands: normalHand under HandLeft/HandRight.
+            // v2.42: the hands keep their Animator, driven per remote player (UpdateHand), and each
+            // side's open and fist finger poses are sampled from it once.
+            tplHandL = MakeTemplate("TplHandL", localKataL.transform, handL.transform, true);
+            tplHandR = MakeTemplate("TplHandR", localKataR.transform, handR.transform, true);
+            fingerPoses[0] = SampleFingerPoses(tplHandL, "left hand");
+            fingerPoses[1] = SampleFingerPoses(tplHandR, "right hand");
 
             // Guns: the default model, anchored on the same transform the pose is sent from
             // (tricks/mesh), so its offset doesn't include a trick that happens to be playing now.
@@ -1791,6 +2133,9 @@ namespace ExScoringMod
             AddFirepointMarker(tplGunL, localGunL, localGunPoseL);
             AddFirepointMarker(tplGunR, localGunR, localGunPoseR);
 
+            // The slide's movement in the game's fire animation, replayed on remote shots.
+            SampleGunSlide(localGunR);
+
             // Gun collisions: the solid collider on tricks, and a kinematic Rigidbody so the copy can
             // be moved every frame. A missing collider only costs the collisions, not the avatar.
             gunCollidersL = AddGunCollider(tplGunL, localGunL, localGunPoseL);
@@ -1806,8 +2151,9 @@ namespace ExScoringMod
         /// <summary>
         /// A template root standing where the anchor is (scale = the anchor's world scale), holding a
         /// stripped copy of source placed relative to the anchor exactly as it is in the game.
+        /// keepAnimator keeps the source's Animator (the hands, v2.42).
         /// </summary>
-        private static GameObject MakeTemplate(string name, Transform anchor, Transform source)
+        private static GameObject MakeTemplate(string name, Transform anchor, Transform source, bool keepAnimator = false)
         {
             GameObject root = new GameObject(name);
             root.transform.SetParent(templateHolder.transform, false);
@@ -1820,8 +2166,219 @@ namespace ExScoringMod
             copy.transform.localRotation = Quaternion.Inverse(anchor.rotation) * source.rotation;
             copy.transform.localScale = Divide(source.lossyScale, anchor.lossyScale);
 
-            Strip(copy);
+            Strip(copy, keepAnimator);
             return root;
+        }
+
+        /// <summary>
+        /// One hand side's finger poses (v2.42), from the template's own Animator: a temporary active
+        /// copy, both layers off and Pinch 0, evaluated at Flex 0 (open) and Flex 1 (fist), recording
+        /// every finger bone's local rotation. Bones are matched to fingers by name
+        /// (hands:b_r_thumb1..3, index1..3, middle1..3, ring1..3, pinky0..3; *_ignore skipped).
+        /// Null, so finger curls fall back to HandAnim, when anything is missing or the two poses
+        /// barely differ.
+        /// </summary>
+        private static FingerPoses SampleFingerPoses(GameObject template, string label)
+        {
+            if (template == null || !ReadAnimNames()) return null;
+            GameObject probe = null;
+            try
+            {
+                probe = UnityEngine.Object.Instantiate<GameObject>(template); // at the scene root, so active
+                probe.name = "MpHandProbe";
+                Animator animator = probe.GetComponentInChildren<Animator>(true);
+                SkinnedMeshRenderer skin = probe.GetComponentInChildren<SkinnedMeshRenderer>(true);
+                if (animator == null || skin == null)
+                {
+                    Log($"{label}: no Animator or skinned mesh to sample finger poses from");
+                    return null;
+                }
+                // Same frame as the copy is made, never drawn: make sure the Animator is bound to its
+                // controller and evaluates even though no renderer of it is visible.
+                AnimatorCullingMode culling = animator.cullingMode;
+                animator.enabled = true;
+                animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+                animator.applyRootMotion = false;
+                animator.Rebind();
+                Log($"{label}: probe animator controller={(animator.runtimeAnimatorController != null ? animator.runtimeAnimatorController.name : "none")} culling={(int)culling} layers={animator.layerCount} initialized={animator.isInitialized}");
+
+                Transform[] bones = SkinBones(skin);
+                FingerPoses poses = new FingerPoses
+                {
+                    Finger = new int[bones.Length],
+                    Open = new Quaternion[bones.Length],
+                    Fist = new Quaternion[bones.Length]
+                };
+                for (int i = 0; i < bones.Length; i++)
+                {
+                    poses.Finger[i] = FingerOf(bones[i]);
+                    if (poses.Finger[i] >= 0) poses.FingerBones++;
+                }
+
+                // After Rebind, which puts parameters and weights back to their defaults.
+                int pointLayer = animator.GetLayerIndex(animPointLayer);
+                int thumbLayer = animator.GetLayerIndex(animThumbLayer);
+                if (pointLayer >= 0) animator.SetLayerWeight(pointLayer, 0f);
+                if (thumbLayer >= 0) animator.SetLayerWeight(thumbLayer, 0f);
+
+                // For the log only: how far Pinch moves the fingers, in case Flex isn't what closes them.
+                Quaternion[] pinched = new Quaternion[bones.Length];
+                RecordBonePose(animator, bones, 0f, 1f, pinched);
+
+                RecordBonePose(animator, bones, 0f, 0f, poses.Open);
+                RecordBonePose(animator, bones, 1f, 0f, poses.Fist);
+
+                float pinchAngle = 0f;
+                for (int i = 0; i < bones.Length; i++)
+                {
+                    if (poses.Finger[i] < 0) continue;
+                    poses.MaxAngle = Mathf.Max(poses.MaxAngle, Quaternion.Angle(poses.Open[i], poses.Fist[i]));
+                    pinchAngle = Mathf.Max(pinchAngle, Quaternion.Angle(poses.Open[i], pinched[i]));
+                }
+                Log($"{label}: finger poses sampled ({poses.FingerBones} finger bones, up to {poses.MaxAngle:F0} deg between open and fist, {pinchAngle:F0} deg for pinch)");
+                if (poses.FingerBones == 0 || poses.MaxAngle < FingerPoseMinAngle)
+                {
+                    Log($"{label}: open and fist poses too similar, finger tracking falls back to HandAnim");
+                    return null;
+                }
+                return poses;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Log($"[MpPresence] sampling {label} finger poses failed: {ex}");
+                return null;
+            }
+            finally
+            {
+                if (probe != null) UnityEngine.Object.DestroyImmediate(probe);
+            }
+        }
+
+        /// <summary>
+        /// Sets Flex and Pinch and steps the Animator SampleSteps x SampleStepSeconds (so any
+        /// transition or damping on the way gets there), then records the bones' local rotations.
+        /// </summary>
+        private static void RecordBonePose(Animator animator, Transform[] bones, float flex, float pinch, Quaternion[] dest)
+        {
+            for (int step = 0; step < SampleSteps; step++)
+            {
+                animator.SetFloat(animFlex, flex);
+                animator.SetFloat(animPinch, pinch);
+                animator.Update(SampleStepSeconds);
+            }
+            for (int i = 0; i < bones.Length; i++) dest[i] = bones[i] != null ? bones[i].localRotation : Quaternion.identity;
+        }
+
+        /// <summary>0 thumb, 1 index, 2 middle, 3 ring, 4 pinky, or -1 (the hand, grip, *_ignore and collider bones).</summary>
+        private static int FingerOf(Transform bone)
+        {
+            if (bone == null) return -1;
+            string name = bone.name.ToLowerInvariant();
+            if (name.Contains("ignore") || name.Contains("coll")) return -1;
+            if (name.Contains("thumb")) return 0;
+            if (name.Contains("index")) return 1;
+            if (name.Contains("middle")) return 2;
+            if (name.Contains("ring")) return 3;
+            if (name.Contains("pinky")) return 4;
+            return -1;
+        }
+
+        private static Transform[] SkinBones(SkinnedMeshRenderer skin)
+        {
+            var bones = skin.bones;
+            Transform[] result = new Transform[bones != null ? bones.Length : 0];
+            for (int i = 0; i < result.Length; i++) result[i] = bones[i];
+            return result;
+        }
+
+        /// <summary>
+        /// Records the slide's movement in the game's gun_fire clip (0.62 s), at SlideSamplesPerSecond,
+        /// by sampling the clip on the local gun itself. Every transform under the gun is put back
+        /// afterwards (and the gun's Animator rewrites them this frame anyway), so nothing shows.
+        /// Without the clip or the slide, remote slides just stay at rest.
+        /// </summary>
+        private static void SampleGunSlide(Gun gun)
+        {
+            slidePos = null;
+            slideRot = null;
+            slideLength = 0f;
+            if (gun == null) return;
+
+            Transform[] all = null;
+            Vector3[] savedPos = null;
+            Quaternion[] savedRot = null;
+            try
+            {
+                Animator animator = gun.GetComponent<Animator>();
+                if (animator == null) animator = gun.gameObject.GetComponentInChildren<Animator>(true);
+                RuntimeAnimatorController controller = animator != null ? animator.runtimeAnimatorController : null;
+                Transform model = FindGunModel(gun.transform);
+                Transform slide = model != null ? FindChildNamed(model, SlideName) : null;
+                if (controller == null || slide == null)
+                {
+                    Log($"gun slide: {(controller == null ? "no gun Animator controller" : "no " + SlideName)}, remote slides stay at rest");
+                    return;
+                }
+
+                AnimationClip clip = null;
+                var clips = controller.animationClips;
+                for (int i = 0; clips != null && i < clips.Length; i++)
+                {
+                    if (clips[i] != null && clips[i].name == GunFireClipName) clip = clips[i];
+                }
+                if (clip == null || clip.length <= 0f)
+                {
+                    Log($"gun slide: no {GunFireClipName} clip, remote slides stay at rest");
+                    return;
+                }
+
+                GameObject animated = animator.gameObject; // the clip's paths are relative to the Animator
+                var transforms = animated.GetComponentsInChildren<Transform>(true);
+                all = new Transform[transforms.Length];
+                savedPos = new Vector3[all.Length];
+                savedRot = new Quaternion[all.Length];
+                for (int i = 0; i < all.Length; i++)
+                {
+                    all[i] = transforms[i];
+                    savedPos[i] = all[i].localPosition;
+                    savedRot[i] = all[i].localRotation;
+                }
+
+                int count = Mathf.Max(2, Mathf.CeilToInt(clip.length * SlideSamplesPerSecond) + 1);
+                Vector3[] positions = new Vector3[count];
+                Quaternion[] rotations = new Quaternion[count];
+                for (int i = 0; i < count; i++)
+                {
+                    clip.SampleAnimation(animated, clip.length * i / (count - 1));
+                    positions[i] = slide.localPosition;
+                    rotations[i] = slide.localRotation;
+                }
+
+                float travel = 0f;
+                for (int i = 0; i < count; i++) travel = Mathf.Max(travel, (positions[i] - positions[0]).magnitude);
+                slidePos = positions;
+                slideRot = rotations;
+                slideLength = clip.length;
+                Log($"gun slide: {count} samples over {clip.length:F3} s, travel {travel:F3} (local units)");
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Log($"[MpPresence] sampling the gun slide failed: {ex}");
+                slidePos = null;
+                slideRot = null;
+            }
+            finally
+            {
+                if (all != null)
+                {
+                    for (int i = 0; i < all.Length; i++)
+                    {
+                        if (all[i] == null) continue;
+                        all[i].localPosition = savedPos[i];
+                        all[i].localRotation = savedRot[i];
+                    }
+                }
+            }
         }
 
         /// <summary>
@@ -1993,6 +2550,37 @@ namespace ExScoringMod
             return true;
         }
 
+        /// <summary>The first transform under root (root included) with that name.</summary>
+        private static Transform FindChildNamed(Transform root, string name)
+        {
+            if (root == null) return null;
+            var all = root.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (all[i] != null && all[i].name == name) return all[i];
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// A remote hand copy's rig: its Animator (root motion off, since the hand's pose is set by
+        /// MpPresence) and its skinned bones, in the same order as the sampled FingerPoses.
+        /// </summary>
+        private static HandRig MakeHandRig(Transform part)
+        {
+            HandRig rig = new HandRig();
+            if (part == null) return rig;
+            rig.Animator = part.gameObject.GetComponentInChildren<Animator>(true);
+            if (rig.Animator != null)
+            {
+                rig.Animator.applyRootMotion = false;
+                rig.Animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            }
+            SkinnedMeshRenderer skin = part.gameObject.GetComponentInChildren<SkinnedMeshRenderer>(true);
+            rig.Bones = skin != null ? SkinBones(skin) : null;
+            return rig;
+        }
+
         private static Transform FindGunModel(Transform gun)
         {
             Transform model = gun.Find("tricks/mesh/" + DefaultGunModelName);
@@ -2007,7 +2595,7 @@ namespace ExScoringMod
         }
 
         /// <summary>Removes gameplay-only objects, then every component but the visual ones.</summary>
-        private static void Strip(GameObject root)
+        private static void Strip(GameObject root, bool keepAnimator = false)
         {
             var transforms = root.GetComponentsInChildren<Transform>(true);
             List<GameObject> doomed = new List<GameObject>();
@@ -2039,7 +2627,9 @@ namespace ExScoringMod
                 for (int i = 0; i < components.Length; i++)
                 {
                     Component c = components[i];
-                    if (c == null || KeepComponentTypes.Contains(TypeName(c))) continue;
+                    if (c == null) continue;
+                    string type = TypeName(c);
+                    if (KeepComponentTypes.Contains(type) || (keepAnimator && type == "Animator")) continue;
                     UnityEngine.Object.DestroyImmediate(c);
                     removedAny = true;
                 }
@@ -2112,6 +2702,9 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] names: show={Config.ShowPlayerNames} spectatorCam={(spectatorCam != null ? "found" : "none")} split={splitNames}");
             sb.AppendLine($"[MpPresence] colliders: gunL={gunCollidersL} gunR={gunCollidersR} head={headColliders} body={bodyColliders}");
             sb.AppendLine($"[MpPresence] sending: {MpSession.PoseRateHz} Hz ({(MpSession.PoseRateEnabled ? "server" : "default")}), my shots L={localShots[0]} R={localShots[1]}, pull L={PullJson(localGunL)} R={PullJson(localGunR)}");
+            bool knuckles = UsingKnuckles();
+            sb.AppendLine($"[MpPresence] hands: knuckles={knuckles} handAnim L={JsonDump(HandAnimJson(localKataL, 0, knuckles))} R={JsonDump(HandAnimJson(localKataR, 1, knuckles))} fingers L={JsonDump(FingersJson(localKataL, knuckles))} R={JsonDump(FingersJson(localKataR, knuckles))}");
+            sb.AppendLine($"[MpPresence] finger poses: L={FingerPoseDump(fingerPoses[0])} R={FingerPoseDump(fingerPoses[1])}, slide: {(slidePos != null ? slidePos.Length + " samples over " + slideLength.ToString("F3") + " s" : "none")}");
             long renderTime = MpSession.ServerNowMs - RenderDelayMs;
             foreach (Remote remote in remotes.Values)
             {
@@ -2119,9 +2712,27 @@ namespace ExScoringMod
                 long newest = remote.Samples.Count > 0 ? remote.Samples[remote.Samples.Count - 1].T : 0;
                 sb.AppendLine($"[MpPresence]   {remote.UserId} \"{player?.nickname}\" seat={player?.seat} present={remote.Present} samples={remote.Samples.Count} " +
                               $"newest={(newest > 0 ? (newest - renderTime) + " ms ahead of render" : "-")} " +
-                              $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
+                              $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} hand L={HandDump(remote, 0)} R={HandDump(remote, 1)} slide L={remote.Slide[0] != null} R={remote.Slide[1] != null} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
             }
             foreach (string line in sb.ToString().TrimEnd().Split('\n')) MelonLogger.Log(line.TrimEnd('\r'));
+        }
+
+        private static string JsonDump(JToken token)
+        {
+            return token == null || token.Type == JTokenType.Null ? "null" : token.ToString(Newtonsoft.Json.Formatting.None);
+        }
+
+        private static string FingerPoseDump(FingerPoses poses)
+        {
+            return poses == null ? "none" : $"{poses.FingerBones} bones/{poses.MaxAngle:F0}deg";
+        }
+
+        /// <summary>For the debug dump: how a remote hand is driven ("anim", "fingers" or "-") and whether it has an Animator.</summary>
+        private static string HandDump(Remote remote, int h)
+        {
+            HandRig rig = remote.Hands[h];
+            if (rig == null) return "none";
+            return $"{rig.Mode}(animator={rig.Animator != null} bones={(rig.Bones != null ? rig.Bones.Length : 0)})";
         }
 
         /// <summary>For the debug dump: whether a hand's shot effects exist and are intact.</summary>

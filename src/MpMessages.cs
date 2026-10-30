@@ -177,6 +177,12 @@ namespace ExScoringMod
         public float? rPull;
         public long? lShots;
         public long? rShots;
+        /// <summary>v2.42 (19.15): [point, thumbsUp, spin], 0..1, or null.</summary>
+        public float[] lHandAnim;
+        public float[] rHandAnim;
+        /// <summary>v2.42 (19.15): [thumb, index, middle, ring, pinky] curls, 0..1 (finger tracking only), or null.</summary>
+        public float[] lFingers;
+        public float[] rFingers;
     }
 
     /// <summary>
