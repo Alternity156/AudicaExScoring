@@ -10,7 +10,7 @@ namespace ExScoringMod
     /// Online play menus:
     ///  - BuildSettings: the "Multiplayer" category of the song list's Options (GlobalOptions),
     ///    settings only (Enable Online Play, Show Other Players, Show Player Names,
-    ///    Auto-Download Missing Songs);
+    ///    Auto-Download Missing Songs, Headshot Effects, Headshot Sounds);
     ///  - Build: the Online Play screen on the Main page (OnlinePlayScreen), not reachable from the
     ///    song list. No settings there (they live only in Options > Multiplayer); just the lobby menu. Not in a lobby: create, join by code, the public lobby
     ///    list. In a lobby: ready, leave, suggest a song, and for the host the lobby settings,
@@ -96,6 +96,16 @@ namespace ExScoringMod
                 v => Config.UpdateShowPlayerNames(v),
                 "Shows each player's name above their head (only while Show Other Players is on)");
             OptionsMenuClone.AddRow(autoDownload, showNames);
+
+            var headshotEffects = OptionsMenuClone.CreateToggle(0, "Headshot Effects",
+                () => Config.HeadshotEffects,
+                v => Config.UpdateHeadshotEffects(v),
+                "Shows the headshot effect when you're shot in the head, and on other players when they are. Your shots still count for the others while this is off");
+            var headshotSounds = OptionsMenuClone.CreateToggle(1, "Headshot Sounds",
+                () => Config.HeadshotSounds,
+                v => Config.UpdateHeadshotSounds(v),
+                "Plays the headshot sound when another player is shot in the head (only while Headshot Effects is on)");
+            OptionsMenuClone.AddRow(headshotEffects, headshotSounds);
         }
 
         // ── Online Play (lobby) category ──
@@ -104,7 +114,7 @@ namespace ExScoringMod
         {
             codeLabel = null;
 
-            // The settings (Enable Online Play, Show Other Players, Show Player Names, Auto-Download Missing Songs)
+            // The settings (Enable Online Play, Show Other Players, Show Player Names, Auto-Download Missing Songs, Headshot Effects/Sounds)
             // live only in the song list's Options > Multiplayer (BuildSettings).
             if (!Config.EnableOnlinePlay)
             {

@@ -47,6 +47,8 @@ namespace ExScoringMod
         private const string PresenceFeature = "presence";
         /// <summary>The v2.40 feature name (19.13.1): the server tells us the pose rate. Only granted with "presence".</summary>
         private const string PoseRateFeature = "poseRate";
+        /// <summary>The v2.41 feature name (19.14.1): headshot events. Only granted with "presence".</summary>
+        private const string HeadshotFeature = "headshot";
 
         /// <summary>Pose rate without "poseRate" (a v2.39 server), as in v2.39.</summary>
         public const int DefaultPoseRateHz = 15;
@@ -93,6 +95,13 @@ namespace ExScoringMod
         /// DefaultPoseRateHz (15) without "poseRate" and after a disconnect.
         /// </summary>
         public static int PoseRateHz { get; private set; } = DefaultPoseRateHz;
+
+        /// <summary>
+        /// True when the last welcome listed "headshot" (v2.41, 19.14.1): headshot may be sent and
+        /// headshot events will arrive. False with a v2.40 or older server (which would answer a
+        /// headshot with BAD_MESSAGE) and after a disconnect.
+        /// </summary>
+        public static bool HeadshotEnabled { get; private set; }
 
         /// <summary>This player's seat in the current lobby (v2.39), or -1 outside a lobby.</summary>
         public static int MySeat => MyPlayer != null ? MyPlayer.seat : -1;
@@ -173,6 +182,12 @@ namespace ExScoringMod
 
         /// <summary>The pose rate changed (v2.40 presenceConfig, or a new connection). Argument: the new PoseRateHz.</summary>
         public static event Action<int> OnPoseRateChanged;
+
+        /// <summary>
+        /// A headshot relayed by the server (v2.41, 19.14.3): shooter hit target's head. Never for
+        /// this player's own shots (the server doesn't echo them back). target can be this player.
+        /// </summary>
+        public static event Action<MpHeadshot> OnHeadshot;
 
         /// <summary>Server errors that no request callback was waiting for.</summary>
         public static event Action<MpError> OnError;
@@ -582,6 +597,19 @@ namespace ExScoringMod
             SendFireAndForget("pose", pose);
         }
 
+        /// <summary>
+        /// This player's shot hit another player's avatar head (v2.41, 19.14.2). Fire-and-forget, no
+        /// reqId, never queued: dropped unless connected, in a lobby and with "headshot" on. The
+        /// server drops anything past 10/s and any invalid target silently, so this never errors.
+        /// </summary>
+        public static void SendHeadshot(string targetUserId)
+        {
+            if (string.IsNullOrEmpty(targetUserId) || targetUserId == MyUserId) return;
+            if (!IsConnected || !HeadshotEnabled || !InLobby) return;
+            Log($"-> headshot {targetUserId}");
+            SendFireAndForget("headshot", new JObject { ["target"] = targetUserId });
+        }
+
         // ── Match (19.5) ──
 
         /// <summary>The song is loaded and holding before playback.</summary>
@@ -665,7 +693,7 @@ namespace ExScoringMod
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("[Mp] ===== MpSession =====");
-            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} seat={MySeat}");
+            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} headshot={HeadshotEnabled} seat={MySeat}");
             sb.AppendLine($"[Mp] clock: offset={ClockOffsetMs} ms, lastRtt={LastRttMs} ms, bestRtt={BestRttMs} ms, samples={clockSamples.Count}, serverNow={ServerNowMs}");
             sb.AppendLine($"[Mp] pending requests={pendingRequests.Count}, queued={queuedRequests.Count}, location=\"{currentLocation}\" browsing={currentBrowsingSongId ?? "none"}");
 
@@ -754,11 +782,11 @@ namespace ExScoringMod
                 ["modVersion"] = ExScoring.BuildInfo.Version,
                 ["platform"] = helloPlatform,
                 ["guestName"] = helloGuestName,
-                ["features"] = new JArray(PresenceFeature, PoseRateFeature)
+                ["features"] = new JArray(PresenceFeature, PoseRateFeature, HeadshotFeature)
             };
             if (!string.IsNullOrEmpty(resumeToken)) hello["resumeToken"] = resumeToken;
 
-            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}, {PoseRateFeature}])");
+            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}, {PoseRateFeature}, {HeadshotFeature}])");
             MpClient.Send(hello.ToString(Formatting.None));
         }
 
@@ -867,6 +895,10 @@ namespace ExScoringMod
                     HandlePresenceConfig(message.ToObject<MpPresenceConfig>(MpJson.Serializer));
                     break;
 
+                case "headshot":
+                    HandleHeadshot(message);
+                    break;
+
                 case "ok":
                     break;
 
@@ -917,6 +949,7 @@ namespace ExScoringMod
             // Features belong to one connection; the next welcome says what the new one has.
             PresenceEnabled = false;
             PoseRateEnabled = false;
+            HeadshotEnabled = false;
             SetPoseRate(DefaultPoseRateHz, "disconnected");
             lastSentGunColorsKey = null;
 
@@ -941,6 +974,8 @@ namespace ExScoringMod
             // "poseRate" only counts with "presence" (19.13.1), and only with a rate to go by.
             PoseRateEnabled = PresenceEnabled && Array.IndexOf(welcome.features, PoseRateFeature) >= 0 && welcome.poseRateHz.HasValue;
             SetPoseRate(PoseRateEnabled ? welcome.poseRateHz.Value : DefaultPoseRateHz, "welcome");
+            // "headshot" only counts with "presence" too (19.14.1).
+            HeadshotEnabled = PresenceEnabled && Array.IndexOf(welcome.features, HeadshotFeature) >= 0;
             lastSentGunColorsKey = null; // a new connection holds no colours yet
 
             // Rough offset until the first pong (no RTT correction).
@@ -952,7 +987,7 @@ namespace ExScoringMod
             MpClient.MarkWelcomed();
             nextPingAtMs = 0; // ping right away for a real clock sample
 
-            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz" : "off (" + PoseRateHz + " Hz)")}");
+            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz" : "off (" + PoseRateHz + " Hz)")} headshot={HeadshotEnabled}");
 
             if (welcome.lobby != null)
             {
@@ -981,6 +1016,32 @@ namespace ExScoringMod
                 return;
             }
             SetPoseRate(config.poseRateHz.Value, "presenceConfig");
+        }
+
+        /// <summary>
+        /// headshot (v2.41, 19.14.3): logged (it's rare), then handed to listeners. Ignored without
+        /// "headshot" on this connection, or when it names no target.
+        /// </summary>
+        private static void HandleHeadshot(JObject message)
+        {
+            MpHeadshot headshot;
+            try
+            {
+                headshot = message.ToObject<MpHeadshot>(MpJson.Serializer);
+            }
+            catch (Exception ex)
+            {
+                Log($"   headshot unreadable, ignored: {ex.Message}");
+                return;
+            }
+            if (headshot == null || string.IsNullOrEmpty(headshot.target)) return;
+            if (!HeadshotEnabled)
+            {
+                Log("   headshot ignored: this connection doesn't have headshot");
+                return;
+            }
+            Log($"   headshot: {headshot.shooter ?? "?"} -> {headshot.target}{(headshot.target == MyUserId ? " (me)" : "")}");
+            SafeInvoke(OnHeadshot, headshot, "OnHeadshot");
         }
 
         /// <summary>Sets PoseRateHz (clamped to the contract's 15..90) and tells listeners when it changed.</summary>

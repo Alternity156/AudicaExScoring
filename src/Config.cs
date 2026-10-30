@@ -118,6 +118,8 @@ namespace ExScoringMod
         public static bool ShowOtherPlayers;
         public static bool ShowPlayerNames;
         public static bool AutoDownloadSongs;
+        public static bool HeadshotEffects;
+        public static bool HeadshotSounds;
 
         public static string gunTricksHeader = "[Header]Gun Tricks";
         public static bool DisableThrowing;
@@ -228,6 +230,8 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(ShowOtherPlayers), true, "Shows the other players in your lobby (head, body, hands and guns) in the menus. Your own pose is still shared while this is off");
             MelonPrefs.RegisterBool(Category, nameof(ShowPlayerNames), true, "Shows each player's name above their head (only while Show Other Players is on)");
             MelonPrefs.RegisterBool(Category, nameof(AutoDownloadSongs), true, "In an online lobby, automatically downloads the selected song and the players' suggestions you don't have, when they're on Maudica");
+            MelonPrefs.RegisterBool(Category, nameof(HeadshotEffects), true, "Shows the headshot effect when you're shot in the head, and on other players when they are. Your shots still count for the others while this is off");
+            MelonPrefs.RegisterBool(Category, nameof(HeadshotSounds), true, "Plays the headshot sound when another player is shot in the head (only while Headshot Effects is on)");
 
             MelonPrefs.RegisterString(Category, nameof(gunTricksHeader), "", "[Header]Gun Tricks");
             MelonPrefs.RegisterBool(Category, nameof(DisableThrowing), false, "Prevents the guns from being thrown");
@@ -317,6 +321,8 @@ namespace ExScoringMod
             ShowOtherPlayers = MelonPrefs.GetBool(Category, nameof(ShowOtherPlayers));
             ShowPlayerNames = MelonPrefs.GetBool(Category, nameof(ShowPlayerNames));
             AutoDownloadSongs = MelonPrefs.GetBool(Category, nameof(AutoDownloadSongs));
+            HeadshotEffects = MelonPrefs.GetBool(Category, nameof(HeadshotEffects));
+            HeadshotSounds = MelonPrefs.GetBool(Category, nameof(HeadshotSounds));
 
             DisableThrowing = MelonPrefs.GetBool(Category, nameof(DisableThrowing));
             UncapThrowDistance = MelonPrefs.GetBool(Category, nameof(UncapThrowDistance));
@@ -352,6 +358,20 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(AutoDownloadSongs), value);
             AutoDownloadSongs = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateHeadshotEffects(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(HeadshotEffects), value);
+            HeadshotEffects = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateHeadshotSounds(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(HeadshotSounds), value);
+            HeadshotSounds = value;
             MelonPrefs.SaveConfig();
         }
 

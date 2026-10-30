@@ -195,6 +195,18 @@ namespace ExScoringMod
         public MpPoseEntry[] players;
     }
 
+    /// <summary>
+    /// headshot (v2.41, 19.14.3): shooter's shot hit target's avatar head. Sent right away to every
+    /// other "headshot" member of the lobby who isn't in a song, the target included, never back to
+    /// the shooter. serverTime = when the server relayed it (server ms).
+    /// </summary>
+    public class MpHeadshot
+    {
+        public string shooter;
+        public string target;
+        public long serverTime;
+    }
+
     /// <summary>matchPrepare.participants entry (19.5).</summary>
     public class MpMatchParticipant
     {

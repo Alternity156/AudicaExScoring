@@ -138,6 +138,24 @@ namespace ExScoringMod
     /// Each client only simulates its own guns, so a bounce seen here is what this player sees, and
     /// the others see it through this player's poses.
     ///
+    /// Headshots (v2.41, 19.14; Config.HeadshotEffects / HeadshotSounds):
+    ///  - Detection: on each local shot (the Gun.UpdateTrigger postfix), a ray from that gun's
+    ///    firepoint along its forward (the same line a remote beam is drawn on) against the Player
+    ///    layer. The nearest collider belonging to a shown remote avatar decides: that player's head
+    ///    is a headshot, their body or gun in front blocks it. The local guns' colliders are skipped.
+    ///    Only in a lobby, outside songs, with "headshot" on the connection and Show Other Players on,
+    ///    at most once per HeadshotSendCooldown per target. Sent whatever HeadshotEffects says, so the
+    ///    others still see this player's hits.
+    ///  - This player hit: PostprocController.OnShotHead(position, null), exactly what shooting your
+    ///    own head does (Ghidra: mShotHeadCountdown = 1 and one FMOD event; gun is unused).
+    ///  - Another player hit (seen by the shooter and by everyone else): the native timing and curve
+    ///    (Ghidra, BlendPostproc), but on that avatar's head, body and hands only, through a
+    ///    per-renderer MaterialPropertyBlock on _Color (all four share the white ShinyHands material,
+    ///    so nothing shared is touched). c = 1 - 0.5 x seconds (about 2 s); hue c^2 x 360 deg,
+    ///    saturation c (a hue turn on white needs it to show), brightness 2^(4 c^2) capped at
+    ///    HeadshotMaxBoost. HeadshotSounds plays the native sound too: OnShotHead, then the countdown
+    ///    is put straight back so this player's screen doesn't flash.
+    ///
     /// From the UnityExplorer console: ExScoringMod.MpPresence.DebugDump();
     /// </summary>
     public static class MpPresence
@@ -175,6 +193,13 @@ namespace ExScoringMod
         private const string DiscColliderPath = "Static/GroundCollider";
         private const string GunColliderPath = "tricks";
         private const int PartColliderLayer = 11;        // Player: what the local guns are on
+
+        // Headshots (v2.41). The drain is PostprocController.Update's (mShotHeadCountdown -= dt * 0.5).
+        private const float HeadshotDrainPerSecond = 0.5f;
+        private const float HeadshotMaxBoost = 4f;       // native exposure is 2^(4 c^2) = 16x at the start; capped so the avatar isn't pure white
+        private const float HeadshotRayLength = 100f;
+        private const float HeadshotSendCooldown = 0.15f; // per target; the server keeps 10/s anyway
+        private const string ColorProperty = "_Color";
 
         // Name labels.
         private const float NameHeight = 0.35f;          // above the head point (eyes), world up (m)
@@ -320,6 +345,13 @@ namespace ExScoringMod
             }
         }
 
+        /// <summary>One of a remote avatar's head, body or hand renderers, with its material's own colour.</summary>
+        private class HeadshotRenderer
+        {
+            public Renderer Renderer;
+            public Color Base;
+        }
+
         private class Remote
         {
             public string UserId;
@@ -364,6 +396,12 @@ namespace ExScoringMod
             public readonly Quaternion[] SlideRestRot = new Quaternion[2];
             /// <summary>Time.time of the last shot per hand, or -1 while the slide is at rest.</summary>
             public readonly float[] SlideStart = { -1f, -1f };
+
+            // v2.41 headshots: Time.time the effect started (-1 = none), the renderers it colours
+            // (collected on the first one), and when this player last reported hitting this one.
+            public float HeadshotStart = -1f;
+            public List<HeadshotRenderer> HeadshotRenderers;
+            public float LastHeadshotSent = -100f;
 
             /// <summary>Forgets what was read, so the next sample only sets a new baseline.</summary>
             public void ResetShots()
@@ -436,6 +474,11 @@ namespace ExScoringMod
         // The hand Animator's parameter and layer names, read once from KataHand's statics.
         private static string animFlex, animPinch, animPointLayer, animThumbLayer;
 
+        // Headshots (v2.41).
+        private static PostprocController postprocController;
+        private static MaterialPropertyBlock headshotBlock;
+        private static int headshotsSent, headshotsReceived;
+
         // ── Per frame ──
 
         /// <summary>Once per frame from ExScoring.OnUpdate, after MpSession.Tick.</summary>
@@ -453,6 +496,7 @@ namespace ExScoringMod
                 };
                 // A new rate starts its schedule now rather than waiting out the old interval.
                 MpSession.OnPoseRateChanged += _ => nextPoseAtMs = 0;
+                MpSession.OnHeadshot += HandleHeadshot;
             }
 
             if (!MpSession.InLobby)
@@ -997,6 +1041,7 @@ namespace ExScoringMod
                 UpdateNames(remote, player, headsetEye, spectatorEye);
 
                 SetVisible(remote, true);
+                UpdateHeadshotFx(remote);
 
                 // After the parts are placed and shown, so a beam leaves from this frame's gun.
                 ReadShotsUpTo(remote, renderTime, true);
@@ -1872,6 +1917,8 @@ namespace ExScoringMod
             remote.NameHeadset = remote.NameSpectator = null;
             remote.AppliedName = null;
             remote.BodyInit = false;
+            remote.HeadshotStart = -1f;
+            remote.HeadshotRenderers = null; // destroyed with the root
         }
 
         private static void DestroyAll(string reason)
@@ -1890,6 +1937,7 @@ namespace ExScoringMod
                 remote.Samples.Clear();
                 remote.BodyInit = false;
                 remote.ResetShots();
+                EndHeadshotFx(remote);
             }
             if (remotes.Count > 0) Log("song started, avatars hidden");
         }
@@ -2701,6 +2749,7 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] disc: template={tplDisc != null} source={(discSource != IntPtr.Zero ? "found" : "none")} collider={discCollider} mySpot={SpotNumber(MpSession.MySeat)}");
             sb.AppendLine($"[MpPresence] names: show={Config.ShowPlayerNames} spectatorCam={(spectatorCam != null ? "found" : "none")} split={splitNames}");
             sb.AppendLine($"[MpPresence] colliders: gunL={gunCollidersL} gunR={gunCollidersR} head={headColliders} body={bodyColliders}");
+            sb.AppendLine($"[MpPresence] headshots: connection={MpSession.HeadshotEnabled} effects={Config.HeadshotEffects} sounds={Config.HeadshotSounds} sent={headshotsSent} received={headshotsReceived} postproc={(IsAlive(postprocController) ? "found" : "not looked up / none")}");
             sb.AppendLine($"[MpPresence] sending: {MpSession.PoseRateHz} Hz ({(MpSession.PoseRateEnabled ? "server" : "default")}), my shots L={localShots[0]} R={localShots[1]}, pull L={PullJson(localGunL)} R={PullJson(localGunR)}");
             bool knuckles = UsingKnuckles();
             sb.AppendLine($"[MpPresence] hands: knuckles={knuckles} handAnim L={JsonDump(HandAnimJson(localKataL, 0, knuckles))} R={JsonDump(HandAnimJson(localKataR, 1, knuckles))} fingers L={JsonDump(FingersJson(localKataL, knuckles))} R={JsonDump(FingersJson(localKataR, knuckles))}");
@@ -2712,7 +2761,7 @@ namespace ExScoringMod
                 long newest = remote.Samples.Count > 0 ? remote.Samples[remote.Samples.Count - 1].T : 0;
                 sb.AppendLine($"[MpPresence]   {remote.UserId} \"{player?.nickname}\" seat={player?.seat} present={remote.Present} samples={remote.Samples.Count} " +
                               $"newest={(newest > 0 ? (newest - renderTime) + " ms ahead of render" : "-")} " +
-                              $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} hand L={HandDump(remote, 0)} R={HandDump(remote, 1)} slide L={remote.Slide[0] != null} R={remote.Slide[1] != null} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
+                              $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} hand L={HandDump(remote, 0)} R={HandDump(remote, 1)} slide L={remote.Slide[0] != null} R={remote.Slide[1] != null} headshotFx={(remote.HeadshotStart >= 0f ? "on" : "off")} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
             }
             foreach (string line in sb.ToString().TrimEnd().Split('\n')) MelonLogger.Log(line.TrimEnd('\r'));
         }
@@ -2750,6 +2799,195 @@ namespace ExScoringMod
             return $"{state.Fired} ({tracking})";
         }
 
+        // ── Headshots (v2.41, 19.14) ──
+
+        /// <summary>
+        /// One of this player's guns just fired (Gun.UpdateTrigger returned true): did the shot hit a
+        /// shown remote avatar's head first? If so, report it and play the effect on that avatar.
+        /// </summary>
+        private static void CheckHeadshot(Gun gun)
+        {
+            if (!MpSession.HeadshotEnabled || !MpSession.PresenceEnabled || !MpSession.InLobby) return;
+            if (!Config.ShowOtherPlayers || remotes.Count == 0 || InSong()) return;
+            int hand = HandOf(gun);
+            if (hand < 0) return;
+            Transform firepoint = gun.firepoint;
+            if (firepoint == null) return;
+
+            // The avatar parts are moved by their transforms; make the colliders follow before casting.
+            Physics.SyncTransforms();
+            var hits = Physics.RaycastAll(firepoint.position, firepoint.forward, HeadshotRayLength,
+                1 << PartColliderLayer, QueryTriggerInteraction.Ignore);
+            if (hits == null || hits.Length == 0) return;
+
+            Remote victim = null;
+            bool victimHead = false;
+            float nearest = float.MaxValue;
+            for (int i = 0; i < hits.Length; i++)
+            {
+                RaycastHit hit = hits[i];
+                Collider collider = hit.collider;
+                if (collider == null || hit.distance >= nearest) continue;
+                Remote owner = RemoteOwning(collider.transform, out bool isHead);
+                if (owner == null) continue; // the local guns, or anything else on the layer
+                nearest = hit.distance;
+                victim = owner;
+                victimHead = isHead;
+            }
+            if (victim == null || !victimHead) return; // a miss, or their body or gun took it
+
+            float now = Time.unscaledTime;
+            if (now - victim.LastHeadshotSent < HeadshotSendCooldown) return;
+            victim.LastHeadshotSent = now;
+            headshotsSent++;
+            Log($"headshot: {(hand == 0 ? "left" : "right")} gun hit {victim.UserId}'s head at {nearest:F2} m");
+
+            MpSession.SendHeadshot(victim.UserId);
+            PlayRemoteHeadshot(victim); // the server never echoes it back (19.14.2)
+        }
+
+        /// <summary>The shown remote avatar a collider belongs to, and whether it is part of its head. Null for anything else.</summary>
+        private static Remote RemoteOwning(Transform t, out bool isHead)
+        {
+            isHead = false;
+            foreach (Remote remote in remotes.Values)
+            {
+                if (remote.Root == null || !remote.Root.activeSelf) continue;
+                if (!t.IsChildOf(remote.Root.transform)) continue;
+                isHead = remote.Head != null && t.IsChildOf(remote.Head);
+                return remote;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// A headshot relayed by the server (19.14.3): on this player, the native effect; on someone
+        /// else, the avatar effect, ignored when their avatar isn't shown (the contract's rule).
+        /// </summary>
+        private static void HandleHeadshot(MpHeadshot headshot)
+        {
+            if (headshot == null) return;
+            headshotsReceived++;
+            if (!Config.HeadshotEffects || InSong()) return;
+
+            if (headshot.target == MpSession.MyUserId)
+            {
+                PlayLocalHeadshot();
+                return;
+            }
+
+            if (!remotes.TryGetValue(headshot.target, out Remote remote)) return;
+            if (remote.Root == null || !remote.Root.activeSelf || remote.Head == null || !remote.Head.gameObject.activeSelf) return;
+            PlayRemoteHeadshot(remote);
+        }
+
+        /// <summary>This player was hit: exactly what shooting your own head does.</summary>
+        private static void PlayLocalHeadshot()
+        {
+            PostprocController controller = FindPostproc();
+            if (controller == null)
+            {
+                Log("headshot on me: no PostprocController, effect skipped");
+                return;
+            }
+            controller.OnShotHead(localHead != null ? localHead.position : Vector3.zero, null);
+        }
+
+        /// <summary>Starts (or restarts) the effect on a remote avatar, with the sound when Headshot Sounds is on.</summary>
+        private static void PlayRemoteHeadshot(Remote remote)
+        {
+            if (!Config.HeadshotEffects) return;
+            remote.HeadshotStart = Time.time;
+            if (Config.HeadshotSounds) PlayHeadshotSound();
+        }
+
+        /// <summary>
+        /// The native headshot sound alone: OnShotHead plays it and sets mShotHeadCountdown, which is
+        /// put straight back (nothing runs in between), so this player's screen doesn't flash and an
+        /// effect of their own already running carries on unchanged.
+        /// </summary>
+        private static void PlayHeadshotSound()
+        {
+            PostprocController controller = FindPostproc();
+            if (controller == null) return;
+            float before = controller.mShotHeadCountdown;
+            controller.OnShotHead(Vector3.zero, null);
+            controller.mShotHeadCountdown = before;
+        }
+
+        private static PostprocController FindPostproc()
+        {
+            if (!IsAlive(postprocController)) postprocController = UnityEngine.Object.FindObjectOfType<PostprocController>();
+            return postprocController;
+        }
+
+        /// <summary>
+        /// Each frame while shown: the effect's colour on that avatar's head, body and hands, on
+        /// BlendPostproc's curve (see the class notes). Ends itself after about 2 s.
+        /// </summary>
+        private static void UpdateHeadshotFx(Remote remote)
+        {
+            if (remote.HeadshotStart < 0f) return;
+            float c = 1f - (Time.time - remote.HeadshotStart) * HeadshotDrainPerSecond;
+            if (c <= 0f || !Config.HeadshotEffects)
+            {
+                EndHeadshotFx(remote);
+                return;
+            }
+
+            if (remote.HeadshotRenderers == null) remote.HeadshotRenderers = CollectHeadshotRenderers(remote);
+            if (headshotBlock == null) headshotBlock = new MaterialPropertyBlock();
+
+            float c2 = c * c;
+            Color tint = Color.HSVToRGB(Mathf.Repeat(c2, 1f), c, 1f);
+            float boost = Mathf.Min(Mathf.Pow(2f, 4f * c2), HeadshotMaxBoost);
+
+            foreach (HeadshotRenderer entry in remote.HeadshotRenderers)
+            {
+                if (entry.Renderer == null) continue;
+                Color color = new Color(entry.Base.r * tint.r * boost, entry.Base.g * tint.g * boost, entry.Base.b * tint.b * boost, entry.Base.a);
+                headshotBlock.Clear();
+                headshotBlock.SetColor(ColorProperty, color);
+                entry.Renderer.SetPropertyBlock(headshotBlock);
+            }
+        }
+
+        /// <summary>Stops the effect and gives the renderers back their material's own colour.</summary>
+        private static void EndHeadshotFx(Remote remote)
+        {
+            if (remote.HeadshotStart < 0f) return;
+            remote.HeadshotStart = -1f;
+            if (remote.HeadshotRenderers == null) return;
+            if (headshotBlock == null) headshotBlock = new MaterialPropertyBlock();
+            headshotBlock.Clear(); // an empty block overrides nothing
+            foreach (HeadshotRenderer entry in remote.HeadshotRenderers)
+            {
+                if (entry.Renderer != null) entry.Renderer.SetPropertyBlock(headshotBlock);
+            }
+        }
+
+        /// <summary>Every renderer under the head, body and hands whose material has _Color (ShinyHands).</summary>
+        private static List<HeadshotRenderer> CollectHeadshotRenderers(Remote remote)
+        {
+            var list = new List<HeadshotRenderer>();
+            Transform[] parts = { remote.Head, remote.Body, remote.LHand, remote.RHand };
+            foreach (Transform part in parts)
+            {
+                if (part == null) continue;
+                var renderers = part.GetComponentsInChildren<Renderer>(true);
+                for (int i = 0; i < renderers.Length; i++)
+                {
+                    Renderer renderer = renderers[i];
+                    if (renderer == null) continue;
+                    Material mat = renderer.sharedMaterial;
+                    if (mat == null || !mat.HasProperty(ColorProperty)) continue;
+                    list.Add(new HeadshotRenderer { Renderer = renderer, Base = mat.GetColor(ColorProperty) });
+                }
+            }
+            Log($"headshot effect on {remote.UserId}: {list.Count} renderer(s)");
+            return list;
+        }
+
         private static void Log(string message)
         {
             DebugLog.Log("[MpPresence] " + message);
@@ -2774,6 +3012,14 @@ namespace ExScoringMod
                 catch (Exception ex)
                 {
                     Log($"shot count failed: {ex.Message}");
+                }
+                try
+                {
+                    CheckHeadshot(__instance);
+                }
+                catch (Exception ex)
+                {
+                    Log($"headshot check failed: {ex.Message}");
                 }
             }
         }
