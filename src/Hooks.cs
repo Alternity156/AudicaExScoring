@@ -685,31 +685,7 @@ namespace ExScoringMod
 
                 if (!processedCuesIndexes.Contains(cue.index))
                 {
-                    currentMaxPossibleExScore += GetMaxExScoreForCue(cue);
-                    currentMaxPossibleJudgementScore += GetMaxJudgementScoreForCue(cue);
-
-                    ExCue exCue = new ExCue();
-
-                    exCue.index = cue.index;
-                    exCue.behavior = cue.behavior;
-                    exCue.handType = cue.handType;
-                    exCue.tick = cue.tick;
-                    exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal;
-                    exCue.health = ScoreKeeper.I.GetHealth();
-                    exCue.miss = true;
-
-                    // Without this, these default to Judgement.Impeccable (enum value 0, since
-                    // they're never otherwise assigned for a miss), silently inflating the
-                    // Impeccable count in every judgement breakdown. RunDataRecalculator.cs already
-                    // does this correctly for saved/reloaded runs — this brings the live path in
-                    // line with it.
-                    exCue.timingJudgement = Judgement.Miss;
-                    exCue.aimJudgement = Judgement.Miss;
-                    exCue.chainJudgement = Judgement.Miss;
-                    if (cue.behavior == Target.TargetBehavior.Chain)
-                    {
-                        exCue.isChainTail = cue.chainNext == null;
-                    }
+                    ExCue exCue = BuildMissExCue(cue);
 
                     // If the player actually made an aim attempt near this target before it was
                     // ultimately marked a failure (e.g. aimed at it but missed the timing/hand/
@@ -717,22 +693,27 @@ namespace ExScoringMod
                     // have recorded a position for it — same capture dictionaries used for
                     // successful hits. Grab it here so misses can still be plotted on the aim graph,
                     // in the direction the shot was actually made.
-                    if (resolvedIntersectionByIndex.TryGetValue(cue.index, out var missIntersection))
+                    try
                     {
-                        exCue.intersectionPoint = missIntersection;
-                        exCue.contactPos = cue.target != null ? cue.target.GetContactPosition() : Vector3.zero;
-                        exCue.contactRotation = firstContactRotationByIndex.TryGetValue(cue.index, out var missRotation)
-                            ? missRotation
-                            : Quaternion.identity;
-                        exCue.hasMissAimData = true;
-
-                        resolvedIntersectionByIndex.Remove(cue.index);
-                        firstContactRotationByIndex.Remove(cue.index);
-                        pendingAimResults.Remove(cue.index);
+                        if (resolvedIntersectionByIndex.TryGetValue(cue.index, out var missIntersection))
+                        {
+                            exCue.intersectionPoint = missIntersection;
+                            exCue.contactPos = cue.target != null
+                                ? cue.target.GetContactPosition()
+                                : (firstContactPositionByIndex.TryGetValue(cue.index, out var missPos) ? missPos : Vector3.zero);
+                            exCue.contactRotation = firstContactRotationByIndex.TryGetValue(cue.index, out var missRotation)
+                                ? missRotation
+                                : Quaternion.identity;
+                            exCue.hasMissAimData = true;
+                        }
+                    }
+                    catch (Exception e)
+                    {
+                        exCue.hasMissAimData = false;
+                        LogCueScoringErrorOnce("ScoreKeeper.OnFailure", cue, e);
                     }
 
-                    processedCuesIndexes.Add(cue.index);
-                    exCues.Add(exCue);
+                    CommitExCue(cue, exCue, 0f, 0f);
 
                     exTypePurple = false;
                 }
@@ -975,6 +956,94 @@ namespace ExScoringMod
         // Hold branch ever sets mIsSustaining/starts the spin, so any of them is safely pre-spin.
         private static Dictionary<int, Quaternion> firstContactRotationByIndex = new Dictionary<int, Quaternion>();
 
+        // Contact POSITION cached at the same moment as the rotation above. Only used when the cue's
+        // target is gone by the time the cue is scored (cue.target == null), which previously threw in
+        // GetScoreForCuePatch.Postfix and corrupted the live max-possible score (see that patch).
+        private static Dictionary<int, Vector3> firstContactPositionByIndex = new Dictionary<int, Vector3>();
+
+        // Cue indexes whose scoring threw this run, so each one is logged once instead of spamming
+        // (MelonLoader stops printing repeated patch exceptions, which hid this bug before).
+        private static HashSet<int> cueScoringErrorIndexes = new HashSet<int>();
+        private static string cueScoringErrorRunId = null;
+
+        private static void LogCueScoringErrorOnce(string where, SongCues.Cue cue, Exception e)
+        {
+            if (cueScoringErrorRunId != currentRunId)
+            {
+                cueScoringErrorRunId = currentRunId;
+                cueScoringErrorIndexes.Clear();
+            }
+
+            int index = cue != null ? cue.index : -1;
+            if (!cueScoringErrorIndexes.Add(index)) return;
+
+            string cueInfo = cue != null
+                ? $"index={cue.index} behavior={cue.behavior} handType={cue.handType} tick={cue.tick} targetNull={cue.target == null}"
+                : "cue=null";
+            DebugLog.Log($"[ExScoring] {where} failed for cue ({cueInfo}); recorded once as a miss. {e}");
+        }
+
+        /// <summary>
+        /// Adds one finished ExCue to the run. This is the ONLY place the live max-possible scores grow,
+        /// and it runs once per cue index: the old code added to the max before anything that could throw,
+        /// so a cue whose scoring kept failing (e.g. null target) added its max on every native call while
+        /// never being marked processed — the local % dropped to ~40% while the server (which rebuilds from
+        /// exCues) stayed correct.
+        /// </summary>
+        private static void CommitExCue(SongCues.Cue cue, ExCue exCue, float exCueScore, float judgementCueScore)
+        {
+            if (processedCuesIndexes.Contains(cue.index)) return;
+
+            currentMaxPossibleExScore += GetMaxExScoreForCue(cue);
+            currentMaxPossibleJudgementScore += GetMaxJudgementScoreForCue(cue);
+
+            processedCuesIndexes.Add(cue.index);
+            exCues.Add(exCue);
+
+            exScore += exCueScore;
+            judgementScore += judgementCueScore;
+
+            ClearCueAimCaches(cue.index);
+        }
+
+        private static void ClearCueAimCaches(int index)
+        {
+            resolvedIntersectionByIndex.Remove(index);
+            firstContactRotationByIndex.Remove(index);
+            firstContactPositionByIndex.Remove(index);
+            pendingAimResults.Remove(index);
+        }
+
+        /// <summary>Bare miss entry for a cue, used by OnFailure and as the fallback when scoring a hit throws.</summary>
+        private static ExCue BuildMissExCue(SongCues.Cue cue)
+        {
+            ExCue exCue = new ExCue();
+
+            exCue.index = cue.index;
+            exCue.behavior = cue.behavior;
+            exCue.handType = cue.handType;
+            exCue.tick = cue.tick;
+            exCue.miss = true;
+
+            // Without this, these default to Judgement.Impeccable (enum value 0, since
+            // they're never otherwise assigned for a miss), silently inflating the
+            // Impeccable count in every judgement breakdown. RunDataRecalculator.cs already
+            // does this correctly for saved/reloaded runs — this brings the live path in
+            // line with it.
+            exCue.timingJudgement = Judgement.Miss;
+            exCue.aimJudgement = Judgement.Miss;
+            exCue.chainJudgement = Judgement.Miss;
+            if (cue.behavior == Target.TargetBehavior.Chain)
+            {
+                exCue.isChainTail = cue.chainNext == null;
+            }
+
+            try { exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal; } catch { }
+            try { exCue.health = ScoreKeeper.I.GetHealth(); } catch { }
+
+            return exCue;
+        }
+
         [HarmonyPatch(typeof(Gun), "CalculateAim", new Type[]
         {
             typeof(Target),
@@ -999,6 +1068,11 @@ namespace ExScoringMod
                 if (!firstContactRotationByIndex.ContainsKey(index))
                 {
                     firstContactRotationByIndex[index] = target.transform.rotation;
+                }
+
+                if (!firstContactPositionByIndex.ContainsKey(index))
+                {
+                    firstContactPositionByIndex[index] = target.GetContactPosition();
                 }
 
                 if (!pendingAimResults.ContainsKey(index))
@@ -1080,137 +1154,185 @@ namespace ExScoringMod
                 ref int __result
                 )
             {
-                if (menuState == MenuState.State.Launched)
+                if (menuState != MenuState.State.Launched) return;
+                if (cue == null) return;
+                if (processedCuesIndexes.Contains(cue.index)) return;
+
+                // Everything that can throw happens BEFORE CommitExCue, which is the only place the
+                // max-possible scores and processedCuesIndexes change. If anything below fails, the cue
+                // is recorded once as a miss (matching what the server sees) instead of being retried
+                // — and re-adding its max — on every subsequent native call.
+                ExCue exCue;
+                float exCueScore;
+                float judgementCueScore;
+                string popupText;
+
+                try
                 {
-                    if (!processedCuesIndexes.Contains(cue.index))
+                    exCue = new ExCue();
+
+                    ExCue.ScoringCalculation scoringCalculation = ExCue.ScoringCalculation.Audica;
+                    float timingMs = GetTimingMsFromCue(cue);
+
+                    if (Config.LinearCalculation)
                     {
-                        currentMaxPossibleExScore += GetMaxExScoreForCue(cue);
-                        currentMaxPossibleJudgementScore += GetMaxJudgementScoreForCue(cue);
+                        scoringCalculation = ExCue.ScoringCalculation.Linear;
+                    }
 
-                        exTypePurple = true;
+                    if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext == null)
+                    {
+                        exCue.isChainTail = true;
+                        exCue.chainAverage = GetChainAverageFromLastNodeCue(cue);
+                        exCue.chainJudgement = GetChainJudgement(exCue.chainAverage);
+                    }
 
-                        ExCue exCue = new ExCue();
+                    Vector3 finalIntersection = Vector3.zero;
+                    bool hasIntersection = false;
 
-                        ExCue.ScoringCalculation scoringCalculation = ExCue.ScoringCalculation.Audica;
-                        float timingMs = GetTimingMsFromCue(cue);
+                    // NEW — prefer the value captured directly from Gun.FindBestIntersection's
+                    // own output, which is the unambiguous final answer native itself computed.
+                    // Falls back to the old approximate-matching approach only if unavailable.
+                    if (resolvedIntersectionByIndex.TryGetValue(cue.index, out var resolvedIntersection))
+                    {
+                        finalIntersection = resolvedIntersection;
+                        hasIntersection = true;
+                    }
+                    else if (pendingAimResults.TryGetValue(cue.index, out var results) && results.Count > 0)
+                    {
+                        var exactMatches = results.Where(r => Mathf.Approximately(r.aimScore, aim)).ToList();
+                        var match = exactMatches.Count > 0
+                            ? exactMatches[0]
+                            : results.OrderByDescending(r => r.aimScore).First();
+                        finalIntersection = match.intersectionPoint;
+                        hasIntersection = true;
+                    }
 
-                        if (Config.LinearCalculation)
-                        {
-                            scoringCalculation = ExCue.ScoringCalculation.Linear;
-                        }
+                    // The target can already be gone when native scores the cue (seen online: one cue
+                    // with cue.target == null, scored repeatedly). Fall back to what CalculateAim cached.
+                    bool targetAlive = cue.target != null;
 
-                        if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext == null)
-                        {
-                            exCue.isChainTail = true;
-                            exCue.chainAverage = GetChainAverageFromLastNodeCue(cue);
-                            exCue.chainJudgement = GetChainJudgement(exCue.chainAverage);
-                        }
+                    // Use the ROTATION cached at CalculateAim time (pre-spin), not a live query —
+                    // confirmed via pointer-matched comparison that a Hold target's contact
+                    // rotation drifts as it visually spins during the hold, while its position
+                    // does not. Falls back to a live query if no cached entry exists (e.g. Melee/
+                    // Chain, which never go through CalculateAim the same way).
+                    Quaternion finalContactRotation;
+                    if (firstContactRotationByIndex.TryGetValue(cue.index, out var cachedRotation))
+                        finalContactRotation = cachedRotation;
+                    else if (targetAlive)
+                        finalContactRotation = cue.target.transform.rotation;
+                    else
+                        finalContactRotation = Quaternion.identity;
 
-                        Vector3 finalIntersection = Vector3.zero;
+                    bool hasContactPos;
+                    Vector3 contactPos;
+                    if (targetAlive)
+                    {
+                        contactPos = cue.target.GetContactPosition();
+                        hasContactPos = true;
+                    }
+                    else if (firstContactPositionByIndex.TryGetValue(cue.index, out var cachedPos))
+                    {
+                        contactPos = cachedPos;
+                        hasContactPos = true;
+                    }
+                    else
+                    {
+                        contactPos = Vector3.zero;
+                        hasContactPos = false;
+                    }
 
-                        // NEW — prefer the value captured directly from Gun.FindBestIntersection's
-                        // own output, which is the unambiguous final answer native itself computed.
-                        // Falls back to the old approximate-matching approach only if unavailable.
-                        if (resolvedIntersectionByIndex.TryGetValue(cue.index, out var resolvedIntersection))
-                        {
-                            finalIntersection = resolvedIntersection;
-                            resolvedIntersectionByIndex.Remove(cue.index);
-                            pendingAimResults.Remove(cue.index);
-                        }
-                        else if (pendingAimResults.TryGetValue(cue.index, out var results))
-                        {
-                            var exactMatches = results.Where(r => Mathf.Approximately(r.aimScore, aim)).ToList();
-                            var match = exactMatches.Count > 0
-                                ? exactMatches[0]
-                                : results.OrderByDescending(r => r.aimScore).First();
-                            finalIntersection = match.intersectionPoint;
-                            pendingAimResults.Remove(cue.index);
-                        }
+                    Judgement timingJudgement = GetTimingJudgement(timingMs);
+                    Judgement aimJudgement;
+                    if (targetAlive)
+                        aimJudgement = GetAimJudgement(cue.target, finalIntersection);
+                    else if (hasContactPos && hasIntersection)
+                        aimJudgement = GetAimJudgementFromDistance((contactPos - finalIntersection).magnitude);
+                    else
+                        aimJudgement = Judgement.Miss;
 
-                        // Use the ROTATION cached at CalculateAim time (pre-spin), not a live query —
-                        // confirmed via pointer-matched comparison that a Hold target's contact
-                        // rotation drifts as it visually spins during the hold, while its position
-                        // does not. Falls back to a live query if no cached entry exists (e.g. Melee/
-                        // Chain, which never go through CalculateAim the same way).
-                        Quaternion finalContactRotation = firstContactRotationByIndex.TryGetValue(cue.index, out var cachedRotation)
-                            ? cachedRotation
-                            : cue.target.transform.rotation;
-                        firstContactRotationByIndex.Remove(cue.index);
+                    if (!targetAlive)
+                    {
+                        LogCueScoringErrorOnce("GetScoreForCue (target null, used cached aim data)", cue,
+                            new Exception($"hasContactPos={hasContactPos} hasIntersection={hasIntersection} aimJudgement={aimJudgement}"));
+                    }
 
-                        Judgement timingJudgement = GetTimingJudgement(timingMs);
-                        Judgement aimJudgement = GetAimJudgement(cue.target, finalIntersection);
+                    exCue.behavior = cue.behavior;
+                    exCue.handType = cue.handType;
+                    exCue.tick = cue.tick;
+                    exCue.successTick = cue.successTick;
+                    exCue.timing = PreciseTiming.GetExTimingScore(cue, timing);
+                    exCue.timingMs = timingMs;
+                    exCue.nativeTimingMs = GetNativeTimingMsFromCue(cue);
+                    exCue.aim = aim;
+                    exCue.contactPos = contactPos;
+                    exCue.contactRotation = finalContactRotation;
+                    exCue.targetHitPos = GetTargetHitPos(exCue.contactPos, exCue.contactRotation, finalIntersection);
+                    exCue.intersectionPoint = finalIntersection;
+                    exCue.health = ScoreKeeper.I.GetHealth();
+                    exCue.velocity = cue.meleeVelocityAmount;
+                    exCue.sustainPercent = cue.sustainPercent;
+                    exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal;
+                    exCue.index = cue.index;
+                    exCue.scoringCalculation = scoringCalculation;
+                    exCue.timingJudgement = timingJudgement;
+                    exCue.aimJudgement = aimJudgement;
 
-                        exCue.behavior = cue.behavior;
-                        exCue.handType = cue.handType;
-                        exCue.tick = cue.tick;
-                        exCue.successTick = cue.successTick;
-                        exCue.timing = PreciseTiming.GetExTimingScore(cue, timing);
-                        exCue.timingMs = timingMs;
-                        exCue.nativeTimingMs = GetNativeTimingMsFromCue(cue);
-                        exCue.aim = aim;
-                        exCue.contactPos = cue.target.GetContactPosition();
-                        exCue.contactRotation = finalContactRotation;
-                        exCue.targetHitPos = GetTargetHitPos(exCue.contactPos, exCue.contactRotation, finalIntersection);
-                        exCue.intersectionPoint = finalIntersection;
-                        exCue.health = ScoreKeeper.I.GetHealth();
-                        exCue.velocity = cue.meleeVelocityAmount;
-                        exCue.sustainPercent = cue.sustainPercent;
-                        exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal;
-                        exCue.index = cue.index;
-                        exCue.scoringCalculation = scoringCalculation;
-                        exCue.timingJudgement = timingJudgement;
-                        exCue.aimJudgement = aimJudgement;
+                    exCueScore = GetExScoreForExCue(exCue);
 
-                        processedCuesIndexes.Add(cue.index);
-                        exCues.Add(exCue);
+                    judgementCueScore = 0f;
 
-                        float exCueScore = GetExScoreForExCue(exCue);
+                    if (cue.behavior == Target.TargetBehavior.Vertical ||
+                        cue.behavior == Target.TargetBehavior.Horizontal ||
+                        cue.behavior == Target.TargetBehavior.ChainStart ||
+                        cue.behavior == Target.TargetBehavior.Standard ||
+                        cue.behavior == Target.TargetBehavior.Hold)
+                    {
+                        judgementCueScore += GetJudgementScore(timingJudgement) + GetJudgementScore(aimJudgement);
+                    }
+                    if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext == null)
+                    {
+                        judgementCueScore += GetJudgementScore(exCue.chainJudgement);
+                    }
+                    if (cue.behavior == Target.TargetBehavior.Hold && exCue.sustainPercent == 1)
+                    {
+                        judgementCueScore += 1;
+                    }
+                    if (cue.behavior == Target.TargetBehavior.Melee && exCue.velocity != 0)
+                    {
+                        judgementCueScore += 1;
+                    }
 
-                        float judgementCueScore = 0f;
-
-                        if (cue.behavior == Target.TargetBehavior.Vertical ||
-                            cue.behavior == Target.TargetBehavior.Horizontal ||
-                            cue.behavior == Target.TargetBehavior.ChainStart ||
-                            cue.behavior == Target.TargetBehavior.Standard ||
-                            cue.behavior == Target.TargetBehavior.Hold)
-                        {
-                            judgementCueScore += GetJudgementScore(timingJudgement) + GetJudgementScore(aimJudgement);
-                        }
-                        if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext == null)
-                        {
-                            judgementCueScore += GetJudgementScore(exCue.chainJudgement);
-                        }
-                        if (cue.behavior == Target.TargetBehavior.Hold && exCue.sustainPercent == 1)
-                        {
-                            judgementCueScore += 1;
-                        }
-                        if (cue.behavior == Target.TargetBehavior.Melee && exCue.velocity != 0)
-                        {
-                            judgementCueScore += 1;
-                        }
-
-                        judgementScore += judgementCueScore;
-
-                        exScore += exCueScore;
-
-                        if (cue.behavior == Target.TargetBehavior.Melee && cue.meleeVelocityAmount > 0)
-                        {
-                            nextPopupText = GetMeleeJudgementText();
-                        }
-                        else if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext != null)
-                        {
-                            nextPopupText = "";
-                        }
-                        else if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext == null)
-                        {
-                            nextPopupText = GetChainJudgementText(exCue.chainJudgement);
-                        }
-                        else
-                        {
-                            nextPopupText = GetJudgementText(timingJudgement, aimJudgement);
-                        }
+                    if (cue.behavior == Target.TargetBehavior.Melee && cue.meleeVelocityAmount > 0)
+                    {
+                        popupText = GetMeleeJudgementText();
+                    }
+                    else if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext != null)
+                    {
+                        popupText = "";
+                    }
+                    else if (cue.behavior == Target.TargetBehavior.Chain && cue.chainNext == null)
+                    {
+                        popupText = GetChainJudgementText(exCue.chainJudgement);
+                    }
+                    else
+                    {
+                        popupText = GetJudgementText(timingJudgement, aimJudgement);
                     }
                 }
+                catch (Exception e)
+                {
+                    LogCueScoringErrorOnce("GetScoreForCue", cue, e);
+
+                    exCue = BuildMissExCue(cue);
+                    exCueScore = 0f;
+                    judgementCueScore = 0f;
+                    popupText = null; // leave whatever popup text was already queued
+                }
+
+                exTypePurple = true;
+                CommitExCue(cue, exCue, exCueScore, judgementCueScore);
+                if (popupText != null) nextPopupText = popupText;
             }
         }
 
