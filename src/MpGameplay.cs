@@ -869,13 +869,30 @@ namespace ExScoringMod
             MpSession.SendFinished(report);
         }
 
+        /// <summary>
+        /// Misses on aim behaviors (Standard, Horizontal, Vertical, ChainStart, Hold) and Melee only,
+        /// the same rule as RunDataRecalculator.SumJudgementScore and GameplayStatsUI. Chain links
+        /// (a missed chain counts once, through its ChainStart) and mines (Dodge) are left out.
+        /// </summary>
         private static int CountMisses()
         {
             int misses = 0;
             List<ExCue> cues = exCues;
             for (int i = 0; i < cues.Count; i++)
             {
-                if (cues[i] != null && cues[i].miss) misses++;
+                ExCue cue = cues[i];
+                if (cue == null || !cue.miss) continue;
+                switch (cue.behavior)
+                {
+                    case Target.TargetBehavior.Standard:
+                    case Target.TargetBehavior.Horizontal:
+                    case Target.TargetBehavior.Vertical:
+                    case Target.TargetBehavior.ChainStart:
+                    case Target.TargetBehavior.Hold:
+                    case Target.TargetBehavior.Melee:
+                        misses++;
+                        break;
+                }
             }
             return misses;
         }
