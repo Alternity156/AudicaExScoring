@@ -39,6 +39,7 @@ namespace ExScoringMod
         public static bool forceHitSounds;
         public static bool disableGunBeamRedirection;
         public static bool unifyTargetSpeed;
+        public static bool disableAutoRecenter;
         public static readonly string[] ArrowColorOptions = { "White", "Hand Color" };
         public static readonly string[] ChainLineColorOptions = { "Default (Black)", "Hand Color" };
         public static int arrowColorMode;
@@ -741,6 +742,17 @@ namespace ExScoringMod
             Config.UpdateUnifyTargetSpeed(value);
         }
 
+        public static void GetDisableAutoRecenter()
+        {
+            disableAutoRecenter = Config.DisableAutoRecenter;
+        }
+
+        public static void SetDisableAutoRecenter(bool value)
+        {
+            disableAutoRecenter = value;
+            Config.UpdateDisableAutoRecenter(value);
+        }
+
         public static void GetTimingWindow()
         {
             timingWindow = Config.TimingWindow;
@@ -1124,6 +1136,61 @@ namespace ExScoringMod
                             }
                         }
                     }
+                }
+            }
+        }
+
+        // PlayerCorral.Update (Ghidra) does two things every frame:
+        //   1. Auto-recenter: picks rangeGameplay (in a song, unless the game's own
+        //      LargerPlayerCorral pref is on) or rangeShell (menus), and if the head has left that
+        //      range on X or Z, calls Recenter() at most once a second.
+        //   2. Manual recenter: KataInput.ButtonPressed(0, 0) (joystick click) calls Recenter().
+        // Recenter() slides the camera rig so the head's world X/Z lands on 0, keeping Y.
+        //
+        // Both calls live in the same method, so skipping Update would also kill the joystick
+        // recenter. Instead, while DisableAutoRecenter is on, both ranges are pushed out of reach
+        // so step 1 never fires and step 2 runs untouched. The game's values are cached per
+        // instance and put back when the option is turned off.
+        [HarmonyPatch(typeof(PlayerCorral), "Update")]
+        private static class DisableAutoRecenterPatch
+        {
+            private const float UnreachableRange = 10000f;
+
+            private static IntPtr cachedInstance = IntPtr.Zero;
+            private static bool haveOriginals;
+            private static float originalRangeGameplay;
+            private static float originalRangeShell;
+
+            private static void Prefix(PlayerCorral __instance)
+            {
+                if (__instance == null) return;
+
+                // A new PlayerCorral (scene reload) starts with the game's own values again.
+                if (__instance.Pointer != cachedInstance)
+                {
+                    cachedInstance = __instance.Pointer;
+                    haveOriginals = false;
+                }
+
+                if (Config.DisableAutoRecenter)
+                {
+                    if (!haveOriginals)
+                    {
+                        originalRangeGameplay = __instance.rangeGameplay;
+                        originalRangeShell = __instance.rangeShell;
+                        haveOriginals = true;
+                        DebugLog.Log($"[AutoRecenter] Disabled (game ranges: gameplay {originalRangeGameplay}, shell {originalRangeShell})");
+                    }
+
+                    __instance.rangeGameplay = UnreachableRange;
+                    __instance.rangeShell = UnreachableRange;
+                }
+                else if (haveOriginals)
+                {
+                    __instance.rangeGameplay = originalRangeGameplay;
+                    __instance.rangeShell = originalRangeShell;
+                    haveOriginals = false;
+                    DebugLog.Log("[AutoRecenter] Restored the game's ranges");
                 }
             }
         }

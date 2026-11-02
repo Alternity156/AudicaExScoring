@@ -303,6 +303,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetControllerRotationSmoothing();
                 OptionsMenuFunctions.GetMirrorMode();
                 OptionsMenuFunctions.GetFlipSlotTargets();
+                OptionsMenuFunctions.GetDisableAutoRecenter();
                 OptionsMenuFunctions.GetTargetingHapticsStrength();
                 OptionsMenuFunctions.GetExShockwave();
                 OptionsMenuFunctions.GetExLowHealthVisual();
@@ -393,6 +394,12 @@ namespace ExScoringMod
                     () => OptionsMenuFunctions.flipSlotTargets,
                     v => { OptionsMenuFunctions.flipSlotTargets = v; OptionsMenuFunctions.SetFlipSlotTargets(v); });
                 OptionsMenuClone.AddRow(mirrorModeToggle, flipSlotToggle);
+
+                var disableAutoRecenterToggle = OptionsMenuClone.CreateToggle(0, "Disable Auto Recenter",
+                    () => OptionsMenuFunctions.disableAutoRecenter,
+                    v => { OptionsMenuFunctions.disableAutoRecenter = v; OptionsMenuFunctions.SetDisableAutoRecenter(v); },
+                    "Stops the game from moving you back to the middle when you step away from it. Clicking the joystick still recenters.");
+                OptionsMenuClone.AddRow(disableAutoRecenterToggle);
 
                 var hapticsHeader = OptionsMenuClone.CreateHeader(0, "Haptics");
                 OptionsMenuClone.AddRow(hapticsHeader);
