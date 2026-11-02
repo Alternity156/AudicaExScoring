@@ -123,7 +123,11 @@ namespace ExScoringMod
                 () => Config.FadeBlockingPlatforms,
                 v => Config.UpdateFadeBlockingPlatforms(v),
                 "Makes another player's platform see-through while it hides a menu button from your view. You can shoot through a faded platform");
-            OptionsMenuClone.AddRow(fadePlatforms);
+            var dimUnready = OptionsMenuClone.CreateToggle(1, "Dim Unready Platforms",
+                () => Config.DimUnreadyPlatforms,
+                v => Config.UpdateDimUnreadyPlatforms(v),
+                "Makes another player's platform darker while they aren't ready in the lobby");
+            OptionsMenuClone.AddRow(fadePlatforms, dimUnready);
         }
 
         // ── Online Play (lobby) category ──
@@ -132,7 +136,7 @@ namespace ExScoringMod
         {
             codeLabel = null;
 
-            // The settings (Enable Online Play, Show Other Players, Show Player Names, Auto-Download Missing Songs, Headshot Effects/Sounds, Fade Blocking Platforms,
+            // The settings (Enable Online Play, Show Other Players, Show Player Names, Auto-Download Missing Songs, Headshot Effects/Sounds, Fade Blocking Platforms, Dim Unready Platforms,
             // Lobby Song Preview/Volume)
             // live only in the song list's Options > Multiplayer (BuildSettings).
             if (!Config.EnableOnlinePlay)

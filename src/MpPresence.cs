@@ -123,6 +123,18 @@ namespace ExScoringMod
     ///  - Undone at once when the setting or Show Other Players goes off, or a song starts; the
     ///    ghost material is destroyed with the disc copy.
     ///
+    /// Dimming unready platforms (Config.DimUnreadyPlatforms): in the lobby phase, a player who isn't
+    /// ready (host included: everyone has the Ready toggle) or is reconnecting gets a darker disc.
+    /// The disc shaders have no colour property (see above), so each of the disc copy's renderers
+    /// gets a ShadeObjectName child drawing the same mesh with the disc's own shade material
+    /// (Sprites/Default, black; it blends One OneMinusSrcAlpha, so alpha a keeps 1 - a of what's
+    /// under it). The platform underneath keeps its shared materials and still reacts to the music,
+    /// only dimmer. The shade's alpha follows the state over ShadeSeconds, up to ShadeAlpha; at 0
+    /// the overlay renderers are switched off. The overlays are built when the disc is first shown
+    /// with the setting on, starting at the player's state without fading in. While the disc is ghosted (Fading discs) the overlays are off and
+    /// the ghost's colour is darkened by the same amount instead. Overlays have no collider; the
+    /// fade ignores them. Rebuilt with the disc copy, the material destroyed with the avatar.
+    ///
     /// Name labels (Config.ShowPlayerNames, only while ShowOtherPlayers is on): the player's
     /// nickname (no guest/bot suffix) NameHeight above their interpolated head point, in world up,
     /// under the avatar root (so it hides and is destroyed with the avatar), hidden while the head
@@ -228,6 +240,12 @@ namespace ExScoringMod
         private const float GhostAlpha = 0.2f;           // fully faded
         private const string GhostShaderName = "Sprites/Default";
         private static readonly Color GhostColor = new Color(0.6f, 0.65f, 0.75f, 1f);
+
+        // Dimming unready platforms (Config.DimUnreadyPlatforms).
+        private const float ShadeSeconds = 0.25f;        // full dark <-> full lit
+        private const float ShadeAlpha = 0.6f;           // fully dark keeps 40% of the platform's light
+        private const string ShadeShaderName = "Sprites/Default";
+        private const string ShadeObjectName = "MpShade";
 
         // Headshots (v2.41). The drain is PostprocController.Update's (mShotHeadCountdown -= dt * 0.5).
         private const float HeadshotDrainPerSecond = 0.5f;
@@ -413,6 +431,25 @@ namespace ExScoringMod
             public bool Blocking;
         }
 
+        /// <summary>
+        /// One disc copy's dimming: a dark overlay per renderer and the material they share (this
+        /// disc's own, so each player fades on their own).
+        /// </summary>
+        private class DiscShade
+        {
+            /// <summary>The copy this state was built for (rebuilt when the disc is replaced).</summary>
+            public Transform Disc;
+            public MeshRenderer[] Overlays;
+            /// <summary>This disc's own, destroyed with the state.</summary>
+            public Material Material;
+            /// <summary>0 = lit, 1 = fully dark.</summary>
+            public float Amount;
+            /// <summary>The overlays are switched on.</summary>
+            public bool Shown;
+            /// <summary>The last frame wanted it dark (debug dump).</summary>
+            public bool Dark;
+        }
+
         /// <summary>A menu button and the collider whose centre the blocking test aims at.</summary>
         private struct MenuButton
         {
@@ -438,6 +475,8 @@ namespace ExScoringMod
             public Transform Disc;
             /// <summary>Its fade state, built on the first check (null while the setting is off).</summary>
             public DiscFade Fade;
+            /// <summary>Its dimming, built once the disc is shown with the setting on.</summary>
+            public DiscShade Shade;
             public readonly List<Material> TintLeft = new List<Material>();
             public readonly List<Material> TintRight = new List<Material>();
             public readonly List<Material> OwnedMaterials = new List<Material>();
@@ -526,6 +565,10 @@ namespace ExScoringMod
         private static float nextBlockCheck;
         private static Shader ghostShader;
         private static bool ghostShaderMissing;
+
+        // Dimming unready platforms: the overlay shader.
+        private static Shader shadeShader;
+        private static bool shadeShaderMissing;
         private static bool loggedButtonRefreshError;
 
         // Spectator camera, for the name labels.
@@ -1131,6 +1174,9 @@ namespace ExScoringMod
 
                 if (fadeDiscs) UpdateDiscFade(remote, checkBlocks, eyePos);
                 else ResetDiscFade(remote, true);
+
+                // After the fade, so a ghosted disc's colour is darkened on top of this frame's alpha.
+                UpdateDiscShade(remote, player, lobby);
 
                 // After the parts are placed and shown, so a beam leaves from this frame's gun.
                 ReadShotsUpTo(remote, renderTime, true);
@@ -2000,6 +2046,7 @@ namespace ExScoringMod
             remote.AppliedColorKey = null;
 
             ResetDiscFade(remote, false); // the disc goes with the root
+            ResetDiscShade(remote);       // its overlays too
 
             if (remote.Root != null) UnityEngine.Object.Destroy(remote.Root);
             remote.Root = null;
@@ -2107,6 +2154,7 @@ namespace ExScoringMod
             {
                 if (remote.Root == null) continue;
                 ResetDiscFade(remote, false); // its disc is replaced below
+                ResetDiscShade(remote);
                 if (remote.Disc != null) UnityEngine.Object.Destroy(remote.Disc.gameObject);
                 remote.Disc = CopyDisc(remote.Root);
             }
@@ -2332,7 +2380,8 @@ namespace ExScoringMod
                 List<MeshRenderer> renderers = new List<MeshRenderer>();
                 for (int i = 0; i < found.Length; i++)
                 {
-                    if (found[i] != null && found[i].enabled) renderers.Add(found[i]);
+                    // The shade's own overlays (dimming) aren't part of the platform.
+                    if (found[i] != null && found[i].enabled && found[i].gameObject.name != ShadeObjectName) renderers.Add(found[i]);
                 }
 
                 DiscFade fade = new DiscFade { Disc = disc };
@@ -2434,6 +2483,194 @@ namespace ExScoringMod
             DiscFade fade = remote.Fade;
             if (fade == null) return "-";
             return $"{fade.Amount:F2}{(fade.Blocking ? " blocking" : "")} renderers={fade.Renderers.Length} colliders={fade.Colliders.Length}";
+        }
+
+        // ── Dimming unready platforms ──
+
+        /// <summary>
+        /// True when this player's disc should be dark: the setting is on, the lobby is between
+        /// matches, and they aren't ready or are reconnecting.
+        /// </summary>
+        private static bool WantsDarkDisc(MpPlayerState player, MpLobbyState lobby)
+        {
+            if (!Config.DimUnreadyPlatforms) return false;
+            if (lobby == null || lobby.phase != "lobby" || player == null) return false;
+            return !player.ready || !player.connected;
+        }
+
+        /// <summary>
+        /// Per frame for a shown avatar: builds the overlays when the disc is first seen with the
+        /// setting on (or was replaced), starting at its state; then moves the shade toward its target, and shows it on the
+        /// overlays, or on the ghost material while the disc is faded.
+        /// </summary>
+        private static void UpdateDiscShade(Remote remote, MpPlayerState player, MpLobbyState lobby)
+        {
+            bool dark = WantsDarkDisc(player, lobby);
+            float target = dark ? 1f : 0f;
+
+            if (remote.Disc == null)
+            {
+                ResetDiscShade(remote);
+                return;
+            }
+
+            DiscShade shade = remote.Shade;
+            bool stale = shade != null &&
+                         (shade.Disc != remote.Disc || shade.Overlays.Length == 0 || !IsAlive(shade.Overlays[0]));
+            if (stale)
+            {
+                ResetDiscShade(remote);
+                shade = null;
+            }
+            if (shade == null)
+            {
+                // Built whenever the setting is on (overlays start off), so later changes fade.
+                if (!Config.DimUnreadyPlatforms) return;
+                shade = remote.Shade = MakeDiscShade(remote.Disc);
+                if (shade == null) return;
+                shade.Amount = target; // first sight: start at the state, no fade-in
+            }
+
+            shade.Dark = dark;
+            shade.Amount = Mathf.MoveTowards(shade.Amount, target, Time.unscaledDeltaTime / ShadeSeconds);
+
+            // A ghosted disc draws the ghost material instead; darken that, and keep the overlays off.
+            DiscFade fade = remote.Fade;
+            bool ghosted = fade != null && fade.Swapped && fade.Ghost != null;
+            if (ghosted)
+            {
+                float keep = 1f - ShadeAlpha * shade.Amount;
+                Color ghost = fade.Ghost.color; // alpha already set by this frame's fade
+                ghost.r = GhostColor.r * keep;
+                ghost.g = GhostColor.g * keep;
+                ghost.b = GhostColor.b * keep;
+                fade.Ghost.color = ghost;
+            }
+
+            bool show = !ghosted && shade.Amount > 0f;
+            if (show != shade.Shown)
+            {
+                for (int i = 0; i < shade.Overlays.Length; i++)
+                {
+                    if (IsAlive(shade.Overlays[i])) shade.Overlays[i].enabled = show;
+                }
+                shade.Shown = show;
+            }
+            if (show && shade.Material != null)
+            {
+                Color color = Color.black;
+                color.a = ShadeAlpha * shade.Amount;
+                shade.Material.color = color;
+            }
+        }
+
+        /// <summary>
+        /// The dimming for one disc copy: a ShadeObjectName child under each of its enabled mesh
+        /// renderers, drawing the same mesh with this disc's own dark material, switched off for now.
+        /// Null when the shader isn't in the game or the disc has nothing drawn.
+        /// </summary>
+        private static DiscShade MakeDiscShade(Transform disc)
+        {
+            if (shadeShader == null)
+            {
+                if (shadeShaderMissing) return null;
+                shadeShader = Shader.Find(ShadeShaderName);
+                if (shadeShader == null)
+                {
+                    shadeShaderMissing = true;
+                    Log($"no {ShadeShaderName} shader, unready platforms won't dim");
+                    return null;
+                }
+            }
+
+            Material material = null;
+            List<GameObject> made = new List<GameObject>();
+            try
+            {
+                material = new Material(shadeShader) { name = "MpDiscShade", color = new Color(0f, 0f, 0f, 0f) };
+
+                var found = disc.GetComponentsInChildren<MeshRenderer>(true);
+                List<MeshRenderer> overlays = new List<MeshRenderer>();
+                for (int i = 0; i < found.Length; i++)
+                {
+                    MeshRenderer source = found[i];
+                    if (source == null || !source.enabled || source.gameObject.name == ShadeObjectName) continue;
+                    MeshFilter filter = source.GetComponent<MeshFilter>();
+                    if (filter == null || filter.sharedMesh == null) continue;
+
+                    GameObject go = new GameObject(ShadeObjectName);
+                    made.Add(go);
+                    go.layer = source.gameObject.layer;
+                    go.transform.SetParent(source.transform, false); // same pose and scale as the platform piece
+
+                    MeshFilter overlayFilter = go.AddComponent<MeshFilter>();
+                    overlayFilter.sharedMesh = filter.sharedMesh;
+
+                    // One slot per submesh, all the shade, so every part of the piece is covered.
+                    int slots = Math.Max(1, source.sharedMaterials.Length);
+                    Material[] mats = new Material[slots];
+                    for (int m = 0; m < slots; m++) mats[m] = material;
+
+                    MeshRenderer overlay = go.AddComponent<MeshRenderer>();
+                    overlay.sharedMaterials = new Il2CppReferenceArray<Material>(mats);
+                    overlay.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+                    overlay.receiveShadows = false;
+                    overlay.enabled = false;
+                    overlays.Add(overlay);
+                }
+
+                if (overlays.Count == 0)
+                {
+                    UnityEngine.Object.Destroy(material);
+                    Log("disc has no mesh to shade, unready platforms won't dim");
+                    return null;
+                }
+
+                return new DiscShade { Disc = disc, Overlays = overlays.ToArray(), Material = material };
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Log($"[MpPresence] preparing a disc shade failed: {ex}");
+                foreach (GameObject go in made)
+                {
+                    if (go != null) UnityEngine.Object.Destroy(go);
+                }
+                if (material != null) UnityEngine.Object.Destroy(material);
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Drops a remote's dimming: destroys its overlays (when the disc is still there) and its
+        /// material. A ghosted disc's colour goes back to normal on the fade's next change.
+        /// </summary>
+        private static void ResetDiscShade(Remote remote)
+        {
+            DiscShade shade = remote.Shade;
+            if (shade == null) return;
+            remote.Shade = null;
+
+            try
+            {
+                foreach (MeshRenderer overlay in shade.Overlays)
+                {
+                    if (IsAlive(overlay)) UnityEngine.Object.Destroy(overlay.gameObject);
+                }
+            }
+            catch (Exception ex)
+            {
+                Log($"removing a disc shade failed: {ex.Message}");
+            }
+            if (shade.Material != null) UnityEngine.Object.Destroy(shade.Material);
+            shade.Material = null;
+        }
+
+        /// <summary>For the debug dump: the shade amount and whether it wants to be dark.</summary>
+        private static string DiscShadeDump(Remote remote)
+        {
+            DiscShade shade = remote.Shade;
+            if (shade == null) return "-";
+            return $"{shade.Amount:F2}{(shade.Dark ? " dark" : "")}{(shade.Shown ? " shown" : "")} overlays={shade.Overlays.Length}";
         }
 
         // ── Templates ──
@@ -3108,6 +3345,7 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] rig: head={localHead != null} handL={localKataL != null} handR={localKataR != null} gunL={localGunL != null} gunR={localGunR != null} gunPoseL={GunPoseState(localGunL, localGunPoseL)} gunPoseR={GunPoseState(localGunR, localGunPoseR)}");
             sb.AppendLine($"[MpPresence] disc: template={tplDisc != null} source={(discSource != IntPtr.Zero ? "found" : "none")} collider={discCollider} mySpot={SpotNumber(MpSession.MySeat)}");
             sb.AppendLine($"[MpPresence] disc fade: setting={Config.FadeBlockingPlatforms} buttons={menuButtons.Count} points={buttonPoints.Count} shader={(ghostShader != null ? "found" : (ghostShaderMissing ? "missing" : "not looked up"))}");
+            sb.AppendLine($"[MpPresence] disc dim: setting={Config.DimUnreadyPlatforms} phase={MpSession.Lobby?.phase ?? "-"} shader={(shadeShader != null ? "found" : (shadeShaderMissing ? "missing" : "not looked up"))}");
             sb.AppendLine($"[MpPresence] names: show={Config.ShowPlayerNames} spectatorCam={(spectatorCam != null ? "found" : "none")} split={splitNames}");
             sb.AppendLine($"[MpPresence] colliders: gunL={gunCollidersL} gunR={gunCollidersR} head={headColliders} body={bodyColliders}");
             sb.AppendLine($"[MpPresence] headshots: connection={MpSession.HeadshotEnabled} effects={Config.HeadshotEffects} sounds={Config.HeadshotSounds} sent={headshotsSent} (own head {selfHeadshotsSent}) received={headshotsReceived} postproc={(IsAlive(postprocController) ? "found" : "not looked up / none")}");
@@ -3122,7 +3360,7 @@ namespace ExScoringMod
                 long newest = remote.Samples.Count > 0 ? remote.Samples[remote.Samples.Count - 1].T : 0;
                 sb.AppendLine($"[MpPresence]   {remote.UserId} \"{player?.nickname}\" seat={player?.seat} present={remote.Present} samples={remote.Samples.Count} " +
                               $"newest={(newest > 0 ? (newest - renderTime) + " ms ahead of render" : "-")} " +
-                              $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} hand L={HandDump(remote, 0)} R={HandDump(remote, 1)} slide L={remote.Slide[0] != null} R={remote.Slide[1] != null} headshotFx={(remote.HeadshotStart >= 0f ? "on" : "off")} discFade={DiscFadeDump(remote)} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
+                              $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} hand L={HandDump(remote, 0)} R={HandDump(remote, 1)} slide L={remote.Slide[0] != null} R={remote.Slide[1] != null} headshotFx={(remote.HeadshotStart >= 0f ? "on" : "off")} discFade={DiscFadeDump(remote)} ready={player?.ready} connected={player?.connected} discShade={DiscShadeDump(remote)} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
             }
             foreach (string line in sb.ToString().TrimEnd().Split('\n')) MelonLogger.Log(line.TrimEnd('\r'));
         }
