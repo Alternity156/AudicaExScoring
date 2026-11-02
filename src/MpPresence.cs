@@ -5,6 +5,7 @@ using Harmony;
 using MelonLoader;
 using Newtonsoft.Json.Linq;
 using TMPro;
+using UnhollowerBaseLib;
 using UnityEngine;
 
 namespace ExScoringMod
@@ -104,6 +105,24 @@ namespace ExScoringMod
     /// environment swaps it for another object, the template and every copy are rebuilt from the new
     /// one, and when there is none, nobody gets a disc.
     ///
+    /// Fading discs (Config.FadeBlockingPlatforms): a disc that hides a menu button from this player
+    /// turns see-through, so the button can be seen and shot. The disc shaders (DefaultMeshLit,
+    /// Kata/PlatformReactive, Kata/BassReactive) are all opaque with no colour or alpha property
+    /// (shader dump 2026-11-02), so a faded disc swaps its renderers to its own ghost material
+    /// (Sprites/Default, GhostColor) and fades that over DiscFadeSeconds; once fully back it gets the
+    /// scene's shared materials again and reacts to the music as before. Only the copies are touched.
+    ///  - Buttons: every GunButton found with FindObjectsOfType each ButtonRefreshSeconds (our own
+    ///    hit-box quads included), counted while active, with an enabled collider, and in front of
+    ///    the headset. The target point is that collider's bounds centre.
+    ///  - Blocking: every BlockCheckSeconds, a line from the headset (CenterEyeAnchor) to each target
+    ///    is tested against each of the disc's renderer bounds (all six fit the 2.26 m platform and go
+    ///    at most 1.4 m deep, bounds dump 2026-11-02); entering one before the button blocks it. A disc
+    ///    stays faded BlockHoldSeconds after its last block so its edges don't flicker.
+    ///  - Shooting through: the disc's collider is on Default (layer 0), which shots would hit, so it
+    ///    is turned off for as long as the disc is faded at all. Thrown guns don't bounce off it then.
+    ///  - Undone at once when the setting or Show Other Players goes off, or a song starts; the
+    ///    ghost material is destroyed with the disc copy.
+    ///
     /// Name labels (Config.ShowPlayerNames, only while ShowOtherPlayers is on): the player's
     /// nickname (no guest/bot suffix) NameHeight above their interpolated head point, in world up,
     /// under the avatar root (so it hides and is destroyed with the avatar), hidden while the head
@@ -193,6 +212,16 @@ namespace ExScoringMod
         private const string DiscColliderPath = "Static/GroundCollider";
         private const string GunColliderPath = "tricks";
         private const int PartColliderLayer = 11;        // Player: what the local guns are on
+
+        // Fading discs that hide a menu button (Config.FadeBlockingPlatforms).
+        private const float ButtonRefreshSeconds = 1f;   // FindObjectsOfType<GunButton> isn't cheap
+        private const float BlockCheckSeconds = 0.1f;
+        private const float BlockHoldSeconds = 0.5f;     // stays faded this long after the last block, so edges don't flicker
+        private const float DiscFadeSeconds = 0.2f;
+        private const float GhostStartAlpha = 0.85f;     // right after the swap from the opaque materials
+        private const float GhostAlpha = 0.2f;           // fully faded
+        private const string GhostShaderName = "Sprites/Default";
+        private static readonly Color GhostColor = new Color(0.6f, 0.65f, 0.75f, 1f);
 
         // Headshots (v2.41). The drain is PostprocController.Update's (mShotHeadCountdown -= dt * 0.5).
         private const float HeadshotDrainPerSecond = 0.5f;
@@ -352,6 +381,39 @@ namespace ExScoringMod
             public Color Base;
         }
 
+        /// <summary>
+        /// One disc copy's fade: its renderers with the scene's shared materials they normally use,
+        /// its own ghost material, and its collider (off while faded).
+        /// </summary>
+        private class DiscFade
+        {
+            /// <summary>The copy this state was built for (rebuilt when the disc is replaced).</summary>
+            public Transform Disc;
+            public MeshRenderer[] Renderers;
+            /// <summary>Per renderer, its sharedMaterials as copied (the scene's own), ready to assign back.</summary>
+            public Il2CppReferenceArray<Material>[] Originals;
+            /// <summary>Per renderer, the same length with every slot the ghost.</summary>
+            public Il2CppReferenceArray<Material>[] GhostSets;
+            public Collider[] Colliders;
+            /// <summary>This disc's own, destroyed with the state.</summary>
+            public Material Ghost;
+            /// <summary>The renderers use the ghost and the colliders are off.</summary>
+            public bool Swapped;
+            /// <summary>0 = normal, 1 = fully faded.</summary>
+            public float Amount;
+            /// <summary>Time.unscaledTime until which it stays faded.</summary>
+            public float BlockedUntil = -1f;
+            /// <summary>The last check found a button behind it (debug dump).</summary>
+            public bool Blocking;
+        }
+
+        /// <summary>A menu button and the collider whose centre the blocking test aims at.</summary>
+        private struct MenuButton
+        {
+            public GunButton Button;
+            public Collider Collider;
+        }
+
         private class Remote
         {
             public string UserId;
@@ -368,6 +430,8 @@ namespace ExScoringMod
             public readonly ShotFx[] Fx = new ShotFx[2];
             /// <summary>Platform copy, or null when the environment has none.</summary>
             public Transform Disc;
+            /// <summary>Its fade state, built on the first check (null while the setting is off).</summary>
+            public DiscFade Fade;
             public readonly List<Material> TintLeft = new List<Material>();
             public readonly List<Material> TintRight = new List<Material>();
             public readonly List<Material> OwnedMaterials = new List<Material>();
@@ -448,6 +512,15 @@ namespace ExScoringMod
         private static float nextDiscCheck;
 
         private static GameObject avatarHolder;
+
+        // Fading discs: the menu buttons found, this check's target points, and the ghost shader.
+        private static readonly List<MenuButton> menuButtons = new List<MenuButton>();
+        private static readonly List<Vector3> buttonPoints = new List<Vector3>();
+        private static float nextButtonRefresh;
+        private static float nextBlockCheck;
+        private static Shader ghostShader;
+        private static bool ghostShaderMissing;
+        private static bool loggedButtonRefreshError;
 
         // Spectator camera, for the name labels.
         private static Camera spectatorCam;
@@ -983,6 +1056,7 @@ namespace ExScoringMod
                     // doesn't replay a burst. Nothing fires while it's off.
                     if (remote.Present && remote.Samples.Count > 0) ReadShotsUpTo(remote, renderTime, false);
                     SetVisible(remote, false);
+                    ResetDiscFade(remote, true);
                 }
                 return;
             }
@@ -994,6 +1068,10 @@ namespace ExScoringMod
             Transform headsetEye = localHead;
             if (headsetEye == null && Camera.main != null) headsetEye = Camera.main.transform;
             Transform spectatorEye = splitNames && spectatorCam != null ? spectatorCam.transform : null;
+
+            bool fadeDiscs = Config.FadeBlockingPlatforms;
+            bool checkBlocks = fadeDiscs && headsetEye != null && PrepareBlockCheck(headsetEye);
+            Vector3 eyePos = headsetEye != null ? headsetEye.position : Vector3.zero;
 
             foreach (Remote remote in remotes.Values)
             {
@@ -1042,6 +1120,9 @@ namespace ExScoringMod
 
                 SetVisible(remote, true);
                 UpdateHeadshotFx(remote);
+
+                if (fadeDiscs) UpdateDiscFade(remote, checkBlocks, eyePos);
+                else ResetDiscFade(remote, true);
 
                 // After the parts are placed and shown, so a beam leaves from this frame's gun.
                 ReadShotsUpTo(remote, renderTime, true);
@@ -1910,6 +1991,8 @@ namespace ExScoringMod
             remote.TintRight.Clear();
             remote.AppliedColorKey = null;
 
+            ResetDiscFade(remote, false); // the disc goes with the root
+
             if (remote.Root != null) UnityEngine.Object.Destroy(remote.Root);
             remote.Root = null;
             remote.Head = remote.Body = remote.LHand = remote.RHand = remote.LGun = remote.RGun = null;
@@ -1938,6 +2021,7 @@ namespace ExScoringMod
                 remote.BodyInit = false;
                 remote.ResetShots();
                 EndHeadshotFx(remote);
+                ResetDiscFade(remote, true);
             }
             if (remotes.Count > 0) Log("song started, avatars hidden");
         }
@@ -2014,6 +2098,7 @@ namespace ExScoringMod
             foreach (Remote remote in remotes.Values)
             {
                 if (remote.Root == null) continue;
+                ResetDiscFade(remote, false); // its disc is replaced below
                 if (remote.Disc != null) UnityEngine.Object.Destroy(remote.Disc.gameObject);
                 remote.Disc = CopyDisc(remote.Root);
             }
@@ -2074,6 +2159,273 @@ namespace ExScoringMod
             discHolder = null;
             tplDisc = null;
             discCollider = false;
+        }
+
+        // ── Fading discs that hide a menu button ──
+
+        /// <summary>
+        /// Refreshes the button list when due and, when a blocking check is due, collects this
+        /// check's target points (visible buttons in front of the headset). True when the discs
+        /// should be tested this frame.
+        /// </summary>
+        private static bool PrepareBlockCheck(Transform eye)
+        {
+            float now = Time.unscaledTime;
+            if (now >= nextButtonRefresh)
+            {
+                nextButtonRefresh = now + ButtonRefreshSeconds;
+                RefreshMenuButtons();
+            }
+
+            if (now < nextBlockCheck) return false;
+            nextBlockCheck = now + BlockCheckSeconds;
+
+            buttonPoints.Clear();
+            Vector3 eyePos = eye.position;
+            Vector3 forward = eye.forward;
+            for (int i = 0; i < menuButtons.Count; i++)
+            {
+                MenuButton button = menuButtons[i];
+                try
+                {
+                    if (!IsAlive(button.Button) || !IsAlive(button.Collider)) continue;
+                    if (!button.Collider.enabled || !button.Collider.gameObject.activeInHierarchy) continue;
+                    Vector3 point = button.Collider.bounds.center;
+                    if (Vector3.Dot(point - eyePos, forward) <= 0f) continue; // behind the headset
+                    buttonPoints.Add(point);
+                }
+                catch
+                {
+                    // destroyed between the refresh and now; dropped at the next refresh
+                }
+            }
+            return true;
+        }
+
+        /// <summary>Every GunButton in the scene with a collider (on itself, or else a child).</summary>
+        private static void RefreshMenuButtons()
+        {
+            menuButtons.Clear();
+            try
+            {
+                var found = UnityEngine.Object.FindObjectsOfType<GunButton>();
+                for (int i = 0; i < found.Length; i++)
+                {
+                    GunButton button = found[i];
+                    if (button == null) continue;
+                    Collider collider = button.GetComponent<Collider>();
+                    if (collider == null) collider = button.gameObject.GetComponentInChildren<Collider>(true);
+                    if (collider == null) continue;
+                    menuButtons.Add(new MenuButton { Button = button, Collider = collider });
+                }
+            }
+            catch (Exception ex)
+            {
+                if (!loggedButtonRefreshError)
+                {
+                    loggedButtonRefreshError = true;
+                    MelonLogger.Log($"[MpPresence] finding the menu buttons failed: {ex}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Per frame for a shown avatar: builds the disc's fade state when needed, tests it against
+        /// this check's button points when one is due, and moves the fade toward its target.
+        /// </summary>
+        private static void UpdateDiscFade(Remote remote, bool check, Vector3 eyePos)
+        {
+            if (remote.Disc == null)
+            {
+                ResetDiscFade(remote, false);
+                return;
+            }
+
+            if (remote.Fade == null || remote.Fade.Disc != remote.Disc)
+            {
+                ResetDiscFade(remote, false);
+                remote.Fade = MakeDiscFade(remote.Disc);
+                if (remote.Fade == null) return;
+            }
+
+            DiscFade fade = remote.Fade;
+            float now = Time.unscaledTime;
+            if (check)
+            {
+                fade.Blocking = DiscBlocksAButton(fade, eyePos);
+                if (fade.Blocking) fade.BlockedUntil = now + BlockHoldSeconds;
+            }
+
+            float target = now < fade.BlockedUntil ? 1f : 0f;
+            float next = Mathf.MoveTowards(fade.Amount, target, Time.unscaledDeltaTime / DiscFadeSeconds);
+            if (next == fade.Amount && fade.Swapped == (next > 0f)) return;
+            fade.Amount = next;
+            ApplyDiscFade(fade);
+        }
+
+        /// <summary>True when a line from the headset to any button point enters one of the disc's renderers first.</summary>
+        private static bool DiscBlocksAButton(DiscFade fade, Vector3 eyePos)
+        {
+            if (buttonPoints.Count == 0) return false;
+
+            // The renderers' bounds, and their union as a quick first test.
+            int count = fade.Renderers.Length;
+            Bounds[] bounds = new Bounds[count];
+            bool any = false;
+            Bounds all = default;
+            for (int r = 0; r < count; r++)
+            {
+                MeshRenderer renderer = fade.Renderers[r];
+                if (renderer == null || !renderer.enabled) continue;
+                bounds[r] = renderer.bounds;
+                if (!any) { all = bounds[r]; any = true; }
+                else all.Encapsulate(bounds[r]);
+            }
+            if (!any) return false;
+
+            for (int i = 0; i < buttonPoints.Count; i++)
+            {
+                Vector3 toButton = buttonPoints[i] - eyePos;
+                float distance = toButton.magnitude;
+                if (distance < 0.001f) continue;
+                Ray ray = new Ray(eyePos, toButton / distance);
+
+                if (!all.IntersectRay(ray, out float hitAll) || hitAll >= distance) continue;
+                for (int r = 0; r < count; r++)
+                {
+                    if (fade.Renderers[r] == null || !fade.Renderers[r].enabled) continue;
+                    if (bounds[r].IntersectRay(ray, out float hit) && hit < distance) return true;
+                }
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// The fade state for one disc copy: its enabled mesh renderers with their materials, its
+        /// colliders, and its own ghost material. Null when the ghost shader isn't in the game.
+        /// </summary>
+        private static DiscFade MakeDiscFade(Transform disc)
+        {
+            if (ghostShader == null)
+            {
+                if (ghostShaderMissing) return null;
+                ghostShader = Shader.Find(GhostShaderName);
+                if (ghostShader == null)
+                {
+                    ghostShaderMissing = true;
+                    Log($"no {GhostShaderName} shader, discs won't fade");
+                    return null;
+                }
+            }
+
+            try
+            {
+                var found = disc.GetComponentsInChildren<MeshRenderer>(true);
+                List<MeshRenderer> renderers = new List<MeshRenderer>();
+                for (int i = 0; i < found.Length; i++)
+                {
+                    if (found[i] != null && found[i].enabled) renderers.Add(found[i]);
+                }
+
+                DiscFade fade = new DiscFade { Disc = disc };
+                fade.Ghost = new Material(ghostShader) { name = "MpDiscGhost", color = GhostColor };
+                fade.Renderers = renderers.ToArray();
+                fade.Originals = new Il2CppReferenceArray<Material>[fade.Renderers.Length];
+                fade.GhostSets = new Il2CppReferenceArray<Material>[fade.Renderers.Length];
+                for (int r = 0; r < fade.Renderers.Length; r++)
+                {
+                    var shared = fade.Renderers[r].sharedMaterials;
+                    Material[] originals = new Material[shared.Length];
+                    Material[] ghosts = new Material[shared.Length];
+                    for (int m = 0; m < shared.Length; m++)
+                    {
+                        originals[m] = shared[m];
+                        ghosts[m] = fade.Ghost;
+                    }
+                    fade.Originals[r] = new Il2CppReferenceArray<Material>(originals);
+                    fade.GhostSets[r] = new Il2CppReferenceArray<Material>(ghosts);
+                }
+
+                var colliders = disc.GetComponentsInChildren<Collider>(true);
+                fade.Colliders = new Collider[colliders.Length];
+                for (int i = 0; i < colliders.Length; i++) fade.Colliders[i] = colliders[i];
+                return fade;
+            }
+            catch (Exception ex)
+            {
+                MelonLogger.Log($"[MpPresence] preparing a disc fade failed: {ex}");
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Swaps to the ghost (colliders off) as soon as the fade starts and back (colliders on) once
+        /// it is fully undone; in between, the ghost's alpha follows the fade.
+        /// </summary>
+        private static void ApplyDiscFade(DiscFade fade)
+        {
+            bool faded = fade.Amount > 0f;
+            if (faded != fade.Swapped)
+            {
+                SwapDiscMaterials(fade, faded);
+                fade.Swapped = faded;
+            }
+
+            if (faded && fade.Ghost != null)
+            {
+                Color color = GhostColor;
+                color.a = Mathf.Lerp(GhostStartAlpha, GhostAlpha, fade.Amount);
+                fade.Ghost.color = color;
+            }
+        }
+
+        private static void SwapDiscMaterials(DiscFade fade, bool ghost)
+        {
+            for (int r = 0; r < fade.Renderers.Length; r++)
+            {
+                MeshRenderer renderer = fade.Renderers[r];
+                if (!IsAlive(renderer)) continue;
+                renderer.sharedMaterials = ghost ? fade.GhostSets[r] : fade.Originals[r];
+            }
+            for (int i = 0; i < fade.Colliders.Length; i++)
+            {
+                Collider collider = fade.Colliders[i];
+                if (IsAlive(collider)) collider.enabled = !ghost;
+            }
+        }
+
+        /// <summary>
+        /// Drops a remote's fade state and destroys its ghost material. With restore, a faded disc
+        /// gets its own materials and colliders back first (when the disc itself is being
+        /// destroyed, there is nothing to restore).
+        /// </summary>
+        private static void ResetDiscFade(Remote remote, bool restore)
+        {
+            DiscFade fade = remote.Fade;
+            if (fade == null) return;
+            remote.Fade = null;
+
+            if (restore && fade.Swapped)
+            {
+                try
+                {
+                    SwapDiscMaterials(fade, false);
+                }
+                catch (Exception ex)
+                {
+                    Log($"restoring a faded disc failed: {ex.Message}");
+                }
+            }
+            if (fade.Ghost != null) UnityEngine.Object.Destroy(fade.Ghost);
+            fade.Ghost = null;
+        }
+
+        /// <summary>For the debug dump: the fade amount and whether the last check found a block.</summary>
+        private static string DiscFadeDump(Remote remote)
+        {
+            DiscFade fade = remote.Fade;
+            if (fade == null) return "-";
+            return $"{fade.Amount:F2}{(fade.Blocking ? " blocking" : "")} renderers={fade.Renderers.Length} colliders={fade.Colliders.Length}";
         }
 
         // ── Templates ──
@@ -2747,6 +3099,7 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] presence={MpSession.PresenceEnabled} inLobby={MpSession.InLobby} inSong={InSong()} results={MpGameplay.OnResultsScreen} show={Config.ShowOtherPlayers} mySeat={MpSession.MySeat} templates={templatesReady}");
             sb.AppendLine($"[MpPresence] rig: head={localHead != null} handL={localKataL != null} handR={localKataR != null} gunL={localGunL != null} gunR={localGunR != null} gunPoseL={GunPoseState(localGunL, localGunPoseL)} gunPoseR={GunPoseState(localGunR, localGunPoseR)}");
             sb.AppendLine($"[MpPresence] disc: template={tplDisc != null} source={(discSource != IntPtr.Zero ? "found" : "none")} collider={discCollider} mySpot={SpotNumber(MpSession.MySeat)}");
+            sb.AppendLine($"[MpPresence] disc fade: setting={Config.FadeBlockingPlatforms} buttons={menuButtons.Count} points={buttonPoints.Count} shader={(ghostShader != null ? "found" : (ghostShaderMissing ? "missing" : "not looked up"))}");
             sb.AppendLine($"[MpPresence] names: show={Config.ShowPlayerNames} spectatorCam={(spectatorCam != null ? "found" : "none")} split={splitNames}");
             sb.AppendLine($"[MpPresence] colliders: gunL={gunCollidersL} gunR={gunCollidersR} head={headColliders} body={bodyColliders}");
             sb.AppendLine($"[MpPresence] headshots: connection={MpSession.HeadshotEnabled} effects={Config.HeadshotEffects} sounds={Config.HeadshotSounds} sent={headshotsSent} received={headshotsReceived} postproc={(IsAlive(postprocController) ? "found" : "not looked up / none")}");
@@ -2761,7 +3114,7 @@ namespace ExScoringMod
                 long newest = remote.Samples.Count > 0 ? remote.Samples[remote.Samples.Count - 1].T : 0;
                 sb.AppendLine($"[MpPresence]   {remote.UserId} \"{player?.nickname}\" seat={player?.seat} present={remote.Present} samples={remote.Samples.Count} " +
                               $"newest={(newest > 0 ? (newest - renderTime) + " ms ahead of render" : "-")} " +
-                              $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} hand L={HandDump(remote, 0)} R={HandDump(remote, 1)} slide L={remote.Slide[0] != null} R={remote.Slide[1] != null} headshotFx={(remote.HeadshotStart >= 0f ? "on" : "off")} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
+                              $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} hand L={HandDump(remote, 0)} R={HandDump(remote, 1)} slide L={remote.Slide[0] != null} R={remote.Slide[1] != null} headshotFx={(remote.HeadshotStart >= 0f ? "on" : "off")} discFade={DiscFadeDump(remote)} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
             }
             foreach (string line in sb.ToString().TrimEnd().Split('\n')) MelonLogger.Log(line.TrimEnd('\r'));
         }

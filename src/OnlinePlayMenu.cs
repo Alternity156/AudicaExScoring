@@ -118,6 +118,12 @@ namespace ExScoringMod
                 0f, 10f, 1f, -1f, "N0",
                 "Volume of the lobby song preview, relative to Music Level. Resetting it makes it follow Music Level again");
             OptionsMenuClone.AddRow(lobbyPreview, lobbyPreviewVolume);
+
+            var fadePlatforms = OptionsMenuClone.CreateToggle(0, "Fade Blocking Platforms",
+                () => Config.FadeBlockingPlatforms,
+                v => Config.UpdateFadeBlockingPlatforms(v),
+                "Makes another player's platform see-through while it hides a menu button from your view. You can shoot through a faded platform");
+            OptionsMenuClone.AddRow(fadePlatforms);
         }
 
         // ── Online Play (lobby) category ──
@@ -126,7 +132,7 @@ namespace ExScoringMod
         {
             codeLabel = null;
 
-            // The settings (Enable Online Play, Show Other Players, Show Player Names, Auto-Download Missing Songs, Headshot Effects/Sounds,
+            // The settings (Enable Online Play, Show Other Players, Show Player Names, Auto-Download Missing Songs, Headshot Effects/Sounds, Fade Blocking Platforms,
             // Lobby Song Preview/Volume)
             // live only in the song list's Options > Multiplayer (BuildSettings).
             if (!Config.EnableOnlinePlay)
