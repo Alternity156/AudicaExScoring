@@ -185,7 +185,8 @@ namespace ExScoringMod
 
         /// <summary>
         /// A headshot relayed by the server (v2.41, 19.14.3): shooter hit target's head. Never for
-        /// this player's own shots (the server doesn't echo them back). target can be this player.
+        /// this player's own shots (the server doesn't echo them back). target can be this player, and
+        /// since v2.43 can equal shooter (that player shot their own head).
         /// </summary>
         public static event Action<MpHeadshot> OnHeadshot;
 
@@ -598,13 +599,15 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// This player's shot hit another player's avatar head (v2.41, 19.14.2). Fire-and-forget, no
+        /// This player's shot hit a player's avatar head (v2.41, 19.14.2): another player's, or since
+        /// v2.43 this player's own (target = MyUserId, so the others see it). Fire-and-forget, no
         /// reqId, never queued: dropped unless connected, in a lobby and with "headshot" on. The
-        /// server drops anything past 10/s and any invalid target silently, so this never errors.
+        /// server drops anything past 10/s and any invalid target silently (a v2.42 or older server
+        /// also drops a self-target), so this never errors.
         /// </summary>
         public static void SendHeadshot(string targetUserId)
         {
-            if (string.IsNullOrEmpty(targetUserId) || targetUserId == MyUserId) return;
+            if (string.IsNullOrEmpty(targetUserId)) return;
             if (!IsConnected || !HeadshotEnabled || !InLobby) return;
             Log($"-> headshot {targetUserId}");
             SendFireAndForget("headshot", new JObject { ["target"] = targetUserId });

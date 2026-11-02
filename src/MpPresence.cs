@@ -165,6 +165,12 @@ namespace ExScoringMod
     ///    Only in a lobby, outside songs, with "headshot" on the connection and Show Other Players on,
     ///    at most once per HeadshotSendCooldown per target. Sent whatever HeadshotEffects says, so the
     ///    others still see this player's hits.
+    ///  - Own head (v2.43): shooting your own head is native (the head toy calls
+    ///    PostprocController.OnShotHead with the gun that fired; the mod's own calls pass null). A
+    ///    postfix on it sends headshot { target: me }, so the others play the remote effect and sound
+    ///    on this player's avatar. Same guards as above except Show Other Players (it only decides
+    ///    what this player sees), at most once per HeadshotSendCooldown. This player's own effect stays
+    ///    the native one; the server never echoes it back. A v2.42 or older server drops it silently.
     ///  - This player hit: PostprocController.OnShotHead(position, null), exactly what shooting your
     ///    own head does (Ghidra: mShotHeadCountdown = 1 and one FMOD event; gun is unused).
     ///  - Another player hit (seen by the shooter and by everyone else): the native timing and curve
@@ -551,6 +557,8 @@ namespace ExScoringMod
         private static PostprocController postprocController;
         private static MaterialPropertyBlock headshotBlock;
         private static int headshotsSent, headshotsReceived;
+        private static int selfHeadshotsSent;
+        private static float lastSelfHeadshotSent = -100f;
 
         // ── Per frame ──
 
@@ -3102,7 +3110,7 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] disc fade: setting={Config.FadeBlockingPlatforms} buttons={menuButtons.Count} points={buttonPoints.Count} shader={(ghostShader != null ? "found" : (ghostShaderMissing ? "missing" : "not looked up"))}");
             sb.AppendLine($"[MpPresence] names: show={Config.ShowPlayerNames} spectatorCam={(spectatorCam != null ? "found" : "none")} split={splitNames}");
             sb.AppendLine($"[MpPresence] colliders: gunL={gunCollidersL} gunR={gunCollidersR} head={headColliders} body={bodyColliders}");
-            sb.AppendLine($"[MpPresence] headshots: connection={MpSession.HeadshotEnabled} effects={Config.HeadshotEffects} sounds={Config.HeadshotSounds} sent={headshotsSent} received={headshotsReceived} postproc={(IsAlive(postprocController) ? "found" : "not looked up / none")}");
+            sb.AppendLine($"[MpPresence] headshots: connection={MpSession.HeadshotEnabled} effects={Config.HeadshotEffects} sounds={Config.HeadshotSounds} sent={headshotsSent} (own head {selfHeadshotsSent}) received={headshotsReceived} postproc={(IsAlive(postprocController) ? "found" : "not looked up / none")}");
             sb.AppendLine($"[MpPresence] sending: {MpSession.PoseRateHz} Hz ({(MpSession.PoseRateEnabled ? "server" : "default")}), my shots L={localShots[0]} R={localShots[1]}, pull L={PullJson(localGunL)} R={PullJson(localGunR)}");
             bool knuckles = UsingKnuckles();
             sb.AppendLine($"[MpPresence] hands: knuckles={knuckles} handAnim L={JsonDump(HandAnimJson(localKataL, 0, knuckles))} R={JsonDump(HandAnimJson(localKataR, 1, knuckles))} fingers L={JsonDump(FingersJson(localKataL, knuckles))} R={JsonDump(FingersJson(localKataR, knuckles))}");
@@ -3197,6 +3205,29 @@ namespace ExScoringMod
 
             MpSession.SendHeadshot(victim.UserId);
             PlayRemoteHeadshot(victim); // the server never echoes it back (19.14.2)
+        }
+
+        /// <summary>
+        /// This player shot their own head (v2.43): the native effect has already played here; tell the
+        /// lobby so everyone else plays it on this player's avatar. Only called for native shots
+        /// (a real gun), never for the mod's own OnShotHead calls.
+        /// </summary>
+        private static void ReportSelfHeadshot(Gun gun)
+        {
+            if (!MpSession.HeadshotEnabled || !MpSession.PresenceEnabled || !MpSession.InLobby) return;
+            if (InSong()) return;
+            string me = MpSession.MyUserId;
+            if (string.IsNullOrEmpty(me)) return;
+
+            float now = Time.unscaledTime;
+            if (now - lastSelfHeadshotSent < HeadshotSendCooldown) return;
+            lastSelfHeadshotSent = now;
+            headshotsSent++;
+            selfHeadshotsSent++;
+            int hand = HandOf(gun);
+            Log($"headshot: shot my own head ({(hand == 0 ? "left" : hand == 1 ? "right" : "unknown")} gun)");
+
+            MpSession.SendHeadshot(me);
         }
 
         /// <summary>The shown remote avatar a collider belongs to, and whether it is part of its head. Null for anything else.</summary>
@@ -3373,6 +3404,29 @@ namespace ExScoringMod
                 catch (Exception ex)
                 {
                     Log($"headshot check failed: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// Shooting your own head (v2.43): the game's head toy calls OnShotHead(position, gun) with the
+        /// gun that fired. The mod's own calls (PlayLocalHeadshot, PlayHeadshotSound) pass a null gun,
+        /// which is how they are told apart (checked in game 2026-11-02: native self-shots pass
+        /// GunLeft/GunRight). A postfix, so the native effect and sound always run first.
+        /// </summary>
+        [HarmonyPatch(typeof(PostprocController), "OnShotHead", new Type[] { typeof(Vector3), typeof(Gun) })]
+        private static class PostprocController_OnShotHead_ReportSelf
+        {
+            private static void Postfix(Gun gun)
+            {
+                if (gun == null) return; // one of the mod's own calls
+                try
+                {
+                    ReportSelfHeadshot(gun);
+                }
+                catch (Exception ex)
+                {
+                    Log($"own headshot report failed: {ex.Message}");
                 }
             }
         }
