@@ -237,6 +237,7 @@
     <Compile Include="src\ModSettingsBlocker.cs" />
     <Compile Include="src\MpClient.cs" />
     <Compile Include="src\MpGameplay.cs" />
+    <Compile Include="src\MpLobbyPreview.cs" />
     <Compile Include="src\MpMessages.cs" />
     <Compile Include="src\MpPresence.cs" />
     <Compile Include="src\MpSession.cs" />

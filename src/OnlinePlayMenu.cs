@@ -10,7 +10,8 @@ namespace ExScoringMod
     /// Online play menus:
     ///  - BuildSettings: the "Multiplayer" category of the song list's Options (GlobalOptions),
     ///    settings only (Enable Online Play, Show Other Players, Show Player Names,
-    ///    Auto-Download Missing Songs, Headshot Effects, Headshot Sounds);
+    ///    Auto-Download Missing Songs, Headshot Effects, Headshot Sounds, Lobby Song Preview,
+    ///    Lobby Preview Volume);
     ///  - Build: the Online Play screen on the Main page (OnlinePlayScreen), not reachable from the
     ///    song list. No settings there (they live only in Options > Multiplayer); just the lobby menu. Not in a lobby: create, join by code, the public lobby
     ///    list. In a lobby: ready, leave, suggest a song, and for the host the lobby settings,
@@ -106,6 +107,17 @@ namespace ExScoringMod
                 v => Config.UpdateHeadshotSounds(v),
                 "Plays the headshot sound when another player is shot in the head (only while Headshot Effects is on)");
             OptionsMenuClone.AddRow(headshotEffects, headshotSounds);
+
+            var lobbyPreview = OptionsMenuClone.CreateToggle(0, "Lobby Song Preview",
+                () => Config.LobbySongPreview,
+                v => Config.UpdateLobbySongPreview(v),
+                "In a lobby, plays the song the host selected in the menus outside the song list, instead of the menu music");
+            var lobbyPreviewVolume = OptionsMenuClone.CreateSlider(1, "Lobby Preview Volume",
+                () => Config.GetLobbySongPreviewVolume(),
+                v => Config.UpdateLobbySongPreviewVolume(v),
+                0f, 10f, 1f, -1f, "N0",
+                "Volume of the lobby song preview, relative to Music Level. Resetting it makes it follow Music Level again");
+            OptionsMenuClone.AddRow(lobbyPreview, lobbyPreviewVolume);
         }
 
         // ── Online Play (lobby) category ──
@@ -114,7 +126,8 @@ namespace ExScoringMod
         {
             codeLabel = null;
 
-            // The settings (Enable Online Play, Show Other Players, Show Player Names, Auto-Download Missing Songs, Headshot Effects/Sounds)
+            // The settings (Enable Online Play, Show Other Players, Show Player Names, Auto-Download Missing Songs, Headshot Effects/Sounds,
+            // Lobby Song Preview/Volume)
             // live only in the song list's Options > Multiplayer (BuildSettings).
             if (!Config.EnableOnlinePlay)
             {

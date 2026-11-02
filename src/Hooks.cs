@@ -437,6 +437,13 @@ namespace ExScoringMod
         {
             public static void Postfix(ref bool __result)
             {
+                // Online lobby: the host's song is being fed to the preview outside the song list
+                // (MpLobbyPreview), which needs the launch-screen path of SongPreview.Update.
+                if (MpLobbyPreview.Feeding)
+                {
+                    __result = true;
+                    return;
+                }
                 if (MarathonSetup.Active)
                 {
                     __result = false; // no launch-screen preview during marathon setup
