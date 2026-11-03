@@ -32,6 +32,10 @@ namespace ExScoringMod
         private const int CloseTimeoutMs = 2000;
         private const int MaxInboundMessageBytes = 1024 * 1024;
 
+        // On quit: how long to wait for the final message (leaveLobby) to go out, then for the close frame.
+        private const int ShutdownFlushTimeoutMs = 500;
+        private const int ShutdownCloseTimeoutMs = 500;
+
         // Unexpected drops are retried with these delays (the last one repeats) until the outage
         // has lasted ReconnectGiveUpMs. The server holds the seat for 30 s after a drop (19.6), so
         // the first few attempts are inside the grace and get the seat back with the resumeToken.
@@ -46,6 +50,8 @@ namespace ExScoringMod
             public readonly SemaphoreSlim OutgoingSignal = new SemaphoreSlim(0);
             public readonly CancellationTokenSource Cancel = new CancellationTokenSource();
             public volatile bool Open;
+            // Messages queued but not yet fully sent (dequeued ones count until SendAsync returns).
+            public int Unsent;
         }
 
         private enum InboundKind { Opened, Message, Closed }
@@ -117,9 +123,15 @@ namespace ExScoringMod
             Connection conn = current;
             if (conn == null || !conn.Open) return false;
 
+            Enqueue(conn, json);
+            return true;
+        }
+
+        private static void Enqueue(Connection conn, string json)
+        {
+            Interlocked.Increment(ref conn.Unsent);
             conn.Outgoing.Enqueue(json);
             conn.OutgoingSignal.Release();
-            return true;
         }
 
         /// <summary>Called by MpSession once a welcome arrives: the connection is fully up.</summary>
@@ -132,24 +144,51 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Best-effort close for OnApplicationQuit, waiting briefly so the server sees a clean close
-        /// instead of a drop (which would hold the seat for 30 s).
+        /// Best-effort close for OnApplicationQuit. A closed socket alone still makes the server hold
+        /// the seat for the 30 s grace (19.6), so MpSession passes leaveLobby as finalMessage when the
+        /// player is in a lobby. It is sent first and given up to ShutdownFlushTimeoutMs to reach the
+        /// wire (ClientWebSocket allows one send at a time, so the close frame must wait for it), then
+        /// the close frame gets up to ShutdownCloseTimeoutMs. Never blocks quitting for much longer.
         /// </summary>
-        public static void Shutdown()
+        public static void Shutdown(string finalMessage = null)
         {
             Connection conn = current;
             current = null;
             State = MpConnectionState.Disconnected;
             if (conn == null) return;
 
+            bool flushed = true;
+            if (!string.IsNullOrEmpty(finalMessage) && conn.Open)
+            {
+                Enqueue(conn, finalMessage);
+                flushed = WaitForFlush(conn, ShutdownFlushTimeoutMs);
+                Log(flushed ? "Shutdown: final message sent" : "Shutdown: final message not confirmed sent in time");
+            }
+
+            // If the flush timed out, a send may still be in flight; closing now could throw, which
+            // CloseQuietly swallows. Quitting matters more than the close frame at that point.
             try
             {
-                CloseQuietly(conn, "game closing").Wait(500);
+                // Task.Run so the awaits inside never depend on the main thread's synchronization context.
+                Task.Run(() => CloseQuietly(conn, "game closing")).Wait(ShutdownCloseTimeoutMs);
             }
             catch
             {
                 // Quitting anyway.
             }
+        }
+
+        /// <summary>Blocks until every queued message on conn has been sent, the socket ended, or the timeout passed.</summary>
+        private static bool WaitForFlush(Connection conn, int timeoutMs)
+        {
+            long deadline = NowMs() + timeoutMs;
+            while (Volatile.Read(ref conn.Unsent) > 0)
+            {
+                if (!conn.Open || conn.Cancel.IsCancellationRequested) return false;
+                if (NowMs() >= deadline) return false;
+                Thread.Sleep(5);
+            }
+            return true;
         }
 
         /// <summary>Main thread, once per frame (via MpSession.Tick).</summary>
@@ -474,8 +513,15 @@ namespace ExScoringMod
 
                     while (conn.Outgoing.TryDequeue(out string json))
                     {
-                        byte[] bytes = Encoding.UTF8.GetBytes(json);
-                        await conn.Socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, conn.Cancel.Token);
+                        try
+                        {
+                            byte[] bytes = Encoding.UTF8.GetBytes(json);
+                            await conn.Socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, conn.Cancel.Token);
+                        }
+                        finally
+                        {
+                            Interlocked.Decrement(ref conn.Unsent);
+                        }
                     }
                 }
             }

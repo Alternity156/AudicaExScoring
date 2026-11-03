@@ -437,10 +437,24 @@ namespace ExScoringMod
             }
         }
 
-        /// <summary>From ExScoring.OnApplicationQuit: a clean close so the server frees the seat now.</summary>
+        /// <summary>
+        /// From ExScoring.OnApplicationQuit. A closed socket alone leaves the seat held for the 30 s
+        /// reconnect grace (19.6), so the other players would see us "reconnecting". When in a lobby,
+        /// leaveLobby goes out first (no reqId: nobody is left to read the reply), then the clean close.
+        /// Queued requests are dropped without callbacks, since the game is closing.
+        /// </summary>
         public static void Shutdown()
         {
-            MpClient.Shutdown();
+            queuedRequests.Clear();
+
+            string finalMessage = null;
+            if (IsConnected && InLobby)
+            {
+                finalMessage = new JObject { ["type"] = "leaveLobby" }.ToString(Newtonsoft.Json.Formatting.None);
+                Log("Game closing: leaving the lobby before disconnecting");
+            }
+
+            MpClient.Shutdown(finalMessage);
         }
 
         // ── Lobby list (19.2) ──
