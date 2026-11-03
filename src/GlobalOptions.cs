@@ -873,8 +873,38 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.showNativeTimingGraph = v; OptionsMenuFunctions.SetShowNativeTimingGraph(v); },
                     "Results screen only: adds a second timing graph below the others using the game's native frame-based timing, for comparison with Precise Shot Timing");
                 OptionsMenuClone.AddRow(nativeTimingGraphToggle);
+
+                // Online play state dumps, written to the MelonLoader log (shown even with Enable Logs off).
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Online Play Dumps"));
+                var sessionDump = OptionsMenuClone.CreateButton(0, "Session",
+                    () => RunDump("MpSession", MpSession.DebugDump),
+                    "Writes the online play connection, lobby and match state to the MelonLoader log");
+                var presenceDump = OptionsMenuClone.CreateButton(1, "Presence",
+                    () => RunDump("MpPresence", MpPresence.DebugDump),
+                    "Writes the other players' avatars (poses, models, shots, platforms) to the MelonLoader log");
+                OptionsMenuClone.AddRow(sessionDump, presenceDump);
+                var cosmeticsDump = OptionsMenuClone.CreateButton(0, "Cosmetics",
+                    () => RunDump("MpCosmetics", MpCosmetics.DebugDump),
+                    "Writes your head, body and gun choices as shared with the lobby (packaging and uploads) to the MelonLoader log");
+                var assetsDump = OptionsMenuClone.CreateButton(1, "Custom Models",
+                    () => RunDump("MpAssets", MpAssets.DebugDump),
+                    "Writes the custom model downloads and cache to the MelonLoader log");
+                OptionsMenuClone.AddRow(cosmeticsDump, assetsDump);
             }),
         };
+
+        /// <summary>Runs a debug dump from a menu button; one that throws only logs it.</summary>
+        private static void RunDump(string name, Action dump)
+        {
+            try
+            {
+                dump();
+            }
+            catch (Exception ex)
+            {
+                MelonLoader.MelonLogger.Log($"[Options] {name} dump failed: {ex}");
+            }
+        }
 
         // ── Song-list view (Back + categories) ────────────────────────────────
         public static List<ViewRow> BuildView()

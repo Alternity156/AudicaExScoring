@@ -128,6 +128,12 @@ namespace ExScoringMod
                 v => Config.UpdateDimUnreadyPlatforms(v),
                 "Makes another player's platform darker while they aren't ready in the lobby");
             OptionsMenuClone.AddRow(fadePlatforms, dimUnready);
+
+            var showCustom = OptionsMenuClone.CreateToggle(0, "Show Custom Avatars",
+                () => Config.ShowCustomAvatars,
+                v => Config.UpdateShowCustomAvatars(v),
+                "Shows the other players' custom heads, bodies and guns, downloading them when needed. Off = those show as the default models. Yours are still shared");
+            OptionsMenuClone.AddRow(showCustom);
         }
 
         // ── Online Play (lobby) category ──
@@ -137,7 +143,7 @@ namespace ExScoringMod
             codeLabel = null;
 
             // The settings (Enable Online Play, Show Other Players, Show Player Names, Auto-Download Missing Songs, Headshot Effects/Sounds, Fade Blocking Platforms, Dim Unready Platforms,
-            // Lobby Song Preview/Volume)
+            // Lobby Song Preview/Volume, Show Custom Avatars)
             // live only in the song list's Options > Multiplayer (BuildSettings).
             if (!Config.EnableOnlinePlay)
             {

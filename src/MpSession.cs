@@ -40,6 +40,7 @@ namespace ExScoringMod
         private const long LocationIntervalMs = 260;        // server: 4/s
         private const long DownloadProgressIntervalMs = 550; // server: 2/s
         private const long GunColorsIntervalMs = 600;       // server: 2/s (v2.39)
+        private const long CosmeticsIntervalMs = 600;       // server: 2/s (v2.44)
 
         private const int GuestNameMaxLength = 24;
 
@@ -49,6 +50,8 @@ namespace ExScoringMod
         private const string PoseRateFeature = "poseRate";
         /// <summary>The v2.41 feature name (19.14.1): headshot events. Only granted with "presence".</summary>
         private const string HeadshotFeature = "headshot";
+        /// <summary>The v2.44 feature name: head, body and gun choices, and custom model packages. Only granted with "presence".</summary>
+        private const string CosmeticsFeature = "cosmetics";
 
         /// <summary>Pose rate without "poseRate" (a v2.39 server), as in v2.39.</summary>
         public const int DefaultPoseRateHz = 15;
@@ -102,6 +105,23 @@ namespace ExScoringMod
         /// headshot with BAD_MESSAGE) and after a disconnect.
         /// </summary>
         public static bool HeadshotEnabled { get; private set; }
+
+        /// <summary>
+        /// True when the last welcome listed "cosmetics" (v2.44): setCosmetics may be sent and other
+        /// players' choices arrive in PlayerState.cosmetics. False with a v2.43 or older server (which
+        /// would answer setCosmetics with BAD_MESSAGE) and after a disconnect.
+        /// </summary>
+        public static bool CosmeticsEnabled { get; private set; }
+
+        /// <summary>
+        /// True when "cosmetics" is on and the server stores custom model packages (v2.44,
+        /// welcome.assetsEnabled with an assetToken). Without it, custom slots must not be sent and the
+        /// asset routes must not be called.
+        /// </summary>
+        public static bool AssetsEnabled { get; private set; }
+
+        /// <summary>v2.44: this connection's upload credential for the asset routes. Secret: never logged.</summary>
+        internal static string AssetToken { get; private set; }
 
         /// <summary>This player's seat in the current lobby (v2.39), or -1 outside a lobby.</summary>
         public static int MySeat => MyPlayer != null ? MyPlayer.seat : -1;
@@ -190,6 +210,13 @@ namespace ExScoringMod
         /// </summary>
         public static event Action<MpHeadshot> OnHeadshot;
 
+        /// <summary>
+        /// setCosmetics was refused (v2.44): UNKNOWN_PACKAGE / PACKAGE_BLOCKED (with error.package),
+        /// ASSETS_DISABLED, or a client-side TIMEOUT / DISCONNECTED. The next change (or the same one,
+        /// after a TIMEOUT) is tried again.
+        /// </summary>
+        public static event Action<MpError> OnCosmeticsError;
+
         /// <summary>Server errors that no request callback was waiting for.</summary>
         public static event Action<MpError> OnError;
 
@@ -262,6 +289,13 @@ namespace ExScoringMod
         private static float[] wantedGunRight;
         private static string lastSentGunColorsKey;
         private static long lastGunColorsSentMs;
+
+        // setCosmetics (v2.44): the latest four slots asked for and what was last sent, handled like
+        // the gun colours (the sent key is forgotten on welcome and on joining a lobby).
+        private static JObject wantedCosmetics;
+        private static string wantedCosmeticsKey;
+        private static string lastSentCosmeticsKey;
+        private static long lastCosmeticsSentMs;
 
         // ── Connection ──
 
@@ -354,6 +388,7 @@ namespace ExScoringMod
             }
 
             SendGunColorsIfDue(now);
+            SendCosmeticsIfDue(now);
 
             ExpireRequests(now);
         }
@@ -589,6 +624,19 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// This player's head, body and guns (v2.44): a JObject with the four slots head, body,
+        /// lGun and rGun (19.15.2), built by MpCosmetics. Call as often as convenient: it goes out
+        /// only while in a lobby with "cosmetics" on, only when it changed (or after a join), and at
+        /// most ~1.7 times a second with the latest value winning. Errors go to OnCosmeticsError.
+        /// </summary>
+        public static void SetCosmetics(JObject slots)
+        {
+            if (slots == null) return;
+            wantedCosmetics = (JObject)slots.DeepClone();
+            wantedCosmeticsKey = wantedCosmetics.ToString(Formatting.None);
+        }
+
+        /// <summary>
         /// One pose (v2.39). Fire-and-forget, no reqId, never queued: dropped unless connected, in a
         /// lobby and with presence on. The caller keeps it to PoseRateHz and stops in songs.
         /// </summary>
@@ -696,7 +744,8 @@ namespace ExScoringMod
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("[Mp] ===== MpSession =====");
-            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} headshot={HeadshotEnabled} seat={MySeat}");
+            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} headshot={HeadshotEnabled} cosmetics={CosmeticsEnabled} assets={AssetsEnabled} seat={MySeat}");
+            sb.AppendLine($"[Mp] cosmetics: wanted={wantedCosmeticsKey ?? "none"} sent={(wantedCosmeticsKey != null && wantedCosmeticsKey == lastSentCosmeticsKey ? "yes" : "no")}");
             sb.AppendLine($"[Mp] clock: offset={ClockOffsetMs} ms, lastRtt={LastRttMs} ms, bestRtt={BestRttMs} ms, samples={clockSamples.Count}, serverNow={ServerNowMs}");
             sb.AppendLine($"[Mp] pending requests={pendingRequests.Count}, queued={queuedRequests.Count}, location=\"{currentLocation}\" browsing={currentBrowsingSongId ?? "none"}");
 
@@ -721,7 +770,7 @@ namespace ExScoringMod
                         string status = p.songStatus == null
                             ? "-"
                             : p.songStatus.status + (p.songStatus.progress.HasValue ? $" {p.songStatus.progress.Value:P0}" : "");
-                        sb.AppendLine($"[Mp]   {(p.isHost ? "*" : " ")} seat {p.seat} \"{p.nickname}\" {p.userId}{(p.guest ? " guest" : "")}{(p.bot ? " bot" : "")}{(p.connected ? "" : " DISCONNECTED")}{(p.presence ? " presence" : "")}{(p.gunColors != null ? " colors" : "")} " +
+                        sb.AppendLine($"[Mp]   {(p.isHost ? "*" : " ")} seat {p.seat} \"{p.nickname}\" {p.userId}{(p.guest ? " guest" : "")}{(p.bot ? " bot" : "")}{(p.connected ? "" : " DISCONNECTED")}{(p.presence ? " presence" : "")}{(p.gunColors != null ? " colors" : "")}{(p.cosmetics != null ? " cosmetics" : "")} " +
                                       $"loc={p.location} mode={p.scoringMode} song={status} diff={p.difficulty ?? "-"} ready={p.ready} " +
                                       $"choice={(p.songChoice != null ? p.songChoice.title ?? p.songChoice.songId : "-")} role={p.matchRole ?? "-"}");
                     }
@@ -785,11 +834,11 @@ namespace ExScoringMod
                 ["modVersion"] = ExScoring.BuildInfo.Version,
                 ["platform"] = helloPlatform,
                 ["guestName"] = helloGuestName,
-                ["features"] = new JArray(PresenceFeature, PoseRateFeature, HeadshotFeature)
+                ["features"] = new JArray(PresenceFeature, PoseRateFeature, HeadshotFeature, CosmeticsFeature)
             };
             if (!string.IsNullOrEmpty(resumeToken)) hello["resumeToken"] = resumeToken;
 
-            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}, {PoseRateFeature}, {HeadshotFeature}])");
+            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}, {PoseRateFeature}, {HeadshotFeature}, {CosmeticsFeature}])");
             MpClient.Send(hello.ToString(Formatting.None));
         }
 
@@ -953,8 +1002,12 @@ namespace ExScoringMod
             PresenceEnabled = false;
             PoseRateEnabled = false;
             HeadshotEnabled = false;
+            CosmeticsEnabled = false;
+            AssetsEnabled = false;
+            AssetToken = null;
             SetPoseRate(DefaultPoseRateHz, "disconnected");
             lastSentGunColorsKey = null;
+            lastSentCosmeticsKey = null;
 
             LastDisconnect = info;
             Log($"Disconnected: {info.reason} (willReconnect={info.willReconnect})");
@@ -979,7 +1032,12 @@ namespace ExScoringMod
             SetPoseRate(PoseRateEnabled ? welcome.poseRateHz.Value : DefaultPoseRateHz, "welcome");
             // "headshot" only counts with "presence" too (19.14.1).
             HeadshotEnabled = PresenceEnabled && Array.IndexOf(welcome.features, HeadshotFeature) >= 0;
+            // "cosmetics" only counts with "presence" too (v2.44); assets need the server's storage and a token.
+            CosmeticsEnabled = PresenceEnabled && Array.IndexOf(welcome.features, CosmeticsFeature) >= 0;
+            AssetToken = CosmeticsEnabled && welcome.assetsEnabled == true && !string.IsNullOrEmpty(welcome.assetToken) ? welcome.assetToken : null;
+            AssetsEnabled = AssetToken != null;
             lastSentGunColorsKey = null; // a new connection holds no colours yet
+            lastSentCosmeticsKey = null; // nor cosmetics
 
             // Rough offset until the first pong (no RTT correction).
             if (clockSamples.Count == 0 && welcome.serverTime > 0)
@@ -990,7 +1048,7 @@ namespace ExScoringMod
             MpClient.MarkWelcomed();
             nextPingAtMs = 0; // ping right away for a real clock sample
 
-            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz" : "off (" + PoseRateHz + " Hz)")} headshot={HeadshotEnabled}");
+            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz" : "off (" + PoseRateHz + " Hz)")} headshot={HeadshotEnabled} cosmetics={CosmeticsEnabled} assets={AssetsEnabled}");
 
             if (welcome.lobby != null)
             {
@@ -1108,6 +1166,7 @@ namespace ExScoringMod
                 lastSentLocationKey = null;
                 locationDirty = currentLocation != null;
                 lastSentGunColorsKey = null; // v2.39: send the colours once after every join
+                lastSentCosmeticsKey = null; // v2.44: and the cosmetics
             }
 
             if (lobby.lobbyId != scoringModeSentForLobbyId)
@@ -1247,6 +1306,26 @@ namespace ExScoringMod
                 // Let the next tick try again (e.g. BAD_MESSAGE can't happen with clamped values,
                 // but a TIMEOUT or a drop can).
                 if (error != null && lastSentGunColorsKey == key) lastSentGunColorsKey = null;
+            });
+        }
+
+        private static void SendCosmeticsIfDue(long now)
+        {
+            if (wantedCosmetics == null || !CosmeticsEnabled || !InLobby) return;
+            if (now - lastCosmeticsSentMs < CosmeticsIntervalMs) return;
+
+            string key = wantedCosmeticsKey;
+            if (key == lastSentCosmeticsKey) return;
+
+            lastSentCosmeticsKey = key;
+            lastCosmeticsSentMs = now;
+            Request("setCosmetics", (JObject)wantedCosmetics.DeepClone(), error =>
+            {
+                if (error == null) return;
+                // Let a later tick send it again: a TIMEOUT or drop can succeed next time, and
+                // MpCosmetics replaces a refused custom slot before the next attempt.
+                if (lastSentCosmeticsKey == key) lastSentCosmeticsKey = null;
+                SafeInvoke(OnCosmeticsError, error, "OnCosmeticsError");
             });
         }
 

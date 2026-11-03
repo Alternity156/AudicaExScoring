@@ -67,8 +67,18 @@ namespace ExScoringMod
     /// came). Players missing from the latest poses message are hidden; every avatar is hidden on
     /// entering a song (the server just stops sending, it never sends an empty list there).
     ///
-    /// Avatars are copies of templates built once from the local rig, always the DEFAULT models
-    /// (avatars[0] head/body, gun model "Gun1"), whatever anyone has selected:
+    /// Cosmetics (v2.44): each player's head, body and guns follow their PlayerState.cosmetics
+    /// (MpCosmetics sends this player's own). Each slot resolves to a model key: "d" the default
+    /// templates below, "bN" a built-in (avatars[N] head/body, gunModels[N] or gunModelsExtras[N-32]
+    /// copied from the local rig, built on first use like the defaults), or "c" + package + config
+    /// for a custom model (MpAssets downloads the package; MpCustomModels loads it, one per frame,
+    /// outside songs). Until a model is ready, or when it fails, or with Show Custom Avatars off for
+    /// a custom one, that slot shows the default. When a player's keys change, their avatar is rebuilt
+    /// from the new templates (colliders, colours and the headshot renderers come with it). Custom
+    /// templates nobody wears are destroyed after CustomTemplateKeepSeconds.
+    ///
+    /// Avatars are copies of templates built from the local rig. The defaults are built once
+    /// (avatars[0] head/body, gun model "Gun1"):
     ///  - head  = 3rdPersonHead with only the default mask kept      (under CenterEyeAnchor)
     ///  - body  = the default torso, 0.39 m under the body point       (under 3rdPersonBody)
     ///  - hands = KataHand.normalHand (*_hand_skeletal_lowres), Animator kept (under HandLeft/Right)
@@ -231,6 +241,11 @@ namespace ExScoringMod
         private const string GunColliderPath = "tricks";
         private const int PartColliderLayer = 11;        // Player: what the local guns are on
 
+        // Cosmetics (v2.44).
+        private const string DefaultModelKey = "d";
+        private const float CustomTemplateKeepSeconds = 30f; // an unworn custom template survives this long
+        private const float TemplateSweepSeconds = 5f;
+
         // Fading discs that hide a menu button (Config.FadeBlockingPlatforms).
         private const float ButtonRefreshSeconds = 1f;   // FindObjectsOfType<GunButton> isn't cheap
         private const float BlockCheckSeconds = 0.1f;
@@ -286,7 +301,12 @@ namespace ExScoringMod
 
         // Material names the game tints with the gun colour (MpColorDump, 2026-10-23). Copies get
         // " (Instance)" appended, hence StartsWith.
-        private static readonly string[] TintedMaterialPrefixes = { "GunGlowRight", "GunGlowLeft", "GunRight", "GunLeft" };
+        // MpTint*: the coloured parts of custom guns (MpCustomModels).
+        private static readonly string[] TintedMaterialPrefixes = { "GunGlowRight", "GunGlowLeft", "GunRight", "GunLeft", "MpTint" };
+
+        // Object-name prefixes the game colours on heads and bodies (AvatarSelector.SetCustomMaterials).
+        private static readonly string[] LeftTintObjects = { "colorleft", "glowleft" };
+        private static readonly string[] RightTintObjects = { "colorright", "glowright" };
 
         // An object carrying any of these is removed from a template entirely (gameplay visuals
         // that would show stale state once their script is gone).
@@ -512,6 +532,11 @@ namespace ExScoringMod
             public List<HeadshotRenderer> HeadshotRenderers;
             public float LastHeadshotSent = -100f;
 
+            // v2.44 cosmetics: the model key each slot should show (MpCosmetics.Slot* order) and the
+            // one the current avatar was built with. A difference rebuilds the avatar.
+            public readonly string[] WantedKeys = new string[MpCosmetics.SlotCount];
+            public readonly string[] BuiltKeys = new string[MpCosmetics.SlotCount];
+
             /// <summary>Forgets what was read, so the next sample only sets a new baseline.</summary>
             public void ResetShots()
             {
@@ -603,6 +628,33 @@ namespace ExScoringMod
         private static int selfHeadshotsSent;
         private static float lastSelfHeadshotSent = -100f;
 
+        // Cosmetics (v2.44): templates per slot and model key (under templateHolder), and the custom
+        // models waiting to be loaded (one per frame).
+        private class SlotTemplate
+        {
+            public GameObject Template;
+            /// <summary>Custom only: the meshes, materials and textures made for it, destroyed with it.</summary>
+            public List<UnityEngine.Object> Owned;
+            public string PackageId;
+            public float LastUsed;
+        }
+
+        private class PendingLoad
+        {
+            public int Slot;
+            public string FullKey;
+            public string PackageId;
+            public string Name;
+            public MpModelConfig Config;
+        }
+
+        private static readonly Dictionary<string, SlotTemplate> slotTemplates = new Dictionary<string, SlotTemplate>();
+        private static readonly HashSet<string> failedTemplates = new HashSet<string>();
+        private static readonly List<PendingLoad> pendingLoads = new List<PendingLoad>();
+        private static readonly HashSet<string> pendingKeys = new HashSet<string>();
+        private static float nextTemplateSweep;
+        private static int customLoads, customLoadFailures;
+
         // ── Per frame ──
 
         /// <summary>Once per frame from ExScoring.OnUpdate, after MpSession.Tick.</summary>
@@ -622,6 +674,9 @@ namespace ExScoringMod
                 MpSession.OnPoseRateChanged += _ => nextPoseAtMs = 0;
                 MpSession.OnHeadshot += HandleHeadshot;
             }
+
+            // v2.44: finished downloads, packaging and uploads report back here, even outside a lobby.
+            MpAssets.Tick();
 
             if (!MpSession.InLobby)
             {
@@ -648,7 +703,10 @@ namespace ExScoringMod
                 return;
             }
 
+            MpCosmetics.Tick(InSongScene());
             RemoveRemotesNotInLobby();
+            ProcessPendingLoad();
+            SweepTemplates();
             CheckDisc();
             UpdateLocalSpin();
             SendPoseIfDue();
@@ -1132,13 +1190,28 @@ namespace ExScoringMod
                     continue;
                 }
 
-                if (remote.Root == null && !BuildAvatar(remote))
+                if (!EnsureTemplates())
                 {
                     ReadShotsUpTo(remote, renderTime, false); // keep the baselines while there's nothing to draw
                     continue;
                 }
 
                 MpPlayerState player = lobby != null ? lobby.FindPlayer(remote.UserId) : null;
+
+                // v2.44: which models this player wears; a change rebuilds the avatar.
+                ResolveCosmetics(remote, player);
+                if (remote.Root != null && !KeysMatch(remote))
+                {
+                    Log($"{remote.UserId}: models changed ({KeysDump(remote.BuiltKeys)} -> {KeysDump(remote.WantedKeys)}), rebuilding the avatar");
+                    DestroyAvatar(remote);
+                }
+
+                if (remote.Root == null && !BuildAvatar(remote))
+                {
+                    ReadShotsUpTo(remote, renderTime, false); // keep the baselines while there's nothing to draw
+                    continue;
+                }
+
                 int seat = player != null ? player.seat : 0;
                 remote.Root.transform.position = LayoutOffset(seat, mySeat);
                 remote.Root.transform.rotation = Quaternion.identity;
@@ -1944,12 +2017,13 @@ namespace ExScoringMod
                 root.transform.SetParent(avatarHolder.transform, false);
                 remote.Root = root;
 
-                remote.Head = CopyPart(tplHead, root, "Head");
-                remote.Body = CopyPart(tplBody, root, "Body");
+                // v2.44: each slot from the template its key names, or the default.
+                remote.Head = CopyPart(TemplateFor(remote, MpCosmetics.SlotHead, tplHead), root, "Head");
+                remote.Body = CopyPart(TemplateFor(remote, MpCosmetics.SlotBody, tplBody), root, "Body");
                 remote.LHand = CopyPart(tplHandL, root, "HandL");
                 remote.RHand = CopyPart(tplHandR, root, "HandR");
-                remote.LGun = CopyPart(tplGunL, root, "GunL");
-                remote.RGun = CopyPart(tplGunR, root, "GunR");
+                remote.LGun = CopyPart(TemplateFor(remote, MpCosmetics.SlotLGun, tplGunL), root, "GunL");
+                remote.RGun = CopyPart(TemplateFor(remote, MpCosmetics.SlotRGun, tplGunR), root, "GunR");
                 remote.LFire = remote.LGun.Find(FirepointName);
                 remote.RFire = remote.RGun.Find(FirepointName);
                 remote.Hands[0] = MakeHandRig(remote.LHand);
@@ -1970,9 +2044,11 @@ namespace ExScoringMod
 
                 CollectGunMaterials(remote.LGun, remote.TintLeft, remote.OwnedMaterials);
                 CollectGunMaterials(remote.RGun, remote.TintRight, remote.OwnedMaterials);
+                CollectAvatarTints(remote.Head, remote);
+                CollectAvatarTints(remote.Body, remote);
                 remote.AppliedColorKey = null;
 
-                Log($"avatar built for {remote.UserId} ({remote.TintLeft.Count}+{remote.TintRight.Count} tinted materials)");
+                Log($"avatar built for {remote.UserId} ({remote.TintLeft.Count}+{remote.TintRight.Count} tinted materials, models {KeysDump(remote.BuiltKeys)})");
                 return true;
             }
             catch (Exception ex)
@@ -2009,6 +2085,42 @@ namespace ExScoringMod
                     if (IsTintedMaterial(mat.name)) tinted.Add(mat);
                 }
             }
+        }
+
+        /// <summary>
+        /// Heads and bodies (v2.44): the parts the game colours by object name (colorleft/glowleft,
+        /// colorright/glowright) get this avatar's own material copies, coloured per side.
+        /// </summary>
+        private static void CollectAvatarTints(Transform part, Remote remote)
+        {
+            if (part == null) return;
+            var renderers = part.GetComponentsInChildren<Renderer>(true);
+            for (int i = 0; i < renderers.Length; i++)
+            {
+                Renderer renderer = renderers[i];
+                if (renderer == null) continue;
+                string name = renderer.gameObject.name;
+                List<Material> tint = StartsWithAny(name, LeftTintObjects) ? remote.TintLeft : (StartsWithAny(name, RightTintObjects) ? remote.TintRight : null);
+                if (tint == null) continue;
+                var mats = renderer.materials; // this renderer's own copies
+                for (int j = 0; j < mats.Length; j++)
+                {
+                    Material mat = mats[j];
+                    if (mat == null) continue;
+                    remote.OwnedMaterials.Add(mat);
+                    if (mat.HasProperty(ColorProperty)) tint.Add(mat);
+                }
+            }
+        }
+
+        private static bool StartsWithAny(string name, string[] prefixes)
+        {
+            if (name == null) return false;
+            foreach (string prefix in prefixes)
+            {
+                if (name.StartsWith(prefix, StringComparison.Ordinal)) return true;
+            }
+            return false;
         }
 
         private static bool IsTintedMaterial(string name)
@@ -2057,6 +2169,7 @@ namespace ExScoringMod
             remote.BodyInit = false;
             remote.HeadshotStart = -1f;
             remote.HeadshotRenderers = null; // destroyed with the root
+            for (int s = 0; s < remote.BuiltKeys.Length; s++) remote.BuiltKeys[s] = null;
         }
 
         private static void DestroyAll(string reason)
@@ -2775,8 +2888,8 @@ namespace ExScoringMod
 
             // Where shots leave from: the local gun's firepoint (GunX/tricks/firepoint), placed
             // relative to the same anchor as the model.
-            AddFirepointMarker(tplGunL, localGunL, localGunPoseL);
-            AddFirepointMarker(tplGunR, localGunR, localGunPoseR);
+            AddFirepointMarker(tplGunL, localGunL, ModelFirepoint(gunModelL.GetComponent<GunModel>(), localGunL), localGunPoseL);
+            AddFirepointMarker(tplGunR, localGunR, ModelFirepoint(gunModelR.GetComponent<GunModel>(), localGunR), localGunPoseR);
 
             // The slide's movement in the game's fire animation, replayed on remote shots.
             SampleGunSlide(localGunR);
@@ -3028,10 +3141,13 @@ namespace ExScoringMod
 
         /// <summary>
         /// An empty FirepointName child of a gun template, placed relative to anchor (tricks/mesh)
-        /// exactly as the local gun's firepoint is (measured 2026-10-29: local (0, -0.13, 0.74),
-        /// no rotation, 1.55 cm from the mesh origin). Without a firepoint it sits on the root.
+        /// as the local gun's firepoint would be with that model (measured 2026-10-29 for Gun1: local
+        /// (0, -0.13, 0.74), no rotation, 1.55 cm from the mesh origin). Gun.UpdateGunModel (Ghidra,
+        /// 2026-11-03) only moves the firepoint's position, to the model's firepointPosition (the
+        /// custom model: firepointDefaultPosition), so the rotation stays the firepoint's own.
+        /// Without a firepoint it sits on the root.
         /// </summary>
-        private static void AddFirepointMarker(GameObject template, Gun gun, Transform anchor)
+        private static void AddFirepointMarker(GameObject template, Gun gun, Transform position, Transform anchor)
         {
             if (template == null) return;
             GameObject marker = new GameObject(FirepointName);
@@ -3043,8 +3159,17 @@ namespace ExScoringMod
                 Log($"{template.name}: no firepoint, shots leave from the gun's origin");
                 return;
             }
-            marker.transform.localPosition = anchor.InverseTransformPoint(firepoint.position);
+            if (position == null) position = firepoint;
+            marker.transform.localPosition = anchor.InverseTransformPoint(position.position);
             marker.transform.localRotation = Quaternion.Inverse(anchor.rotation) * firepoint.rotation;
+        }
+
+        /// <summary>Where the firepoint goes with this model: its firepointPosition, else the gun's current firepoint.</summary>
+        private static Transform ModelFirepoint(GunModel model, Gun gun)
+        {
+            Transform position = model != null ? model.firepointPosition : null;
+            if (position != null) return position;
+            return gun != null ? gun.firepoint : null;
         }
 
         /// <summary>Copies the gun's solid tricks collider into a gun template and makes its root kinematic.</summary>
@@ -3069,8 +3194,10 @@ namespace ExScoringMod
         /// holding a convex MeshCollider of its mesh when the mesh is readable, otherwise a BoxCollider
         /// of that mesh's own bounds (always available). The template root gets a kinematic Rigidbody
         /// so the copies can be moved every frame. Returns how many colliders were added.
+        /// boxesOnly (custom models, v2.44): always the box, since a convex hull of a big mesh made at
+        /// runtime (they are all readable) costs a hitch for little gain.
         /// </summary>
-        private static int AddMeshColliders(GameObject template)
+        private static int AddMeshColliders(GameObject template, bool boxesOnly = false)
         {
             if (template == null) return 0;
             Transform root = template.transform;
@@ -3090,7 +3217,7 @@ namespace ExScoringMod
                 go.layer = PartColliderLayer;
 
                 string kind = "box";
-                if (IsReadable(mesh))
+                if (!boxesOnly && IsReadable(mesh))
                 {
                     try
                     {
@@ -3115,7 +3242,7 @@ namespace ExScoringMod
                 }
 
                 Vector3 size = Vector3.Scale(mesh.bounds.size, renderer.transform.lossyScale);
-                Log($"{template.name} collider: {renderer.name} ({mesh.name}) {kind}, {size.x:F2} x {size.y:F2} x {size.z:F2} m");
+                if (!boxesOnly) Log($"{template.name} collider: {renderer.name} ({mesh.name}) {kind}, {size.x:F2} x {size.y:F2} x {size.z:F2} m");
                 added++;
             }
 
@@ -3298,6 +3425,15 @@ namespace ExScoringMod
 
         private static void DestroyTemplates()
         {
+            // v2.44: avatars may share a custom template's meshes and materials, so they go first, and
+            // the built-in and custom templates go with the holder.
+            foreach (Remote remote in remotes.Values) DestroyAvatar(remote);
+            foreach (SlotTemplate entry in slotTemplates.Values) MpCustomModels.DestroyOwned(entry.Owned);
+            slotTemplates.Clear();
+            failedTemplates.Clear();
+            pendingLoads.Clear();
+            pendingKeys.Clear();
+
             templatesReady = false;
             if (templateHolder != null) UnityEngine.Object.Destroy(templateHolder);
             templateHolder = null;
@@ -3335,6 +3471,370 @@ namespace ExScoringMod
                 Mathf.Abs(b.z) > 0.000001f ? a.z / b.z : 1f);
         }
 
+        // ── Cosmetics (v2.44) ──
+
+        private static string TemplateKey(int slot, string modelKey)
+        {
+            return slot + "|" + modelKey;
+        }
+
+        /// <summary>Fills remote.WantedKeys from the player's cosmetics, starting whatever downloads and loads they need.</summary>
+        private static void ResolveCosmetics(Remote remote, MpPlayerState player)
+        {
+            MpCosmeticsState cosmetics = player != null ? player.cosmetics : null;
+            for (int s = 0; s < MpCosmetics.SlotCount; s++)
+            {
+                string key;
+                try
+                {
+                    key = ResolveSlot(s, cosmetics != null ? cosmetics.Get(s) : null);
+                }
+                catch (Exception ex)
+                {
+                    Log($"{remote.UserId}: resolving slot {s} failed ({ex.Message}), showing the default");
+                    key = DefaultModelKey;
+                }
+                remote.WantedKeys[s] = key;
+            }
+        }
+
+        /// <summary>
+        /// The model key one slot shows right now: a built-in (built on the spot), a custom model that
+        /// is loaded, or the default while it isn't (or can't be).
+        /// </summary>
+        private static string ResolveSlot(int s, MpCosmeticSlot slot)
+        {
+            if (slot == null || slot.kind == null || slot.kind == "default") return DefaultModelKey;
+            float now = Time.unscaledTime;
+
+            if (slot.kind == "builtin")
+            {
+                int index = slot.index ?? -1;
+                if (index <= 0 || index > MpCosmetics.MaxBuiltinIndex) return DefaultModelKey; // 0 is the default model
+                string key = "b" + index;
+                string full = TemplateKey(s, key);
+                if (slotTemplates.TryGetValue(full, out SlotTemplate existing))
+                {
+                    existing.LastUsed = now;
+                    return key;
+                }
+                if (failedTemplates.Contains(full)) return DefaultModelKey;
+
+                GameObject template = null;
+                try
+                {
+                    template = BuildBuiltinTemplate(s, index);
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Log($"[MpPresence] building built-in model {index} for slot {s} failed: {ex}");
+                }
+                if (template == null)
+                {
+                    failedTemplates.Add(full);
+                    Log($"built-in model {index} for slot {s} unavailable, showing the default");
+                    return DefaultModelKey;
+                }
+                slotTemplates[full] = new SlotTemplate { Template = template, LastUsed = now };
+                Log($"built-in template {template.name} built");
+                return key;
+            }
+
+            if (slot.kind == "custom")
+            {
+                if (!Config.ShowCustomAvatars) return DefaultModelKey;
+                string package = slot.package;
+                if (package == null || package.Length != 64) return DefaultModelKey;
+                string key = "c" + package + "|" + ConfigKey(slot.config);
+                string full = TemplateKey(s, key);
+                if (slotTemplates.TryGetValue(full, out SlotTemplate existing))
+                {
+                    existing.LastUsed = now;
+                    return key;
+                }
+                if (failedTemplates.Contains(full)) return DefaultModelKey;
+
+                MpAssets.PackageInfo info = MpAssets.Request(package);
+                if (info == null || info.Status != MpAssets.PackageStatus.Ready) return DefaultModelKey;
+                if (pendingKeys.Add(full))
+                {
+                    pendingLoads.Add(new PendingLoad { Slot = s, FullKey = full, PackageId = package, Name = slot.name, Config = slot.config });
+                }
+                return DefaultModelKey;
+            }
+
+            return DefaultModelKey; // an unknown kind from a newer server
+        }
+
+        private static bool KeysMatch(Remote remote)
+        {
+            for (int s = 0; s < MpCosmetics.SlotCount; s++)
+            {
+                if ((remote.WantedKeys[s] ?? DefaultModelKey) != (remote.BuiltKeys[s] ?? DefaultModelKey)) return false;
+            }
+            return true;
+        }
+
+        /// <summary>The template a slot's wanted key names (recording it as built), or the default.</summary>
+        private static GameObject TemplateFor(Remote remote, int s, GameObject fallback)
+        {
+            string key = remote.WantedKeys[s] ?? DefaultModelKey;
+            if (key != DefaultModelKey && slotTemplates.TryGetValue(TemplateKey(s, key), out SlotTemplate entry) && entry.Template != null)
+            {
+                remote.BuiltKeys[s] = key;
+                return entry.Template;
+            }
+            remote.BuiltKeys[s] = DefaultModelKey;
+            return fallback;
+        }
+
+        /// <summary>A built-in head or body (avatars[index]) or gun (gunModels / gunModelsExtras), copied from the local rig.</summary>
+        private static GameObject BuildBuiltinTemplate(int s, int index)
+        {
+            if (s == MpCosmetics.SlotHead || s == MpCosmetics.SlotBody)
+            {
+                AvatarSelector selector = AvatarSelector.I;
+                if (selector == null || selector.avatars == null || index >= selector.avatars.Count) return null;
+                GameObject source = s == MpCosmetics.SlotHead ? selector.avatars[index].head : selector.avatars[index].body;
+                if (source == null || source.transform.parent == null) return null;
+
+                GameObject template;
+                if (s == MpCosmetics.SlotHead)
+                {
+                    // As the default: 3rdPersonHead with only this mask kept.
+                    template = MakeTemplate("TplHead b" + index, localHead, source.transform.parent);
+                    Transform headCopy = template.transform.GetChild(0);
+                    for (int i = headCopy.childCount - 1; i >= 0; i--)
+                    {
+                        Transform child = headCopy.GetChild(i);
+                        if (child.name == source.name) child.gameObject.SetActive(true);
+                        else GameObject.DestroyImmediate(child.gameObject);
+                    }
+                }
+                else
+                {
+                    template = MakeTemplate("TplBody b" + index, source.transform.parent, source.transform);
+                }
+                SetLayerRecursive(template, AvatarLayer);
+                AddMeshColliders(template);
+                return template;
+            }
+
+            int hand = s == MpCosmetics.SlotLGun ? 0 : 1;
+            Gun gun = hand == 0 ? localGunL : localGunR;
+            if (gun == null) return null;
+            GunModel model = GunModelAt(gun, index);
+            if (model == null) return null;
+
+            Transform anchor = hand == 0 ? GunPoseTransform(gun, ref localGunPoseL) : GunPoseTransform(gun, ref localGunPoseR);
+            if (anchor == null) return null;
+            GameObject gunTemplate = MakeTemplate($"TplGun{HandName(hand)} b{index}", anchor, model.transform);
+            OwnMaterials(gunTemplate);
+            AddFirepointMarker(gunTemplate, gun, ModelFirepoint(model, gun), anchor);
+            AddGunCollider(gunTemplate, gun, anchor);
+            return gunTemplate;
+        }
+
+        /// <summary>Built-in gun index (MpCosmetics): 0-31 gunModels, 32-63 gunModelsExtras.</summary>
+        private static GunModel GunModelAt(Gun gun, int index)
+        {
+            if (index < MpCosmetics.GunExtrasBase)
+            {
+                var models = gun.gunModels;
+                return models != null && index < models.Length ? models[index] : null;
+            }
+            var extras = gun.gunModelsExtras;
+            int extra = index - MpCosmetics.GunExtrasBase;
+            return extras != null && extra < extras.Length ? extras[extra] : null;
+        }
+
+        /// <summary>
+        /// One custom model loaded per frame, outside songs (MpCustomModels does the loading). A model
+        /// that can't be shown stays the default for this session.
+        /// </summary>
+        private static void ProcessPendingLoad()
+        {
+            if (pendingLoads.Count == 0 || !templatesReady) return;
+            PendingLoad load = pendingLoads[0];
+            pendingLoads.RemoveAt(0);
+            pendingKeys.Remove(load.FullKey);
+            if (slotTemplates.ContainsKey(load.FullKey) || failedTemplates.Contains(load.FullKey)) return;
+
+            MpAssets.PackageInfo info = MpAssets.Request(load.PackageId);
+            if (info == null || info.Status != MpAssets.PackageStatus.Ready) return;
+
+            float started = Time.realtimeSinceStartup;
+            List<UnityEngine.Object> owned = new List<UnityEngine.Object>();
+            GameObject template = null;
+            string error;
+            try
+            {
+                template = BuildCustomTemplate(load, info.ObjPath, owned, out error);
+            }
+            catch (Exception ex)
+            {
+                error = ex.Message;
+                MelonLogger.Log($"[MpPresence] loading custom model {load.Name} failed: {ex}");
+            }
+
+            if (template == null)
+            {
+                failedTemplates.Add(load.FullKey);
+                customLoadFailures++;
+                MpCustomModels.DestroyOwned(owned);
+                MelonLogger.Log($"[MpPresence] custom model \"{load.Name}\" ({MpAssets.Short(load.PackageId)}) can't be shown: {error}");
+                return;
+            }
+
+            slotTemplates[load.FullKey] = new SlotTemplate { Template = template, Owned = owned, PackageId = load.PackageId, LastUsed = Time.unscaledTime };
+            customLoads++;
+            MpAssets.Touch(load.PackageId);
+            Log($"custom model \"{load.Name}\" ({MpAssets.Short(load.PackageId)}) loaded for slot {load.Slot} in {(Time.realtimeSinceStartup - started) * 1000f:F0} ms, {owned.Count} owned object(s)");
+        }
+
+        /// <summary>
+        /// A custom model's template: a root standing where the slot's anchor is (as MakeTemplate's),
+        /// with a frame placed where the game puts the player's own custom model (AvatarSelector's
+        /// customHead / customBody, the gun's customModel), at world scale 1 (mirrored for the left
+        /// gun, as CustomModelLoader.UpdateCustomGun does), holding the loaded parts.
+        /// </summary>
+        private static GameObject BuildCustomTemplate(PendingLoad load, string objPath, List<UnityEngine.Object> owned, out string error)
+        {
+            error = null;
+            int s = load.Slot;
+            Transform anchor, frameSource;
+            Vector3 worldScale = Vector3.one;
+            Gun gun = null;
+
+            if (s == MpCosmetics.SlotHead || s == MpCosmetics.SlotBody)
+            {
+                AvatarSelector selector = AvatarSelector.I;
+                GameObject slotObject = selector == null ? null : (s == MpCosmetics.SlotHead ? selector.customHead : selector.customBody);
+                if (slotObject == null || selector.avatars == null || selector.avatars.Count == 0 || selector.avatars[0].body == null)
+                {
+                    error = "the game's avatar isn't ready";
+                    return null;
+                }
+                frameSource = slotObject.transform;
+                anchor = s == MpCosmetics.SlotHead ? localHead : selector.avatars[0].body.transform.parent; // CenterEyeAnchor / 3rdPersonBody
+            }
+            else
+            {
+                int hand = s == MpCosmetics.SlotLGun ? 0 : 1;
+                gun = hand == 0 ? localGunL : localGunR;
+                if (gun == null || gun.customModel == null)
+                {
+                    error = "the game's gun isn't ready";
+                    return null;
+                }
+                frameSource = gun.customModel.transform;
+                anchor = hand == 0 ? GunPoseTransform(gun, ref localGunPoseL) : GunPoseTransform(gun, ref localGunPoseR);
+                if (hand == 0) worldScale = new Vector3(-1f, 1f, 1f);
+            }
+            if (anchor == null || frameSource == null)
+            {
+                error = "no anchor for this slot";
+                return null;
+            }
+
+            GameObject root = new GameObject($"TplCustom {s} {MpAssets.Short(load.PackageId)}");
+            root.transform.SetParent(templateHolder.transform, false);
+            root.transform.localScale = anchor.lossyScale;
+
+            GameObject frame = new GameObject("custom");
+            frame.transform.SetParent(root.transform, false);
+            frame.transform.localPosition = anchor.InverseTransformPoint(frameSource.position);
+            frame.transform.localRotation = Quaternion.Inverse(anchor.rotation) * frameSource.rotation;
+            frame.transform.localScale = Divide(worldScale, anchor.lossyScale);
+
+            if (!MpCustomModels.Load(s, objPath, load.Config, frame.transform, gun, owned, out error))
+            {
+                UnityEngine.Object.Destroy(root);
+                return null;
+            }
+
+            if (gun == null)
+            {
+                SetLayerRecursive(root, AvatarLayer);
+                AddMeshColliders(root, true);
+            }
+            else
+            {
+                AddFirepointMarker(root, gun, gun.firepointDefaultPosition, anchor);
+                AddGunCollider(root, gun, anchor);
+            }
+            return root;
+        }
+
+        /// <summary>Every TemplateSweepSeconds: destroys custom templates no avatar has worn for CustomTemplateKeepSeconds.</summary>
+        private static void SweepTemplates()
+        {
+            if (Time.unscaledTime < nextTemplateSweep) return;
+            nextTemplateSweep = Time.unscaledTime + TemplateSweepSeconds;
+            if (slotTemplates.Count == 0) return;
+
+            HashSet<string> worn = new HashSet<string>();
+            foreach (Remote remote in remotes.Values)
+            {
+                for (int s = 0; s < MpCosmetics.SlotCount; s++)
+                {
+                    if (remote.BuiltKeys[s] != null) worn.Add(TemplateKey(s, remote.BuiltKeys[s]));
+                    if (remote.WantedKeys[s] != null) worn.Add(TemplateKey(s, remote.WantedKeys[s]));
+                }
+            }
+
+            List<string> drop = null;
+            float now = Time.unscaledTime;
+            foreach (KeyValuePair<string, SlotTemplate> entry in slotTemplates)
+            {
+                if (entry.Value.Owned == null) continue; // built-ins stay (cheap, shared meshes)
+                if (worn.Contains(entry.Key) || now - entry.Value.LastUsed < CustomTemplateKeepSeconds) continue;
+                if (drop == null) drop = new List<string>();
+                drop.Add(entry.Key);
+            }
+            if (drop == null) return;
+
+            foreach (string key in drop)
+            {
+                SlotTemplate entry = slotTemplates[key];
+                slotTemplates.Remove(key);
+                if (entry.Template != null) UnityEngine.Object.Destroy(entry.Template);
+                MpCustomModels.DestroyOwned(entry.Owned);
+                Log($"custom template {key} unused, destroyed");
+            }
+        }
+
+        /// <summary>A short, stable key for a custom slot's config (part of the template key: the config changes the mesh).</summary>
+        private static string ConfigKey(MpModelConfig c)
+        {
+            if (c == null) return "-";
+            return $"{VecKey(c.scaleFactor)};{VecKey(c.positionOffset)};{VecKey(c.orientationOffset)};{FloatKey(c.shading)};{FloatKey(c.reflection)};{(c.recalculateNormals.HasValue ? (c.recalculateNormals.Value ? "1" : "0") : "-")}";
+        }
+
+        private static string VecKey(float[] v)
+        {
+            if (v == null || v.Length != 3) return "-";
+            return FloatKey(v[0]) + "," + FloatKey(v[1]) + "," + FloatKey(v[2]);
+        }
+
+        private static string FloatKey(float? v)
+        {
+            return v.HasValue ? v.Value.ToString("0.####", System.Globalization.CultureInfo.InvariantCulture) : "-";
+        }
+
+        /// <summary>For logs and the dump: "head,body,lGun,rGun" model keys, custom ones shortened.</summary>
+        private static string KeysDump(string[] keys)
+        {
+            StringBuilder sb = new StringBuilder();
+            for (int s = 0; s < keys.Length; s++)
+            {
+                if (s > 0) sb.Append(',');
+                string key = keys[s] ?? DefaultModelKey;
+                sb.Append(key.StartsWith("c", StringComparison.Ordinal) && key.Length > 13 ? key.Substring(0, 13) : key);
+            }
+            return sb.ToString();
+        }
+
         // ── Debug ──
 
         /// <summary>Logs the presence state through MelonLogger.</summary>
@@ -3348,6 +3848,9 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] disc dim: setting={Config.DimUnreadyPlatforms} phase={MpSession.Lobby?.phase ?? "-"} shader={(shadeShader != null ? "found" : (shadeShaderMissing ? "missing" : "not looked up"))}");
             sb.AppendLine($"[MpPresence] names: show={Config.ShowPlayerNames} spectatorCam={(spectatorCam != null ? "found" : "none")} split={splitNames}");
             sb.AppendLine($"[MpPresence] colliders: gunL={gunCollidersL} gunR={gunCollidersR} head={headColliders} body={bodyColliders}");
+            int customTemplates = 0;
+            foreach (SlotTemplate entry in slotTemplates.Values) if (entry.Owned != null) customTemplates++;
+            sb.AppendLine($"[MpPresence] cosmetics: connection={MpSession.CosmeticsEnabled} showCustom={Config.ShowCustomAvatars} templates={slotTemplates.Count} (custom {customTemplates}) failed={failedTemplates.Count} pendingLoads={pendingLoads.Count} loaded={customLoads} loadFailures={customLoadFailures}");
             sb.AppendLine($"[MpPresence] headshots: connection={MpSession.HeadshotEnabled} effects={Config.HeadshotEffects} sounds={Config.HeadshotSounds} sent={headshotsSent} (own head {selfHeadshotsSent}) received={headshotsReceived} postproc={(IsAlive(postprocController) ? "found" : "not looked up / none")}");
             sb.AppendLine($"[MpPresence] sending: {MpSession.PoseRateHz} Hz ({(MpSession.PoseRateEnabled ? "server" : "default")}), my shots L={localShots[0]} R={localShots[1]}, pull L={PullJson(localGunL)} R={PullJson(localGunR)}");
             bool knuckles = UsingKnuckles();
@@ -3360,7 +3863,7 @@ namespace ExScoringMod
                 long newest = remote.Samples.Count > 0 ? remote.Samples[remote.Samples.Count - 1].T : 0;
                 sb.AppendLine($"[MpPresence]   {remote.UserId} \"{player?.nickname}\" seat={player?.seat} present={remote.Present} samples={remote.Samples.Count} " +
                               $"newest={(newest > 0 ? (newest - renderTime) + " ms ahead of render" : "-")} " +
-                              $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} hand L={HandDump(remote, 0)} R={HandDump(remote, 1)} slide L={remote.Slide[0] != null} R={remote.Slide[1] != null} headshotFx={(remote.HeadshotStart >= 0f ? "on" : "off")} discFade={DiscFadeDump(remote)} ready={player?.ready} connected={player?.connected} discShade={DiscShadeDump(remote)} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
+                              $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} hand L={HandDump(remote, 0)} R={HandDump(remote, 1)} slide L={remote.Slide[0] != null} R={remote.Slide[1] != null} headshotFx={(remote.HeadshotStart >= 0f ? "on" : "off")} discFade={DiscFadeDump(remote)} ready={player?.ready} connected={player?.connected} discShade={DiscShadeDump(remote)} models={KeysDump(remote.BuiltKeys)} wanted={KeysDump(remote.WantedKeys)} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
             }
             foreach (string line in sb.ToString().TrimEnd().Split('\n')) MelonLogger.Log(line.TrimEnd('\r'));
         }

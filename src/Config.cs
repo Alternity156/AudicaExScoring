@@ -118,6 +118,7 @@ namespace ExScoringMod
         public static bool EnableOnlinePlay;
         public static bool ShowOtherPlayers;
         public static bool ShowPlayerNames;
+        public static bool ShowCustomAvatars;
         public static bool FadeBlockingPlatforms;
         public static bool DimUnreadyPlatforms;
         public static bool AutoDownloadSongs;
@@ -237,6 +238,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(EnableOnlinePlay), false, "Allows connecting to online play lobbies. Nothing connects while this is off");
             MelonPrefs.RegisterBool(Category, nameof(ShowOtherPlayers), true, "Shows the other players in your lobby (head, body, hands and guns) in the menus. Your own pose is still shared while this is off");
             MelonPrefs.RegisterBool(Category, nameof(ShowPlayerNames), true, "Shows each player's name above their head (only while Show Other Players is on)");
+            MelonPrefs.RegisterBool(Category, nameof(ShowCustomAvatars), true, "Shows the other players' custom heads, bodies and guns, downloading them when needed. Off = those show as the default models. Yours are still shared");
             MelonPrefs.RegisterBool(Category, nameof(FadeBlockingPlatforms), true, "Makes another player's platform see-through while it hides a menu button from your view. You can shoot through a faded platform");
             MelonPrefs.RegisterBool(Category, nameof(DimUnreadyPlatforms), true, "Makes another player's platform darker while they aren't ready in the lobby");
             MelonPrefs.RegisterBool(Category, nameof(AutoDownloadSongs), true, "In an online lobby, automatically downloads the selected song and the players' suggestions you don't have, when they're on Maudica");
@@ -335,6 +337,7 @@ namespace ExScoringMod
             EnableOnlinePlay = MelonPrefs.GetBool(Category, nameof(EnableOnlinePlay));
             ShowOtherPlayers = MelonPrefs.GetBool(Category, nameof(ShowOtherPlayers));
             ShowPlayerNames = MelonPrefs.GetBool(Category, nameof(ShowPlayerNames));
+            ShowCustomAvatars = MelonPrefs.GetBool(Category, nameof(ShowCustomAvatars));
             FadeBlockingPlatforms = MelonPrefs.GetBool(Category, nameof(FadeBlockingPlatforms));
             DimUnreadyPlatforms = MelonPrefs.GetBool(Category, nameof(DimUnreadyPlatforms));
             AutoDownloadSongs = MelonPrefs.GetBool(Category, nameof(AutoDownloadSongs));
@@ -371,6 +374,13 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(ShowPlayerNames), value);
             ShowPlayerNames = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateShowCustomAvatars(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(ShowCustomAvatars), value);
+            ShowCustomAvatars = value;
             MelonPrefs.SaveConfig();
         }
 

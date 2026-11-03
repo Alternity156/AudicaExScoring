@@ -69,6 +69,57 @@ namespace ExScoringMod
         public bool presence;
         /// <summary>Null until the player sends setGunColors (v2.39).</summary>
         public MpGunColors gunColors;
+        /// <summary>
+        /// Head, body and gun choices (v2.44). Null until the player's first accepted setCosmetics,
+        /// and always null for connections without "cosmetics". Null means defaults.
+        /// </summary>
+        public MpCosmeticsState cosmetics;
+    }
+
+    /// <summary>PlayerState.cosmetics (v2.44): four independent slots.</summary>
+    public class MpCosmeticsState
+    {
+        public MpCosmeticSlot head;
+        public MpCosmeticSlot body;
+        public MpCosmeticSlot lGun;
+        public MpCosmeticSlot rGun;
+
+        /// <summary>By MpCosmetics.Slot* index: 0 head, 1 body, 2 left gun, 3 right gun.</summary>
+        public MpCosmeticSlot Get(int slot)
+        {
+            switch (slot)
+            {
+                case 0: return head;
+                case 1: return body;
+                case 2: return lGun;
+                case 3: return rGun;
+                default: return null;
+            }
+        }
+    }
+
+    /// <summary>
+    /// One cosmetics slot (v2.44): kind "default", "builtin" (index 0..63) or "custom" (a
+    /// package id, a display name and the game's model config, normalised by the server).
+    /// </summary>
+    public class MpCosmeticSlot
+    {
+        public string kind;
+        public int? index;
+        public string package;
+        public string name;
+        public MpModelConfig config;
+    }
+
+    /// <summary>CustomModelLoader.ObjConfig as sent inline with a custom slot (v2.44).</summary>
+    public class MpModelConfig
+    {
+        public float[] scaleFactor;
+        public float[] positionOffset;
+        public float[] orientationOffset;
+        public float? shading;
+        public float? reflection;
+        public bool? recalculateNormals;
     }
 
     /// <summary>PlayerState.gunColors (v2.39): 0..1 floats, [r, g, b].</summary>
@@ -145,6 +196,10 @@ namespace ExScoringMod
         public string[] features;
         /// <summary>The pose rate (v2.40, 19.13.3). Only present when features contains "poseRate".</summary>
         public int? poseRateHz;
+        /// <summary>v2.44: the server stores custom model packages. Only with "cosmetics".</summary>
+        public bool? assetsEnabled;
+        /// <summary>v2.44: the upload credential for the asset routes. Secret: never logged.</summary>
+        public string assetToken;
     }
 
     /// <summary>presenceConfig (v2.40, 19.13.3): an admin changed the pose rate.</summary>
@@ -307,6 +362,8 @@ namespace ExScoringMod
         public string message;
         /// <summary>Only on NOT_ALL_READY: who isn't ready.</summary>
         public string[] userIds;
+        /// <summary>v2.44, only on UNKNOWN_PACKAGE / PACKAGE_BLOCKED: the package id refused.</summary>
+        public string package;
 
         public override string ToString()
         {
