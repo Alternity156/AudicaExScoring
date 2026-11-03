@@ -145,7 +145,7 @@ namespace ExScoringMod
         private static void SetHistoryItem(SongInfoHistoryItem item, RecalculatedRun run, int slot)
         {
             if (item.date != null)
-                item.date.text = DateTimeOffset.FromUnixTimeSeconds(run.unixTimestamp).LocalDateTime.ToString("MMM d, yyyy");
+                item.date.text = DateTimeOffset.FromUnixTimeSeconds(run.unixTimestamp).LocalDateTime.ToString("MMM d, yyyy HH:mm");
 
             if (item.difficulty != null)
                 item.difficulty.text = run.difficulty;
