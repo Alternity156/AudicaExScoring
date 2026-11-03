@@ -319,14 +319,16 @@ namespace ExScoringMod
                 return;
             }
 
-            if (Config.AutoDownloadSongs)
+            // Never for a song the player deleted this session (DeleteButton.cs).
+            if (Config.AutoDownloadSongs && !IsDeletedThisSession(songId))
             {
                 MelonCoroutines.Start(DownloadForLobby(selected));
                 return;
             }
 
-            // Auto-download off: "missing" when Maudica has it (it can be downloaded by hand from
-            // the Suggested Songs folder), "unavailable" when it doesn't.
+            // Auto-download off (or the song was deleted this session): "missing" when Maudica
+            // has it (it can be downloaded by hand from the Suggested Songs folder), "unavailable"
+            // when it doesn't.
             MaudicaLookup.State? lookup = MaudicaLookup.Peek(songId, out Song unused);
             if (lookup == null)
             {
@@ -341,6 +343,19 @@ namespace ExScoringMod
         public static string DownloadingSongId => downloadingSongId;
 
         /// <summary>
+        /// From ExScoring.DeleteSong: forget the cached availability so the lobby is told right
+        /// away that the song is now missing (it isn't auto-downloaded again this session).
+        /// </summary>
+        public static void OnSongDeleted(string songId)
+        {
+            if (string.IsNullOrEmpty(songId)) return;
+            if (statusSongId == songId) statusAvailableDifficulties = null;
+            failedDownloadSongIds.Remove(songId);
+            nextStatusCheckMs = 0;
+            Log($"{songId} was deleted: no auto-download for it this session");
+        }
+
+        /// <summary>
         /// True while the lobby's selected song is missing and auto-download will fetch (or is
         /// fetching) it: other auto-downloads wait so the selected song goes first.
         /// </summary>
@@ -353,6 +368,7 @@ namespace ExScoringMod
                 MpSongRef selected = MpSession.Lobby?.selectedSong;
                 if (selected == null || string.IsNullOrEmpty(selected.songId)) return false;
                 if (failedDownloadSongIds.Contains(selected.songId)) return false;
+                if (IsDeletedThisSession(selected.songId)) return false;
                 if (SongList.I == null || SongList.I.GetSong(selected.songId) != null) return false;
                 return MaudicaLookup.Peek(selected.songId, out Song unused) != MaudicaLookup.State.NotFound;
             }

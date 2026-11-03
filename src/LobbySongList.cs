@@ -23,7 +23,9 @@ namespace ExScoringMod
     ///
     /// Maudica lookups go through MaudicaLookup (audica_id first). With Auto-Download Missing
     /// Songs on, Tick downloads missing suggestions on its own, one at a time, in join order, and
-    /// only after the selected song (MpGameplay downloads that one). Not during songs.
+    /// only after the selected song (MpGameplay downloads that one). Not during songs, and never a
+    /// song the player deleted this session (ExScoring.IsDeletedThisSession): its row says so and
+    /// still downloads it when shot.
     /// </summary>
     internal static class LobbySongList
     {
@@ -158,6 +160,7 @@ namespace ExScoringMod
                     if (lookup.downloading) row.subLabel = $"Downloading... {Math.Max(0, lookup.percent)}%";
                     else if (MpGameplay.DownloadingSongId == song.songId) row.subLabel = "Downloading...";
                     else if (lookup.failed) row.subLabel = "Download failed - shoot to retry";
+                    else if (ExScoring.IsDeletedThisSession(song.songId)) row.subLabel = "Deleted - shoot to download again";
                     return row;
 
                 case LookupState.NotFound:
@@ -237,6 +240,23 @@ namespace ExScoringMod
             return SongList.I != null && !string.IsNullOrEmpty(songId) && SongList.I.GetSong(songId) != null;
         }
 
+        /// <summary>
+        /// From ExScoring.DeleteSong: the song is gone, so its row turns back into a downloadable
+        /// one (the Maudica lookup is kept), with no stale download state. The view itself is
+        /// rebuilt when the song list is shown again.
+        /// </summary>
+        public static void OnSongDeleted(string songId)
+        {
+            if (string.IsNullOrEmpty(songId)) return;
+            if (lookups.TryGetValue(songId, out Lookup lookup))
+            {
+                lookup.downloading = false;
+                lookup.failed = false;
+                lookup.percent = -1;
+            }
+            lastSignature = null; // rebuild on the next lobby state, even if nothing else changed
+        }
+
         // ── Maudica lookup and download ──
 
         private static Lookup EnsureLookup(MpSongRef song)
@@ -265,7 +285,8 @@ namespace ExScoringMod
         /// Once per frame from ExScoring.OnUpdate. About once a second, in a lobby with
         /// Auto-Download Missing Songs on and outside songs, starts the next missing suggestion's
         /// download: one at a time, the selected song first (MpGameplay), then suggestions in join
-        /// order. A failed download isn't retried on its own (shooting its row retries it).
+        /// order. A failed download isn't retried on its own (shooting its row retries it), and a
+        /// song deleted this session is skipped (shooting its row downloads it).
         /// </summary>
         public static void Tick()
         {
@@ -292,6 +313,7 @@ namespace ExScoringMod
                 {
                     MpSongRef song = entry.Value;
                     if (song.songId == selectedId || IsInstalled(song.songId)) continue;
+                    if (ExScoring.IsDeletedThisSession(song.songId)) continue;
 
                     Lookup lookup = EnsureLookup(song);
                     if (lookup.state != LookupState.Found || lookup.downloading || lookup.failed) continue;
@@ -324,6 +346,7 @@ namespace ExScoringMod
                     lookup.downloading = false;
                     lookup.failed = !ok;
                     DebugLog.Log($"[LobbySongList] download of {map.song_id} {(ok ? "done" : "failed")}");
+                    if (ok && IsInstalled(songId)) ExScoring.OnSongRedownloaded(songId);
                     Refresh();
                 },
                 (id, progress) =>

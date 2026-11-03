@@ -187,6 +187,36 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// Drops a deleted song from the cache (DeleteButton.cs): the entry stored under its
+        /// zipPath (the cache key is the same root-relative path ProcessSingleSong gives
+        /// zipPath), plus any other entry recording the same song ID. Returns how many entries
+        /// were removed. Call SaveIfDirty afterwards to write it to disk.
+        /// </summary>
+        public static int RemoveSong(string songID, string zipPath)
+        {
+            EnsureLoaded();
+
+            string normalizedZip = (zipPath ?? "").Replace('\\', '/');
+            List<string> keys = new List<string>();
+            foreach (var kv in entries)
+            {
+                bool samePath = normalizedZip.Length > 0 &&
+                    string.Equals(kv.Key.Replace('\\', '/'), normalizedZip, StringComparison.OrdinalIgnoreCase);
+                bool sameSong = !string.IsNullOrEmpty(songID) && kv.Value != null && kv.Value.SongID == songID;
+                if (samePath || sameSong) keys.Add(kv.Key);
+            }
+
+            foreach (string key in keys)
+            {
+                entries.Remove(key);
+                pendingEntitlementPaths.Remove(key);
+            }
+
+            if (keys.Count > 0) dirty = true;
+            return keys.Count;
+        }
+
+        /// <summary>
         /// Writes the cache to disk if anything changed since the last save. Call once at
         /// the end of a scan batch — not per file — to avoid excess disk I/O.
         /// </summary>

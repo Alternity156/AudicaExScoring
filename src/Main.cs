@@ -81,7 +81,10 @@ namespace ExScoringMod
 
         // ── Song deletion fields ──
         public static string deletedDownloadsListPath;
+        // Song IDs deleted this session (DeleteButton.cs): the lobby won't auto-download them.
         public static List<string> deletedSongs = new List<string>();
+        // Full paths of deleted song files that couldn't be deleted yet: retried on quit, then
+        // on the next launch (deletedDownloadsListPath).
         public static List<string> deletedSongPaths = new List<string>();
 
         public static class BuildInfo
@@ -269,24 +272,6 @@ namespace ExScoringMod
             }
         }
 
-        // ── Song deletion methods ──
-
-        public static void RemoveSong(string songID)
-        {
-            if (deletedSongs.Contains(songID))
-                return;
-            var song = SongList.I.GetSong(songID);
-            deletedSongPaths.Add(song.searchRoot + "/" + song.zipPath);
-            deletedSongs.Add(song.songID);
-        }
-
-        public static void RestoreDeletedSongs()
-        {
-            deletedSongPaths = new List<string>();
-            deletedSongs = new List<string>();
-            KataConfig.I.CreateDebugText("Restored songs", new Vector3(0f, -1f, 5f), 5f, null, false, 0.2f);
-        }
-
         // ── Song count notification ──
 
         /// <summary>
@@ -329,39 +314,45 @@ namespace ExScoringMod
             CleanDeletedSongs();
         }
 
+        /// <summary>
+        /// On quit: retries the deleted song files that couldn't be deleted during the session
+        /// (DeleteButton.cs). Any still failing are written to deletedDownloadsListPath (full
+        /// paths) for CleanMarkedForDeletion on the next launch.
+        /// </summary>
         private static void CleanDeletedSongs()
         {
-            List<string> downloadsMarkedForDeletion = new List<string>();
+            List<string> stillPending = new List<string>();
             foreach (var songPath in deletedSongPaths)
             {
-                if (File.Exists(songPath))
+                if (!File.Exists(songPath)) continue;
+                try
                 {
-                    try
-                    {
-                        File.Delete(songPath);
-                    }
-                    catch
-                    {
-                        downloadsMarkedForDeletion.Add(Path.GetFileName(songPath));
-                    }
+                    File.Delete(songPath);
+                    DebugLog.Log($"[DeleteSong] Deleted file on quit: {songPath}");
                 }
-                else
+                catch
                 {
-                    string fileName = Path.GetFileName(songPath);
-                    string downloadPath = Path.Combine(downloadsDirectory, fileName);
-                    if (File.Exists(downloadPath))
-                    {
-                        downloadsMarkedForDeletion.Add(fileName);
-                    }
+                    stillPending.Add(songPath);
                 }
             }
-            if (downloadsMarkedForDeletion.Count > 0)
+
+            if (stillPending.Count == 0) return;
+            try
             {
-                string text = MelonLoader.TinyJSON.JSON.Dump(downloadsMarkedForDeletion);
+                string text = MelonLoader.TinyJSON.JSON.Dump(stillPending);
                 File.WriteAllText(deletedDownloadsListPath, text);
+            }
+            catch (Exception e)
+            {
+                DebugLog.Log($"[WARNING] Could not write deletion list: {e.Message}");
             }
         }
 
+        /// <summary>
+        /// On launch, before the song list loads: deletes the files left over from the last
+        /// session's deletes. Entries are full paths; older lists held bare file names, which are
+        /// looked up in Downloads, then the songs folder.
+        /// </summary>
         private static void CleanMarkedForDeletion()
         {
             if (!File.Exists(deletedDownloadsListPath)) return;
@@ -371,27 +362,32 @@ namespace ExScoringMod
                 string text = File.ReadAllText(deletedDownloadsListPath);
                 List<string> deleted = MelonLoader.TinyJSON.JSON.Load(text).Make<List<string>>();
 
-                foreach (string fileName in deleted)
+                foreach (string entry in deleted)
                 {
-                    string path = Path.Combine(downloadsDirectory, fileName);
+                    if (string.IsNullOrEmpty(entry)) continue;
                     try
                     {
-                        if (File.Exists(path))
+                        string path = null;
+                        if (Path.IsPathRooted(entry))
                         {
-                            File.Delete(path);
+                            path = entry;
                         }
                         else
                         {
-                            path = Path.Combine(mainSongDirectory, fileName);
-                            if (File.Exists(path))
-                            {
-                                File.Delete(path);
-                            }
+                            string inDownloads = Path.Combine(downloadsDirectory, entry);
+                            string inSongs = Path.Combine(mainSongDirectory, entry);
+                            path = File.Exists(inDownloads) ? inDownloads : inSongs;
+                        }
+
+                        if (File.Exists(path))
+                        {
+                            File.Delete(path);
+                            DebugLog.Log($"[DeleteSong] Deleted leftover file from last session: {path}");
                         }
                     }
                     catch
                     {
-                        DebugLog.Log($"[WARNING] Unable to delete {fileName}");
+                        DebugLog.Log($"[WARNING] Unable to delete {entry}");
                     }
                 }
                 File.Delete(deletedDownloadsListPath);
