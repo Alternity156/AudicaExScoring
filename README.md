@@ -15,6 +15,7 @@ TrippyMenu
 MenuGrabDisabler
 Grind-Mode
 ColoredChains
+AutoRecenterDisabler
 ```
 
 Functionality of these mods has been added as options.
