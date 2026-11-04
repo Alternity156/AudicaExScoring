@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
+using Harmony;
 using MelonLoader;
 using Newtonsoft.Json;
 using UnityEngine;
@@ -91,6 +92,77 @@ namespace ExScoringMod
         public int MaxRawScoreNormal;
         public int MaxRawScoreHard;
         public int MaxRawScoreExpert;
+
+        // True when SongID/CueChecksum were computed with SongDescriptorInvariantPatch active
+        // (set by SongCache.Set). Older entries for songs with a tempo of 999.5+ may hold a
+        // locale-dependent ID and are dropped on load so they get recomputed once.
+        public bool InvariantDescriptorId;
+    }
+
+    /// <summary>
+    /// Makes custom song IDs independent of the Windows number format.
+    ///
+    /// A custom song's ID is originalSongID + "_" + an MD5 that includes
+    /// SongData.GetDescriptor(): every tempo change written as tempo.ToString("N0") + ";" +
+    /// tick + ";". "N0" uses the current culture's thousands separator, so a tempo of 1,000
+    /// BPM or more is written "1,002" on an English-format PC but "1 002" (no-break space) on
+    /// a French one, and the same map gets two different IDs: different official
+    /// leaderboards, and no match in online lobbies. Seen on TWOTORIAL-Continuum
+    /// (cd6953... on a French-format PC, 3282f... everywhere else).
+    ///
+    /// The postfix swaps the culture's separator for ",", giving every player the
+    /// English-format ID that the official leaderboards and other players use. N0 shows no
+    /// decimals, so the separator is the only culture-dependent character. (Cultures that
+    /// group other than every 3 digits only differ from 100,000 up, far above any tempo.)
+    /// </summary>
+    [HarmonyPatch(typeof(SongList.SongData), "GetDescriptor")]
+    internal static class SongDescriptorInvariantPatch
+    {
+        private static string groupSeparator;
+
+        public static void Postfix(ref string __result)
+        {
+            if (string.IsNullOrEmpty(__result)) return;
+            string sep = GetGroupSeparator();
+            if (sep.Length == 0 || __result.IndexOf(sep, StringComparison.Ordinal) < 0) return;
+            __result = __result.Replace(sep, ",");
+        }
+
+        /// <summary>The game's thousands separator when it isn't ",", else "" (nothing to fix).</summary>
+        private static string GetGroupSeparator()
+        {
+            if (groupSeparator != null) return groupSeparator;
+
+            string sep = null;
+            try
+            {
+                // The game formats on the Il2Cpp side, so ask its culture.
+                sep = Il2CppSystem.Globalization.NumberFormatInfo.CurrentInfo.NumberGroupSeparator;
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Log($"[SongID] Couldn't read the game's number format ({ex.Message}), using the system's");
+            }
+            if (sep == null)
+                sep = System.Globalization.CultureInfo.CurrentCulture.NumberFormat.NumberGroupSeparator ?? "";
+
+            bool unusable = sep.Length == 0 || sep == "," || sep.IndexOf(';') >= 0;
+            if (!unusable)
+                foreach (char c in sep)
+                    if (char.IsDigit(c)) { unusable = true; break; }
+
+            if (sep != "," && sep.Length > 0)
+            {
+                var codes = new List<string>();
+                foreach (char c in sep) codes.Add("U+" + ((int)c).ToString("X4"));
+                DebugLog.Log(unusable
+                    ? $"[SongID] Thousands separator {string.Join(" ", codes.ToArray())} can't be safely replaced: song IDs left as the game makes them"
+                    : $"[SongID] Thousands separator is {string.Join(" ", codes.ToArray())}: written as \",\" in song IDs so they match other players");
+            }
+
+            groupSeparator = unusable ? "" : sep;
+            return groupSeparator;
+        }
     }
 
     /// <summary>
@@ -133,6 +205,7 @@ namespace ExScoringMod
                         entries = loadedEntries;
 
                     DebugLog.Log($"[SongCache] Loaded {entries.Count} cached song entries");
+                    DropLocaleDependentIds();
                 }
                 else
                 {
@@ -144,6 +217,32 @@ namespace ExScoringMod
                 DebugLog.Log($"[SongCache] Failed to load cache, starting fresh: {ex}");
                 entries = new Dictionary<string, CachedSongEntry>();
             }
+        }
+
+        /// <summary>
+        /// Drops entries cached before SongDescriptorInvariantPatch whose ID could depend on
+        /// the number format: those with a tempo that "N0" writes as 1,000 or more. They're
+        /// rescanned live once; every other entry is unaffected and kept.
+        /// </summary>
+        private static void DropLocaleDependentIds()
+        {
+            List<string> stale = new List<string>();
+            foreach (var kv in entries)
+            {
+                CachedSongEntry entry = kv.Value;
+                if (entry == null || entry.InvariantDescriptorId || entry.Tempos == null) continue;
+                foreach (CachedTempoChange t in entry.Tempos)
+                {
+                    if (t != null && t.Tempo >= 999.5f) { stale.Add(kv.Key); break; }
+                }
+            }
+
+            foreach (string key in stale)
+            {
+                DebugLog.Log($"[SongCache] Rescanning {key}: tempo of 1,000+ BPM, cached ID may depend on the number format");
+                entries.Remove(key);
+            }
+            if (stale.Count > 0) dirty = true;
         }
 
         /// <summary>
@@ -170,6 +269,8 @@ namespace ExScoringMod
         public static void Set(string relativePath, CachedSongEntry entry)
         {
             EnsureLoaded();
+            // Harvested from a live ProcessSingleSong this session, so with the patch active.
+            if (entry != null) entry.InvariantDescriptorId = true;
             entries[relativePath] = entry;
             dirty = true;
         }
