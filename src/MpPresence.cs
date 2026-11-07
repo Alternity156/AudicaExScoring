@@ -45,12 +45,14 @@ namespace ExScoringMod
     /// is one shot. Trigger pull is interpolated like the parts (bool 0/1 without a pull) and
     /// feeds the hand animation.
     ///
-    /// Hands from others (v2.42): each remote hand copy keeps the normal hand's Animator. With
-    /// finger curls (a Knuckles sender) the Animator is off and every finger bone is slerped
-    /// between that side's open and fist poses (sampled once from the Animator at Flex 0 and 1);
-    /// otherwise the Animator gets KataHand.UpdateAnimStates' values from HandAnim and the pull.
-    /// Neither: the rest pose. After each remote shot the gun copy's gun_slide replays the game's
-    /// gun_fire clip movement (sampled once from the local gun).
+    /// Hands from others (v2.42): each remote hand copy holds two models, the normal hand (with its
+    /// Animator) and a stripped copy of that side's Knuckles glove (KataHand.knucklesHand). With
+    /// finger curls (a Knuckles sender) the glove shows, its fingers posed from the curls and the
+    /// gun's state between poses captured in game from the glove itself (GlovePoses: open, closed
+    /// on the gun, closed with the gun thrown, fist with the gun thrown, and the index finger while
+    /// spinning). Otherwise the normal hand shows and its Animator gets KataHand.UpdateAnimStates'
+    /// values from HandAnim and the pull. Neither: the rest pose. After each remote shot the gun
+    /// copy's gun_slide replays the game's gun_fire clip movement (sampled once from the local gun).
     ///
     /// Each shot is shown the way the game shows its own (Gun.Fire, PlayShot): the success beam
     /// from the gun copy's firepoint (a marker placed from the local gun's firepoint), the muzzle
@@ -220,12 +222,15 @@ namespace ExScoringMod
         // Hand animation (v2.42) and the gun slide, the game's own numbers (Ghidra / in-game dumps, 2026-10-30).
         private const float HandBlendRate = 20f;         // KataHand.INPUT_RATE_CHANGE: a blend moves 20 per second
         private const int KnucklesHardware = 4;          // VRHardwareSetup hardware 4 = Knuckles
-        private const float FingerPoseMinAngle = 5f;     // open vs fist must differ at least this much to be usable
         private const string GunFireClipName = "gun_fire";
         private const string SlideName = "gun_slide";    // under the default model (tricks/mesh/Gun1/gun_slide)
         private const int SlideSamplesPerSecond = 90;
-        private const int SampleSteps = 10;              // finger pose sampling: Animator steps per pose
-        private const float SampleStepSeconds = 0.05f;   // 10 x 0.05 s = half a second per pose
+
+        // Knuckles glove on remote hands (v2.42): the gun counts as thrown once its pose is this far
+        // from the hand (at rest it sits a few cm away, spins included), eased at this rate per second.
+        private const float GunThrownDistance = 0.25f;
+        private const float GunThrownBlendRate = 10f;
+        private const string GloveChildName = "MpGlove";
         private const long SampleKeepMs = 1000;
         private const float GunColorPollSeconds = 0.5f;
         private const float RigLookupRetrySeconds = 2f;
@@ -350,34 +355,97 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// One remote hand copy's animation (v2.42): its own Animator (kept from the normal hand,
-        /// driven like KataHand.UpdateAnimStates) and its skinned bones, posed one finger at a time
-        /// from finger curls when the sender has finger tracking.
+        /// One remote hand copy's animation (v2.42): the normal hand with its own Animator (driven
+        /// like KataHand.UpdateAnimStates), and the Knuckles glove whose finger bones are posed from
+        /// the sender's curls when they have finger tracking. Only one of the two shows.
         /// </summary>
         private class HandRig
         {
+            public GameObject Normal;
             public Animator Animator;
             /// <summary>-2 = not looked up yet (needs the Animator active), -1 = the controller has no such layer.</summary>
             public int PointLayer = -2, ThumbLayer = -2;
-            /// <summary>SkinnedMeshRenderer.bones, the same order as fingerPoses.</summary>
-            public Transform[] Bones;
-            /// <summary>For the debug dump: "anim", "fingers" or "-".</summary>
+            /// <summary>The glove copy, or null when the template has none (or a bone is missing).</summary>
+            public GameObject Glove;
+            /// <summary>The glove's finger bones, in GloveBoneNames order.</summary>
+            public Transform[] GloveBones;
+            /// <summary>Eased 0..1: how far the glove is posed as "gun thrown".</summary>
+            public float Thrown;
+            public bool ThrownInit;
+            /// <summary>For the debug dump: "anim", "glove" or "-".</summary>
             public string Mode = "-";
+            public float LastSpin;
         }
 
-        /// <summary>
-        /// One hand side's finger poses, sampled once from the hand template's own Animator: per
-        /// skinned bone, which finger it belongs to (0 thumb .. 4 pinky, -1 none) and its local
-        /// rotation with the hand open (Flex 0) and as a fist (Flex 1).
-        /// </summary>
-        private class FingerPoses
+        // ── Knuckles glove poses (v2.42) ──
+        // Captured in game 2026-11-06 from the right glove (vr_glove_model_audicahand), as each
+        // bone's localRotation. The left glove has the same bones, names and local rotations (it is
+        // mirrored above the skeleton), so one table serves both sides. The wrist and *_aux bones
+        // are left as the template has them.
+
+        private static readonly string[] GloveBoneNames =
         {
-            public int[] Finger;
-            public Quaternion[] Open;
-            public Quaternion[] Fist;
-            public int FingerBones;
-            public float MaxAngle;
-        }
+            "finger_thumb_0_r", "finger_thumb_1_r", "finger_thumb_2_r",
+            "finger_index_meta_r", "finger_index_0_r", "finger_index_1_r", "finger_index_2_r",
+            "finger_middle_meta_r", "finger_middle_0_r", "finger_middle_1_r", "finger_middle_2_r",
+            "finger_ring_meta_r", "finger_ring_0_r", "finger_ring_1_r", "finger_ring_2_r",
+            "finger_pinky_meta_r", "finger_pinky_0_r", "finger_pinky_1_r", "finger_pinky_2_r"
+        };
+
+        /// <summary>Which finger each GloveBoneNames entry belongs to: 0 thumb, 1 index, 2 middle, 3 ring, 4 pinky.</summary>
+        private static readonly int[] GloveBoneFinger = { 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4 };
+
+        private const int FingerThumb = 0, FingerIndex = 1, FingerMiddle = 2;
+
+        // The captured poses. Open and Closed are with the gun in hand (the poser keeps the hand
+        // from closing further, grip and trigger change nothing); ClosedNoGun is the same hand with
+        // the gun thrown, and Fist is that plus grip and trigger. Spin: the index while the gun spins.
+        private static readonly Quaternion[] GloveOpen =
+        {
+            new Quaternion(-0.1260f, -0.7676f, 0.4510f, 0.4375f), new Quaternion(0.1281f, 0.0306f, -0.3870f, 0.9126f), new Quaternion(0.1304f, 0.0017f, -0.1398f, 0.9816f),
+            new Quaternion(-0.6435f, -0.4230f, -0.4792f, 0.4212f), new Quaternion(0.0318f, 0.0403f, -0.0939f, 0.9943f), new Quaternion(0.0191f, 0.0021f, -0.0208f, 0.9996f), new Quaternion(0.0005f, 0.0105f, -0.0504f, 0.9987f),
+            new Quaternion(-0.5458f, -0.4626f, -0.4436f, 0.5397f), new Quaternion(-0.1482f, 0.0178f, -0.1371f, 0.9792f), new Quaternion(0.0128f, 0.0065f, -0.1549f, 0.9878f), new Quaternion(-0.0040f, 0.0133f, -0.1386f, 0.9903f),
+            new Quaternion(-0.5165f, -0.4307f, -0.4979f, 0.5476f), new Quaternion(-0.0886f, 0.0162f, -0.1998f, 0.9757f), new Quaternion(-0.0051f, -0.0031f, -0.1519f, 0.9884f), new Quaternion(-0.0027f, 0.0034f, -0.1827f, 0.9832f),
+            new Quaternion(-0.5059f, -0.3514f, -0.6123f, 0.4956f), new Quaternion(-0.0599f, 0.0160f, -0.1332f, 0.9891f), new Quaternion(-0.0026f, 0.0180f, -0.2469f, 0.9689f), new Quaternion(0.0129f, 0.0582f, -0.1670f, 0.9842f)
+        };
+        private static readonly Quaternion[] GloveClosed =
+        {
+            new Quaternion(-0.1260f, -0.7676f, 0.4510f, 0.4375f), new Quaternion(0.1281f, 0.0306f, -0.3870f, 0.9126f), new Quaternion(0.1304f, 0.0017f, -0.1398f, 0.9816f),
+            new Quaternion(-0.6327f, -0.4357f, -0.4933f, 0.4080f), new Quaternion(-0.0050f, 0.0722f, -0.2445f, 0.9669f), new Quaternion(0.0174f, -0.0014f, -0.4548f, 0.8904f), new Quaternion(-0.0039f, 0.0110f, -0.4160f, 0.9093f),
+            new Quaternion(-0.5351f, -0.4779f, -0.4527f, 0.5295f), new Quaternion(-0.1484f, -0.0108f, -0.3338f, 0.9308f), new Quaternion(-0.0215f, 0.0310f, -0.6389f, 0.7684f), new Quaternion(-0.0175f, 0.0397f, -0.4343f, 0.8997f),
+            new Quaternion(-0.5042f, -0.4498f, -0.5086f, 0.5337f), new Quaternion(-0.0390f, -0.0923f, -0.3550f, 0.9295f), new Quaternion(-0.0290f, -0.0273f, -0.6369f, 0.7699f), new Quaternion(-0.0104f, -0.0056f, -0.5093f, 0.8605f),
+            new Quaternion(-0.5087f, -0.3493f, -0.6019f, 0.5069f), new Quaternion(-0.0234f, -0.0653f, -0.2708f, 0.9601f), new Quaternion(-0.0109f, 0.0812f, -0.6170f, 0.7827f), new Quaternion(0.0083f, 0.0888f, -0.3461f, 0.9340f)
+        };
+        private static readonly Quaternion[] GloveClosedNoGun =
+        {
+            new Quaternion(-0.5258f, -0.5776f, 0.2081f, 0.5888f), new Quaternion(-0.0166f, 0.1175f, -0.3664f, 0.9229f), new Quaternion(0.0004f, -0.0013f, -0.3677f, 0.9299f),
+            new Quaternion(-0.6344f, -0.4326f, -0.4905f, 0.4121f), new Quaternion(-0.0172f, 0.0685f, -0.3229f, 0.9438f), new Quaternion(0.0313f, -0.0081f, -0.5102f, 0.8595f), new Quaternion(0.0029f, 0.0139f, -0.5039f, 0.8636f),
+            new Quaternion(-0.5341f, -0.4747f, -0.4472f, 0.5379f), new Quaternion(-0.1156f, 0.0239f, -0.3354f, 0.9346f), new Quaternion(0.0084f, -0.0047f, -0.5591f, 0.8291f), new Quaternion(0.0054f, 0.0091f, -0.5489f, 0.8358f),
+            new Quaternion(-0.4896f, -0.4640f, -0.5206f, 0.5234f), new Quaternion(-0.0556f, -0.0116f, -0.6475f, 0.7600f), new Quaternion(0.0016f, -0.0020f, -0.7474f, 0.6643f), new Quaternion(-0.0028f, 0.0032f, -0.7790f, 0.6270f),
+            new Quaternion(-0.4798f, -0.3799f, -0.6302f, 0.4778f), new Quaternion(0.0343f, -0.0034f, -0.5611f, 0.8270f), new Quaternion(-0.0067f, 0.0093f, -0.7119f, 0.7022f), new Quaternion(0.0080f, -0.0099f, -0.7360f, 0.6769f)
+        };
+        private static readonly Quaternion[] GloveFist =
+        {
+            new Quaternion(-0.5335f, -0.5522f, 0.1825f, 0.6141f), new Quaternion(-0.0295f, 0.1182f, -0.3588f, 0.9254f), new Quaternion(0.0003f, -0.0014f, -0.3069f, 0.9517f),
+            new Quaternion(-0.6173f, -0.4492f, -0.5109f, 0.3952f), new Quaternion(-0.0395f, 0.1127f, -0.7120f, 0.6920f), new Quaternion(0.0035f, -0.0036f, -0.8267f, 0.5627f), new Quaternion(-0.0007f, 0.0009f, -0.6666f, 0.7454f),
+            new Quaternion(-0.5142f, -0.4837f, -0.4783f, 0.5223f), new Quaternion(-0.0945f, -0.0574f, -0.7431f, 0.6599f), new Quaternion(-0.0023f, 0.0029f, -0.7519f, 0.6593f), new Quaternion(0.0026f, -0.0032f, -0.7530f, 0.6580f),
+            new Quaternion(-0.4787f, -0.4752f, -0.5326f, 0.5112f), new Quaternion(-0.0828f, 0.0053f, -0.7343f, 0.6737f), new Quaternion(0.0016f, -0.0020f, -0.7474f, 0.6643f), new Quaternion(-0.0028f, 0.0032f, -0.7790f, 0.6270f),
+            new Quaternion(-0.4542f, -0.4133f, -0.6302f, 0.4751f), new Quaternion(-0.0429f, 0.0326f, -0.7335f, 0.6776f), new Quaternion(-0.0067f, 0.0093f, -0.7119f, 0.7022f), new Quaternion(0.0088f, -0.0092f, -0.7903f, 0.6126f)
+        };
+        private static readonly Quaternion[] GloveSpin =
+        {
+            new Quaternion(-0.4643f, -0.6642f, 0.2331f, 0.5375f), new Quaternion(0.0075f, 0.1213f, -0.3924f, 0.9117f), new Quaternion(0.0003f, -0.0014f, -0.3282f, 0.9446f),
+            new Quaternion(-0.6314f, -0.4380f, -0.4953f, 0.4051f), new Quaternion(0.0034f, 0.0746f, -0.1870f, 0.9795f), new Quaternion(0.0077f, 0.0034f, -0.4133f, 0.9106f), new Quaternion(-0.0087f, 0.0089f, -0.3497f, 0.9368f),
+            new Quaternion(-0.5342f, -0.4747f, -0.4472f, 0.5380f), new Quaternion(-0.1186f, 0.0309f, -0.3313f, 0.9355f), new Quaternion(0.0083f, -0.0066f, -0.5587f, 0.8293f), new Quaternion(0.0051f, 0.0118f, -0.5322f, 0.8465f),
+            new Quaternion(-0.4896f, -0.4640f, -0.5206f, 0.5234f), new Quaternion(-0.0556f, -0.0116f, -0.6475f, 0.7600f), new Quaternion(0.0016f, -0.0020f, -0.7474f, 0.6643f), new Quaternion(-0.0028f, 0.0032f, -0.7790f, 0.6270f),
+            new Quaternion(-0.4798f, -0.3799f, -0.6302f, 0.4778f), new Quaternion(0.0343f, -0.0034f, -0.5611f, 0.8270f), new Quaternion(-0.0067f, 0.0093f, -0.7119f, 0.7022f), new Quaternion(0.0080f, -0.0099f, -0.7360f, 0.6769f)
+        };
+
+        // The curls each pose was captured at, per finger [thumb, index, middle, ring, pinky].
+        // Fist is taken as fully curled (1).
+        private static readonly float[] GloveOpenCurls = { 0.15f, 0.04f, 0.10f, 0.12f, 0.16f };
+        private static readonly float[] GloveClosedCurls = { 0.11f, 0.58f, 0.59f, 1.00f, 0.74f };
+        private static readonly float[] GloveNoGunCurls = { 0.80f, 0.58f, 0.60f, 1.00f, 1.00f };
 
         /// <summary>
         /// One remote hand's shot effects, built like the game builds a gun's own (Gun.SetUp,
@@ -610,8 +678,11 @@ namespace ExScoringMod
         private static readonly float[][] curFingers = { new float[5], new float[5] };
         private static readonly bool[] curHasFingers = new bool[2];
 
-        // v2.42: finger poses per hand side (null until sampled, or when sampling found nothing usable).
-        private static readonly FingerPoses[] fingerPoses = new FingerPoses[2];
+        // v2.42: whether each hand template got its Knuckles glove, and how many of its finger bones were found.
+        private static readonly bool[] gloveTemplate = new bool[2];
+        private static readonly int[] gloveBonesFound = new int[2];
+        // Reused per finger while posing a glove.
+        private static readonly float[] gloveHeld = new float[5], gloveSeg1 = new float[5], gloveSeg2 = new float[5];
         // The gun slide's movement in the game's gun_fire clip, sampled once (null when unavailable).
         private static Vector3[] slidePos;
         private static Quaternion[] slideRot;
@@ -1266,9 +1337,9 @@ namespace ExScoringMod
 
         /// <summary>
         /// Poses one remote hand copy from this frame's interpolated values (19.15.4):
-        ///  - finger curls (a finger-tracking sender): the copy's Animator off, every finger bone set
-        ///    between its sampled open and fist rotation by its finger's curl
-        ///  - otherwise the copy's Animator, driven exactly like KataHand.UpdateAnimStates (Ghidra
+        ///  - finger curls (a finger-tracking sender): the Knuckles glove shows instead of the normal
+        ///    hand, posed by PoseGlove
+        ///  - otherwise the normal hand's Animator, driven exactly like KataHand.UpdateAnimStates (Ghidra
         ///    2026-10-30) from HandAnim and the trigger pull, the grip axis taken as 0 (it isn't sent
         ///    and only moves Flex between 0.2 and 0.25):
         ///      Flex   = Lerp(Lerp(0.2, 0.25, grip), 0, spin)
@@ -1282,21 +1353,16 @@ namespace ExScoringMod
             Transform part = h == 0 ? remote.LHand : remote.RHand;
             if (rig == null || part == null || !part.gameObject.activeInHierarchy) return;
 
-            FingerPoses poses = fingerPoses[h];
-            if (curHasFingers[h] && poses != null && rig.Bones != null && rig.Bones.Length == poses.Finger.Length)
+            bool glove = curHasFingers[h] && rig.Glove != null;
+            if (rig.Glove != null && rig.Glove.activeSelf != glove) rig.Glove.SetActive(glove);
+            if (rig.Normal != null && rig.Normal.activeSelf == glove) rig.Normal.SetActive(!glove);
+            if (glove)
             {
-                if (rig.Animator != null && rig.Animator.enabled) rig.Animator.enabled = false;
-                float[] curls = curFingers[h];
-                for (int i = 0; i < rig.Bones.Length; i++)
-                {
-                    int finger = poses.Finger[i];
-                    Transform bone = rig.Bones[i];
-                    if (finger < 0 || bone == null) continue;
-                    bone.localRotation = Quaternion.Slerp(poses.Open[i], poses.Fist[i], curls[finger]);
-                }
-                rig.Mode = "fingers";
+                PoseGlove(rig, h);
+                rig.Mode = "glove";
                 return;
             }
+            rig.ThrownInit = false;
 
             Animator animator = rig.Animator;
             if (animator == null || !ReadAnimNames())
@@ -1323,6 +1389,70 @@ namespace ExScoringMod
             if (rig.ThumbLayer >= 0)
                 animator.SetLayerWeight(rig.ThumbLayer, Mathf.Lerp(Mathf.Lerp(0f, 0.2f, thumbsUp), 1f, spin));
             rig.Mode = "anim";
+        }
+
+        /// <summary>
+        /// Poses a remote glove's fingers from this frame's curls and the gun's state, between the
+        /// captured GlovePoses:
+        ///  - gun in hand: each finger from Open (at its open curl) to Closed (at its closed curl),
+        ///    held at Closed beyond (the game's gun poser keeps the hand there)
+        ///  - gun thrown: Open to ClosedNoGun, then ClosedNoGun to Fist up to curl 1. The thumb's
+        ///    curl barely changes from ClosedNoGun to Fist, so its second step follows the middle finger
+        ///  - gun spinning: the thrown rules, except the index, which goes to its Spin pose
+        /// "Thrown" is the gun's pose being more than GunThrownDistance from the hand, eased at
+        /// GunThrownBlendRate; "spinning" is HandAnim's spin (already eased by the sender) while
+        /// the gun isn't thrown.
+        /// </summary>
+        private static void PoseGlove(HandRig rig, int h)
+        {
+            int handPart = h == 0 ? PartLHand : PartRHand;
+            int gunPart = h == 0 ? PartLGun : PartRGun;
+            bool thrown = curHas[handPart] && curHas[gunPart] && (curPos[gunPart] - curPos[handPart]).sqrMagnitude > GunThrownDistance * GunThrownDistance;
+            float target = thrown ? 1f : 0f;
+            if (!rig.ThrownInit)
+            {
+                rig.Thrown = target;
+                rig.ThrownInit = true;
+            }
+            else rig.Thrown = Mathf.MoveTowards(rig.Thrown, target, GunThrownBlendRate * Time.deltaTime);
+
+            // A throw is a trick too, so the sender's spin is 1 while the gun is thrown: the Spin
+            // pose only counts while the gun is in hand.
+            float spin = Mathf.Clamp01(curHandAnim[h][2]) * (1f - rig.Thrown);
+            rig.LastSpin = spin;
+            float[] curls = curFingers[h];
+
+            for (int f = 0; f < 5; f++)
+            {
+                float c = Mathf.Clamp01(curls[f]);
+                gloveHeld[f] = SafeInverseLerp(GloveOpenCurls[f], GloveClosedCurls[f], c);
+                gloveSeg1[f] = SafeInverseLerp(GloveOpenCurls[f], GloveNoGunCurls[f], c);
+                gloveSeg2[f] = SafeInverseLerp(GloveNoGunCurls[f], 1f, c);
+            }
+            gloveSeg2[FingerThumb] = gloveSeg2[FingerMiddle];
+
+            Transform[] bones = rig.GloveBones;
+            for (int i = 0; i < bones.Length; i++)
+            {
+                Transform bone = bones[i];
+                if (bone == null) continue;
+                int f = GloveBoneFinger[i];
+
+                Quaternion held = Quaternion.Slerp(GloveOpen[i], GloveClosed[i], gloveHeld[f]);
+                Quaternion noGun = gloveSeg2[f] > 0f
+                    ? Quaternion.Slerp(GloveClosedNoGun[i], GloveFist[i], gloveSeg2[f])
+                    : Quaternion.Slerp(GloveOpen[i], GloveClosedNoGun[i], gloveSeg1[f]);
+                Quaternion rot = Quaternion.Slerp(held, noGun, rig.Thrown);
+                if (spin > 0f) rot = Quaternion.Slerp(rot, f == FingerIndex ? GloveSpin[i] : noGun, spin);
+                bone.localRotation = rot;
+            }
+        }
+
+        /// <summary>Where c sits between a and b, 0..1. When the two are (nearly) equal: 1 once c reaches b, else 0.</summary>
+        private static float SafeInverseLerp(float a, float b, float c)
+        {
+            if (Mathf.Abs(b - a) < 0.05f) return c >= b ? 1f : 0f;
+            return Mathf.Clamp01((c - a) / (b - a));
         }
 
         /// <summary>The hand Animator's names from KataHand's statics ("Flex", "Pinch", "Point Layer", "Thumb Layer"), read once.</summary>
@@ -2870,11 +3000,11 @@ namespace ExScoringMod
 
             // Hands: normalHand under HandLeft/HandRight.
             // v2.42: the hands keep their Animator, driven per remote player (UpdateHand), and each
-            // side's open and fist finger poses are sampled from it once.
+            // also gets a copy of that side's Knuckles glove, shown for senders with finger tracking.
             tplHandL = MakeTemplate("TplHandL", localKataL.transform, handL.transform, true);
             tplHandR = MakeTemplate("TplHandR", localKataR.transform, handR.transform, true);
-            fingerPoses[0] = SampleFingerPoses(tplHandL, "left hand");
-            fingerPoses[1] = SampleFingerPoses(tplHandR, "right hand");
+            AddGlove(tplHandL, localKataL, handL.layer, 0, "left");
+            AddGlove(tplHandR, localKataR, handR.layer, 1, "right");
 
             // Guns: the default model, anchored on the same transform the pose is sent from
             // (tricks/mesh), so its offset doesn't include a trick that happens to be playing now.
@@ -2929,124 +3059,74 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// One hand side's finger poses (v2.42), from the template's own Animator: a temporary active
-        /// copy, both layers off and Pinch 0, evaluated at Flex 0 (open) and Flex 1 (fist), recording
-        /// every finger bone's local rotation. Bones are matched to fingers by name
-        /// (hands:b_r_thumb1..3, index1..3, middle1..3, ring1..3, pinky0..3; *_ignore skipped).
-        /// Null, so finger curls fall back to HandAnim, when anything is missing or the two poses
-        /// barely differ.
+        /// Adds a stripped copy of that side's Knuckles glove (KataHand.knucklesHand, the SteamVR
+        /// skeleton holding vr_glove_model_audicahand) to a hand template, as a GloveChildName child
+        /// placed relative to the KataHand as the glove is in the game (the same way MakeTemplate
+        /// places the normal hand), on the normal hand's layer, switched off until a sender with
+        /// finger tracking needs it. The glove exists in the scene on every headset, only active on
+        /// Knuckles. Without it, or without all GloveBoneNames, finger tracking falls back to HandAnim
+        /// on the normal hand.
         /// </summary>
-        private static FingerPoses SampleFingerPoses(GameObject template, string label)
+        private static void AddGlove(GameObject template, KataHand kata, int layer, int side, string label)
         {
-            if (template == null || !ReadAnimNames()) return null;
-            GameObject probe = null;
+            gloveTemplate[side] = false;
+            gloveBonesFound[side] = 0;
+            if (template == null || kata == null) return;
             try
             {
-                probe = UnityEngine.Object.Instantiate<GameObject>(template); // at the scene root, so active
-                probe.name = "MpHandProbe";
-                Animator animator = probe.GetComponentInChildren<Animator>(true);
-                SkinnedMeshRenderer skin = probe.GetComponentInChildren<SkinnedMeshRenderer>(true);
-                if (animator == null || skin == null)
+                Valve.VR.SteamVR_Behaviour_Skeleton skeleton = kata.knucklesHand;
+                if (skeleton == null)
                 {
-                    Log($"{label}: no Animator or skinned mesh to sample finger poses from");
-                    return null;
-                }
-                // Same frame as the copy is made, never drawn: make sure the Animator is bound to its
-                // controller and evaluates even though no renderer of it is visible.
-                AnimatorCullingMode culling = animator.cullingMode;
-                animator.enabled = true;
-                animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
-                animator.applyRootMotion = false;
-                animator.Rebind();
-                Log($"{label}: probe animator controller={(animator.runtimeAnimatorController != null ? animator.runtimeAnimatorController.name : "none")} culling={(int)culling} layers={animator.layerCount} initialized={animator.isInitialized}");
-
-                Transform[] bones = SkinBones(skin);
-                FingerPoses poses = new FingerPoses
-                {
-                    Finger = new int[bones.Length],
-                    Open = new Quaternion[bones.Length],
-                    Fist = new Quaternion[bones.Length]
-                };
-                for (int i = 0; i < bones.Length; i++)
-                {
-                    poses.Finger[i] = FingerOf(bones[i]);
-                    if (poses.Finger[i] >= 0) poses.FingerBones++;
+                    Log($"{label} glove: KataHand has no knucklesHand, finger tracking uses the normal hand");
+                    return;
                 }
 
-                // After Rebind, which puts parameters and weights back to their defaults.
-                int pointLayer = animator.GetLayerIndex(animPointLayer);
-                int thumbLayer = animator.GetLayerIndex(animThumbLayer);
-                if (pointLayer >= 0) animator.SetLayerWeight(pointLayer, 0f);
-                if (thumbLayer >= 0) animator.SetLayerWeight(thumbLayer, 0f);
+                Transform anchor = kata.transform;
+                Transform source = skeleton.transform;
+                GameObject copy = GameObject.Instantiate(source.gameObject, template.transform);
+                copy.name = GloveChildName;
+                copy.transform.localPosition = anchor.InverseTransformPoint(source.position);
+                copy.transform.localRotation = Quaternion.Inverse(anchor.rotation) * source.rotation;
+                copy.transform.localScale = Divide(source.lossyScale, anchor.lossyScale);
+                Strip(copy);
+                SetLayerRecursive(copy, layer);
 
-                // For the log only: how far Pinch moves the fingers, in case Flex isn't what closes them.
-                Quaternion[] pinched = new Quaternion[bones.Length];
-                RecordBonePose(animator, bones, 0f, 1f, pinched);
-
-                RecordBonePose(animator, bones, 0f, 0f, poses.Open);
-                RecordBonePose(animator, bones, 1f, 0f, poses.Fist);
-
-                float pinchAngle = 0f;
-                for (int i = 0; i < bones.Length; i++)
+                // The glove's mesh, and everything between it and the copy, switched on (only the
+                // copy itself is switched on and off afterwards).
+                int meshes = 0;
+                var skins = copy.GetComponentsInChildren<SkinnedMeshRenderer>(true);
+                for (int i = 0; i < skins.Length; i++)
                 {
-                    if (poses.Finger[i] < 0) continue;
-                    poses.MaxAngle = Mathf.Max(poses.MaxAngle, Quaternion.Angle(poses.Open[i], poses.Fist[i]));
-                    pinchAngle = Mathf.Max(pinchAngle, Quaternion.Angle(poses.Open[i], pinched[i]));
+                    SkinnedMeshRenderer skin = skins[i];
+                    if (skin == null) continue;
+                    skin.enabled = true;
+                    skin.updateWhenOffscreen = true; // the bones move while the mesh's bounds don't
+                    for (Transform t = skin.transform; t != null && t.Pointer != copy.transform.Pointer; t = t.parent)
+                        if (!t.gameObject.activeSelf) t.gameObject.SetActive(true);
+                    meshes++;
                 }
-                Log($"{label}: finger poses sampled ({poses.FingerBones} finger bones, up to {poses.MaxAngle:F0} deg between open and fist, {pinchAngle:F0} deg for pinch)");
-                if (poses.FingerBones == 0 || poses.MaxAngle < FingerPoseMinAngle)
+
+                int found = 0;
+                for (int i = 0; i < GloveBoneNames.Length; i++)
+                    if (FindChildNamed(copy.transform, GloveBoneNames[i]) != null) found++;
+                gloveBonesFound[side] = found;
+
+                copy.SetActive(false);
+                if (meshes == 0 || found < GloveBoneNames.Length)
                 {
-                    Log($"{label}: open and fist poses too similar, finger tracking falls back to HandAnim");
-                    return null;
+                    Log($"{label} glove: {meshes} meshes, {found}/{GloveBoneNames.Length} finger bones, finger tracking uses the normal hand");
+                    GameObject.DestroyImmediate(copy);
+                    return;
                 }
-                return poses;
+                gloveTemplate[side] = true;
+                Log($"{label} glove: copied ({meshes} meshes, {found} finger bones, layer {layer})");
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[MpPresence] sampling {label} finger poses failed: {ex}");
-                return null;
+                MelonLogger.Log($"[MpPresence] copying the {label} glove failed: {ex}");
+                Transform leftover = template.transform.Find(GloveChildName);
+                if (leftover != null) GameObject.DestroyImmediate(leftover.gameObject);
             }
-            finally
-            {
-                if (probe != null) UnityEngine.Object.DestroyImmediate(probe);
-            }
-        }
-
-        /// <summary>
-        /// Sets Flex and Pinch and steps the Animator SampleSteps x SampleStepSeconds (so any
-        /// transition or damping on the way gets there), then records the bones' local rotations.
-        /// </summary>
-        private static void RecordBonePose(Animator animator, Transform[] bones, float flex, float pinch, Quaternion[] dest)
-        {
-            for (int step = 0; step < SampleSteps; step++)
-            {
-                animator.SetFloat(animFlex, flex);
-                animator.SetFloat(animPinch, pinch);
-                animator.Update(SampleStepSeconds);
-            }
-            for (int i = 0; i < bones.Length; i++) dest[i] = bones[i] != null ? bones[i].localRotation : Quaternion.identity;
-        }
-
-        /// <summary>0 thumb, 1 index, 2 middle, 3 ring, 4 pinky, or -1 (the hand, grip, *_ignore and collider bones).</summary>
-        private static int FingerOf(Transform bone)
-        {
-            if (bone == null) return -1;
-            string name = bone.name.ToLowerInvariant();
-            if (name.Contains("ignore") || name.Contains("coll")) return -1;
-            if (name.Contains("thumb")) return 0;
-            if (name.Contains("index")) return 1;
-            if (name.Contains("middle")) return 2;
-            if (name.Contains("ring")) return 3;
-            if (name.Contains("pinky")) return 4;
-            return -1;
-        }
-
-        private static Transform[] SkinBones(SkinnedMeshRenderer skin)
-        {
-            var bones = skin.bones;
-            Transform[] result = new Transform[bones != null ? bones.Length : 0];
-            for (int i = 0; i < result.Length; i++) result[i] = bones[i];
-            return result;
         }
 
         /// <summary>
@@ -3335,21 +3415,48 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// A remote hand copy's rig: its Animator (root motion off, since the hand's pose is set by
-        /// MpPresence) and its skinned bones, in the same order as the sampled FingerPoses.
+        /// A remote hand copy's rig: the normal hand and its Animator (root motion off, since the
+        /// hand's pose is set by MpPresence), and the glove with its finger bones when the template
+        /// has one. The normal hand starts shown and the glove hidden.
         /// </summary>
         private static HandRig MakeHandRig(Transform part)
         {
             HandRig rig = new HandRig();
             if (part == null) return rig;
-            rig.Animator = part.gameObject.GetComponentInChildren<Animator>(true);
-            if (rig.Animator != null)
+
+            for (int i = 0; i < part.childCount; i++)
             {
-                rig.Animator.applyRootMotion = false;
-                rig.Animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+                Transform child = part.GetChild(i);
+                if (child.name == GloveChildName) rig.Glove = child.gameObject;
+                else if (rig.Normal == null) rig.Normal = child.gameObject;
             }
-            SkinnedMeshRenderer skin = part.gameObject.GetComponentInChildren<SkinnedMeshRenderer>(true);
-            rig.Bones = skin != null ? SkinBones(skin) : null;
+
+            if (rig.Normal != null)
+            {
+                rig.Animator = rig.Normal.GetComponentInChildren<Animator>(true);
+                if (rig.Animator != null)
+                {
+                    rig.Animator.applyRootMotion = false;
+                    rig.Animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+                }
+            }
+
+            if (rig.Glove != null)
+            {
+                rig.GloveBones = new Transform[GloveBoneNames.Length];
+                for (int i = 0; i < GloveBoneNames.Length; i++)
+                {
+                    rig.GloveBones[i] = FindChildNamed(rig.Glove.transform, GloveBoneNames[i]);
+                    if (rig.GloveBones[i] == null)
+                    {
+                        rig.Glove.SetActive(false);
+                        rig.Glove = null;
+                        rig.GloveBones = null;
+                        break;
+                    }
+                }
+                if (rig.Glove != null) rig.Glove.SetActive(false);
+            }
             return rig;
         }
 
@@ -3438,6 +3545,8 @@ namespace ExScoringMod
             if (templateHolder != null) UnityEngine.Object.Destroy(templateHolder);
             templateHolder = null;
             tplHead = tplBody = tplHandL = tplHandR = tplGunL = tplGunR = null;
+            gloveTemplate[0] = gloveTemplate[1] = false;
+            gloveBonesFound[0] = gloveBonesFound[1] = 0;
             gunCollidersL = gunCollidersR = false;
             headColliders = bodyColliders = 0;
         }
@@ -3855,7 +3964,7 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] sending: {MpSession.PoseRateHz} Hz ({(MpSession.PoseRateEnabled ? "server" : "default")}), my shots L={localShots[0]} R={localShots[1]}, pull L={PullJson(localGunL)} R={PullJson(localGunR)}");
             bool knuckles = UsingKnuckles();
             sb.AppendLine($"[MpPresence] hands: knuckles={knuckles} handAnim L={JsonDump(HandAnimJson(localKataL, 0, knuckles))} R={JsonDump(HandAnimJson(localKataR, 1, knuckles))} fingers L={JsonDump(FingersJson(localKataL, knuckles))} R={JsonDump(FingersJson(localKataR, knuckles))}");
-            sb.AppendLine($"[MpPresence] finger poses: L={FingerPoseDump(fingerPoses[0])} R={FingerPoseDump(fingerPoses[1])}, slide: {(slidePos != null ? slidePos.Length + " samples over " + slideLength.ToString("F3") + " s" : "none")}");
+            sb.AppendLine($"[MpPresence] gloves: L={GloveTemplateDump(0)} R={GloveTemplateDump(1)}, slide: {(slidePos != null ? slidePos.Length + " samples over " + slideLength.ToString("F3") + " s" : "none")}");
             long renderTime = MpSession.ServerNowMs - RenderDelayMs;
             foreach (Remote remote in remotes.Values)
             {
@@ -3873,17 +3982,21 @@ namespace ExScoringMod
             return token == null || token.Type == JTokenType.Null ? "null" : token.ToString(Newtonsoft.Json.Formatting.None);
         }
 
-        private static string FingerPoseDump(FingerPoses poses)
+        private static string GloveTemplateDump(int side)
         {
-            return poses == null ? "none" : $"{poses.FingerBones} bones/{poses.MaxAngle:F0}deg";
+            return gloveTemplate[side] ? $"ok({gloveBonesFound[side]} bones)" : $"none({gloveBonesFound[side]}/{GloveBoneNames.Length} bones)";
         }
 
-        /// <summary>For the debug dump: how a remote hand is driven ("anim", "fingers" or "-") and whether it has an Animator.</summary>
+        /// <summary>
+        /// For the debug dump: how a remote hand is driven ("anim", "glove" or "-"), with the glove's
+        /// gun state (thrown and spin, 0..1) and whether the copy has an Animator and a glove.
+        /// </summary>
         private static string HandDump(Remote remote, int h)
         {
             HandRig rig = remote.Hands[h];
             if (rig == null) return "none";
-            return $"{rig.Mode}(animator={rig.Animator != null} bones={(rig.Bones != null ? rig.Bones.Length : 0)})";
+            string state = rig.Mode == "glove" ? $" thrown={rig.Thrown:F2} spin={rig.LastSpin:F2}" : "";
+            return $"{rig.Mode}({state.TrimStart()}{(state.Length > 0 ? " " : "")}animator={rig.Animator != null} glove={rig.Glove != null})";
         }
 
         /// <summary>For the debug dump: whether a hand's shot effects exist and are intact.</summary>
