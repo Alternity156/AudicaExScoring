@@ -636,6 +636,20 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.disableMenuGrab = v; OptionsMenuFunctions.SetDisableMenuGrab(v); });
                 OptionsMenuClone.AddRow(disableMenuGrabToggle);
 
+                OptionsMenuFunctions.GetMenuAimAssist();
+                OptionsMenuFunctions.GetMenuAimAssistWindowMs();
+                var menuAimAssistToggle = OptionsMenuClone.CreateToggle(0, "Menu Aim Assist",
+                    () => OptionsMenuFunctions.menuAimAssist,
+                    v => { OptionsMenuFunctions.menuAimAssist = v; OptionsMenuFunctions.SetMenuAimAssist(v); },
+                    "Temporal aim assist for menu buttons: if a trigger pull just misses a button you were on a moment earlier, it still clicks it");
+                var menuAimAssistWindowSlider = OptionsMenuClone.CreateSlider(1, "Aim Assist Window",
+                    () => OptionsMenuFunctions.menuAimAssistWindowMs,
+                    v => { OptionsMenuFunctions.menuAimAssistWindowMs = v; OptionsMenuFunctions.SetMenuAimAssistWindowMs(v); },
+                    30f, 200f, 5f, 100f,
+                    v => v.ToString("N0") + " ms",
+                    "How far back menu aim assist looks for a button you were aiming at");
+                OptionsMenuClone.AddRow(menuAimAssistToggle, menuAimAssistWindowSlider);
+
                 var trippyMenuToggle = OptionsMenuClone.CreateToggle(0, "Enable Trippy Menu",
                     () => OptionsMenuFunctions.trippyMenuEnabled,
                     v => { OptionsMenuFunctions.trippyMenuEnabled = v; OptionsMenuFunctions.SetTrippyMenuEnabled(v); });

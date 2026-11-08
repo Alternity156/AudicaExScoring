@@ -66,6 +66,8 @@ namespace ExScoringMod
         public static bool PracticeModeMinimizeButtonEnabled;
         public static int RandomSongScope; // 0 = Folder Songs, 1 = All Songs
         public static bool ShowStatsOnFail;
+        public static bool MenuAimAssist;
+        public static float MenuAimAssistWindowMs;
 
         public static string dataHeader = "[Header]Data";
         public static bool EnableRunDataSaving;
@@ -197,6 +199,8 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(ArrowJumpToEnds), false, "Makes the song list's top/bottom arrow buttons jump straight to the start/end of the list instead of scrolling a few rows at a time");
             MelonPrefs.RegisterBool(Category, nameof(HideScoreData), false, "Permanently hides target data, heatmap, and intensity graph on the launch panel");
             MelonPrefs.RegisterBool(Category, nameof(FirstPlayBlind), false, "Hides target data, heatmap, and intensity graph only for songs you've never played");
+            MelonPrefs.RegisterBool(Category, nameof(MenuAimAssist), true, "Temporal aim assist for menu buttons: a trigger pull that just missed a button still clicks it if you were on it a moment earlier");
+            MelonPrefs.RegisterFloat(Category, nameof(MenuAimAssistWindowMs), 100f, "How far back (ms) menu aim assist looks for a button you were aiming at [30,200,5,100]");
             MelonPrefs.RegisterBool(Category, nameof(WrapSongList), false, "Loops the song list like a wheel — scrolling or dragging past either end wraps around to the other");
             MelonPrefs.RegisterBool(Category, nameof(OptionsBackToSongList), true, "While in the song list's Options menu, the bottom Back button returns to the song list instead of the main menu");
             MelonPrefs.RegisterBool(Category, nameof(PracticeModeMinimizeButtonEnabled), true, "Adds a button in practice mode to minimize its panel");
@@ -307,6 +311,8 @@ namespace ExScoringMod
             HideScoreData = MelonPrefs.GetBool(Category, nameof(HideScoreData));
             FirstPlayBlind = MelonPrefs.GetBool(Category, nameof(FirstPlayBlind));
             WrapSongList = MelonPrefs.GetBool(Category, nameof(WrapSongList));
+            MenuAimAssist = MelonPrefs.GetBool(Category, nameof(MenuAimAssist));
+            MenuAimAssistWindowMs = MelonPrefs.GetFloat(Category, nameof(MenuAimAssistWindowMs));
             OptionsBackToSongList = MelonPrefs.GetBool(Category, nameof(OptionsBackToSongList));
             PracticeModeMinimizeButtonEnabled = MelonPrefs.GetBool(Category, nameof(PracticeModeMinimizeButtonEnabled));
             RandomSongScope = MelonPrefs.GetInt(Category, nameof(RandomSongScope));
@@ -551,6 +557,22 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(FirstPlayBlind), value);
             FirstPlayBlind = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateMenuAimAssist(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(MenuAimAssist), value);
+            MenuAimAssist = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateMenuAimAssistWindowMs(float value)
+        {
+            if (value < 30f) value = 30f;
+            if (value > 200f) value = 200f;
+            MelonPrefs.SetFloat(Category, nameof(MenuAimAssistWindowMs), value);
+            MenuAimAssistWindowMs = value;
             MelonPrefs.SaveConfig();
         }
 

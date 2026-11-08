@@ -65,6 +65,8 @@ namespace ExScoringMod
         public static bool firstPlayBlind;
         public static bool wrapSongList;
         public static bool optionsBackToSongList;
+        public static bool menuAimAssist;
+        public static float menuAimAssistWindowMs;
         public static bool practiceModeMinimizeButtonEnabled;
         public static readonly string[] RandomSongScopeOptions = { "Folder Songs", "All Songs" };
         public static int randomSongScope;
@@ -246,6 +248,28 @@ namespace ExScoringMod
             firstPlayBlind = value;
             Config.UpdateFirstPlayBlind(value);
             ExScoring.RefreshScoreDataVisibility();
+        }
+
+        public static void GetMenuAimAssist()
+        {
+            menuAimAssist = Config.MenuAimAssist;
+        }
+
+        public static void SetMenuAimAssist(bool value)
+        {
+            menuAimAssist = value;
+            Config.UpdateMenuAimAssist(value);
+        }
+
+        public static void GetMenuAimAssistWindowMs()
+        {
+            menuAimAssistWindowMs = Config.MenuAimAssistWindowMs;
+        }
+
+        public static void SetMenuAimAssistWindowMs(float value)
+        {
+            menuAimAssistWindowMs = value;
+            Config.UpdateMenuAimAssistWindowMs(value);
         }
 
         public static void GetOptionsBackToSongList()
