@@ -496,6 +496,7 @@ namespace ExScoringMod
 
         public override void OnLateUpdate()
         {
+            MpPresence.LateTick();
             VirtualSongList.Sync();
             ScrollIndicator.Tick();
             EnforceLaunchPanelBlank();

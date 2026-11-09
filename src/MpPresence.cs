@@ -64,6 +64,36 @@ namespace ExScoringMod
     /// flash and dust use the game's per-hand colour slot, so they show this player's own colour
     /// for that hand.
     ///
+    /// What a remote shot meets (Gun.Fire's miss branch and Gun.OnThrownShootableHit, Ghidra 2026-11-07):
+    ///  - This player's thrown guns (Gun.GetCurrentTrick() == Throw): the shot's line is tested against
+    ///    the colliders of the gun's thrownShootable (or the solid box on GunX/tricks), for the bounce.
+    ///    The push itself comes from the shooter's gunHit (below). Only on a server without "gunHit"
+    ///    does the shot as drawn here push the gun (rigidBody.AddForceAtPosition(forward x 100, hit,
+    ///    Force), once per shot), judged ~RenderDelayMs plus latency after it was fired.
+    ///  - Other players' thrown gun copies (pose more than GunThrownDistance from that hand) bounce it
+    ///    too, visual only: their owner is told by the shooter.
+    ///  - Rebounds: the nearest of a thrown gun with shouldRicochet, a platform (this player's own and
+    ///    every shown disc copy, through KataConfig.groundDisc's own test with the line shifted into
+    ///    the copy's place; ghosted discs skipped) or active menu glass (KataConfig.mRicochetRects).
+    ///    As in Gun.Fire: the beam is cut to end there, a rebound beam from the miss prefab (its own
+    ///    pool per remote hand, in that player's colour) leaves along the reflection plus 0.15 scatter,
+    ///    and KataConfig.ricochetParticlePrefab and the rebound sound (emitterPool.PlayEvent(
+    ///    "event:/gameplay/ricochet", the shooter's gun position)) play.
+    ///
+    /// This player's own shots on the others (v2.45). Gun.Fire can't be patched, so the Gun.UpdateTrigger
+    /// postfix queues the shot and LateTick (Main.OnLateUpdate, after every Gun.Update) looks at it once
+    /// native has drawn it (HandleLocalShot):
+    ///  - Rebounds off the other players' discs and thrown gun copies, which native doesn't know: when
+    ///    one is nearer than native's own bounce (if any), native's beam is cut there, native's farther
+    ///    rebound beam is switched off, and a rebound beam leaves from the gun's own miss pool as in
+    ///    Gun.Fire, with the ricochet particle and sound (the sound only when native didn't bounce
+    ///    the shot itself, as it already played it then).
+    ///  - gunHit: a shot on another player's thrown gun copy (in front of whatever stops the beam) sends
+    ///    gunHit { target, hand, point in that gun's local space, dir } (MpSession.SendGunHit, only with
+    ///    "gunHit" on the connection, at most every GunHitSendCooldown per gun). The server relays it to
+    ///    the owner only, who pushes their own gun as a native shot would (HandleGunHit), with the
+    ///    point put back on their gun pose; everyone sees the push through the owner's poses.
+    ///
     /// Drawing: each remote player's samples are buffered and drawn RenderDelayMs behind server
     /// time, interpolating on each sample's t (lerp / slerp, holding the last pose if nothing newer
     /// came). Players missing from the latest poses message are hidden; every avatar is hidden on
@@ -218,6 +248,15 @@ namespace ExScoringMod
         private const int BeamDustBurst = 3500;          // Gun.DoBeamDust: burstNum += 0xdac
         private const int BeamDustEmitterShape = 6;      // Gun.DoBeamDust: SetBeamEmitterShape(6)
         private const string FirepointName = "Firepoint";
+
+        // Rebounds and thrown guns, the game's own numbers (Gun.Fire / Gun.OnThrownShootableHit, Ghidra 2026-11-07).
+        private const float RicochetScatter = 0.15f;     // Reflect(...) + Random.onUnitSphere * 0.15
+        private const string RicochetSoundEvent = "event:/gameplay/ricochet"; // _StringLiteral_9242 (UnityExplorer probe 2026-11-08)
+        private const int RicochetParticleMode = 3;      // ParticleInstantiator.CreateAndPlay(..., 3, false, 1.0)
+        private const float ThrownShotForce = 100f;      // AddForceAtPosition(forward * 100, position, ForceMode.Force)
+        private const float ShotRayLength = 100f;        // how far a shot can reach a thrown gun
+        private const float NativeBeamMatchDistance = 0.3f; // native's beam starts this close to the firepoint
+        private const float GunHitSendCooldown = 0.04f;  // per gun; the game fires at most every 0.05 s per hand
 
         // Hand animation (v2.42) and the gun slide, the game's own numbers (Ghidra / in-game dumps, 2026-10-30).
         private const float HandBlendRate = 20f;         // KataHand.INPUT_RATE_CHANGE: a blend moves 20 per second
@@ -459,6 +498,10 @@ namespace ExScoringMod
             public GunBeam Prefab;
             public GunBeam[] Beams;
             public int Cycle;
+            /// <summary>The local same-hand gun's missBeamPrefab and its pool: the rebound beams (Gun.Fire takes them from mMissBeams). Null when the gun has none.</summary>
+            public GunBeam MissPrefab;
+            public GunBeam[] MissBeams;
+            public int MissCycle;
             public MuzzleFlash Muzzle;
             /// <summary>This player's beam texture: a copy of the native one, repainted in their gun colour.</summary>
             public RenderTexture Texture;
@@ -599,6 +642,8 @@ namespace ExScoringMod
             public float HeadshotStart = -1f;
             public List<HeadshotRenderer> HeadshotRenderers;
             public float LastHeadshotSent = -100f;
+            /// <summary>v2.45: when this player last reported hitting each of this player's thrown guns (0 = left, 1 = right).</summary>
+            public readonly float[] LastGunHitSent = { -100f, -100f };
 
             // v2.44 cosmetics: the model key each slot should show (MpCosmetics.Slot* order) and the
             // one the current avatar was built with. A difference rebuilds the avatar.
@@ -696,6 +741,14 @@ namespace ExScoringMod
         private static PostprocController postprocController;
         private static MaterialPropertyBlock headshotBlock;
         private static int headshotsSent, headshotsReceived;
+
+        // Rebounds and thrown guns hit by remote shots.
+        private static int ricochetsShown, thrownGunHits;
+        // This player's own shots on the others (v2.45): queued per hand by the UpdateTrigger postfix, read in LateTick.
+        private static readonly int[] pendingShotFrame = { -1, -1 };
+        private static int localRebounds, localBeamsNotFound, gunHitsSent, gunHitsReceived;
+        private static System.Reflection.MethodInfo particleCreateAndPlay;
+        private static bool particleCallFailed, ricochetSoundFailed;
         private static int selfHeadshotsSent;
         private static float lastSelfHeadshotSent = -100f;
 
@@ -744,6 +797,7 @@ namespace ExScoringMod
                 // A new rate starts its schedule now rather than waiting out the old interval.
                 MpSession.OnPoseRateChanged += _ => nextPoseAtMs = 0;
                 MpSession.OnHeadshot += HandleHeadshot;
+                MpSession.OnGunHit += HandleGunHit;
             }
 
             // v2.44: finished downloads, packaging and uploads report back here, even outside a lobby.
@@ -1839,11 +1893,27 @@ namespace ExScoringMod
             Vector3 forward = firepoint.forward;
             float roll = gunPart.eulerAngles.z;
 
+            // What the shot meets (Gun.Fire's miss branch): this player's thrown guns get pushed, and
+            // the nearest thrown gun, platform or menu glass bounces the beam.
+            ThrownGunHit gunHit = FindThrownGunHit(position, forward);
+            bool bounces = FindRicochet(position, forward, gunPart.position, gunHit, false, out Ricochet ricochet);
+
             int beams = Math.Min(count, BeamPoolSize);
             for (int i = 0; i < beams; i++)
             {
                 fx.Cycle = (fx.Cycle + 1) % fx.Beams.Length; // BeamPool.GetBeam
-                FireBeam(fx.Beams[fx.Cycle], fx.Prefab, position, forward, roll);
+                GunBeam beam = fx.Beams[fx.Cycle];
+                FireBeam(beam, fx.Prefab, position, forward, roll);
+                if (bounces) FireRicochetBeam(fx, beam, ricochet, position, forward);
+                // With "gunHit" the shooter decides and tells us (HandleGunHit); without it (an older
+                // server) the shot as drawn here decides, so the push still happens, never twice.
+                if (gunHit.Gun != null && !MpSession.GunHitEnabled) PushThrownGun(gunHit.Gun, gunHit.Toy, gunHit.Point, forward);
+            }
+            if (bounces)
+            {
+                ricochetsShown++;
+                PlayRicochetSound(gunPart.position);
+                PlayRicochetParticle(ricochet, forward, gunPart.rotation);
             }
 
             if (IsAlive(fx.Muzzle)) fx.Muzzle.Play(position, forward, roll);
@@ -1863,6 +1933,608 @@ namespace ExScoringMod
             t.localScale = prefab.transform.localScale;
             beam.speed = prefab.speed;
             beam.Fire();
+        }
+
+        // ── Rebounds and thrown guns (Gun.Fire's miss branch, Gun.OnThrownShootableHit) ──
+
+        /// <summary>Where a remote shot bounces: the point, the surface normal, and how far from the firepoint.</summary>
+        private struct Ricochet
+        {
+            public Vector3 Point;
+            public Vector3 Normal;
+            public float Distance;
+            public string Surface; // debug
+        }
+
+        /// <summary>One of this player's thrown guns hit by a remote shot (Gun is null when none was).</summary>
+        private struct ThrownGunHit
+        {
+            public Gun Gun;
+            public ShootableToy Toy;
+            public Vector3 Point;
+            public float Distance;
+        }
+
+        /// <summary>
+        /// The nearest of this player's own thrown guns on the shot's line. Only this player's guns:
+        /// each client simulates its own, so the others see the push through this player's poses.
+        /// The line is tested against the colliders of the gun's thrownShootable (falling back to the
+        /// solid box on GunX/tricks), whatever their layer.
+        /// </summary>
+        private static ThrownGunHit FindThrownGunHit(Vector3 position, Vector3 forward)
+        {
+            ThrownGunHit best = default;
+            best.Distance = float.MaxValue;
+            Ray ray = new Ray(position, forward);
+            for (int h = 0; h < 2; h++)
+            {
+                Gun gun = h == 0 ? localGunL : localGunR;
+                if (!IsThrown(gun)) continue;
+                ShootableToy toy = gun.thrownShootable;
+                if (!IsAlive(toy)) continue;
+                if (!RaycastThrownGun(gun, toy, ray, best.Distance, out RaycastHit hit)) continue;
+                best.Gun = gun;
+                best.Toy = toy;
+                best.Point = hit.point;
+                best.Distance = hit.distance;
+            }
+            return best;
+        }
+
+        /// <summary>The gun is out of the hand in a throw trick (Gun.GetCurrentTrick).</summary>
+        private static bool IsThrown(Gun gun)
+        {
+            if (!IsAlive(gun)) return false;
+            try
+            {
+                return gun.GetCurrentTrick() == Gun.Trick.Throw && gun.rigidBody != null;
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        private static bool RaycastThrownGun(Gun gun, ShootableToy toy, Ray ray, float maxDistance, out RaycastHit best)
+        {
+            best = default;
+            bool found = false;
+            float nearest = Math.Min(maxDistance, ShotRayLength);
+            var colliders = toy.GetComponentsInChildren<Collider>(false);
+            if (colliders == null || colliders.Length == 0)
+            {
+                Transform tricks = gun.transform.Find(GunColliderPath);
+                if (tricks != null) colliders = tricks.GetComponents<Collider>();
+            }
+            if (colliders == null) return false;
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                Collider collider = colliders[i];
+                if (collider == null || !collider.enabled || collider.isTrigger) continue;
+                if (!collider.Raycast(ray, out RaycastHit hit, nearest)) continue;
+                nearest = hit.distance;
+                best = hit;
+                found = true;
+            }
+            return found;
+        }
+
+        /// <summary>
+        /// Gun.OnThrownShootableHit for a shot from another player: rigidBody.AddForceAtPosition(the
+        /// shooter's forward x 100, the hit point, ForceMode.Force), with the shot's own forward
+        /// standing in for the shooter's rewound firepoint. lastShotPosition is set as ShootableToy.OnHit does.
+        /// </summary>
+        private static void PushThrownGun(Gun gun, ShootableToy toy, Vector3 point, Vector3 forward)
+        {
+            try
+            {
+                Rigidbody body = gun.rigidBody;
+                if (body == null) return;
+                if (IsAlive(toy)) toy.lastShotPosition = point;
+                body.AddForceAtPosition(forward * ThrownShotForce, point, ForceMode.Force);
+                thrownGunHits++;
+            }
+            catch (Exception ex)
+            {
+                Log($"pushing a thrown gun failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// gunHit (v2.45): another player's shot hit one of this player's guns while thrown. The point
+        /// comes in that gun's local space (the pose this player sends: tricks/mesh, kept while thrown),
+        /// so it lands on the same spot of the gun however far it moved since. Nothing happens if the
+        /// gun is already back in hand.
+        /// </summary>
+        private static void HandleGunHit(MpGunHit hit)
+        {
+            try
+            {
+                gunHitsReceived++;
+                if (InSong()) return;
+                int hand = hit.hand == "l" ? 0 : 1;
+                Gun gun = hand == 0 ? localGunL : localGunR;
+                if (!IsThrown(gun)) return;
+                Transform pose = hand == 0 ? localGunPoseL : localGunPoseR;
+                if (pose == null) pose = gun.transform;
+                Vector3 point = pose.TransformPoint(new Vector3(hit.point[0], hit.point[1], hit.point[2]));
+                Vector3 dir = new Vector3(hit.dir[0], hit.dir[1], hit.dir[2]);
+                if (dir.sqrMagnitude < 1e-6f) return;
+                ShootableToy toy = null;
+                try { toy = gun.thrownShootable; } catch { }
+                PushThrownGun(gun, toy, point, dir.normalized);
+                Log($"gunHit: {hit.shooter ?? "?"} pushed my {hit.hand} gun");
+            }
+            catch (Exception ex)
+            {
+                Log($"gunHit failed: {ex.Message}");
+            }
+        }
+
+        // ── This player's own shots on the other players (rebounds off their discs and guns, gunHit) ──
+
+        /// <summary>The shot is worth checking: in a lobby, presence on, others shown, not in a song.</summary>
+        private static bool LocalShotsInteract()
+        {
+            return MpSession.PresenceEnabled && MpSession.InLobby && Config.ShowOtherPlayers && remotes.Count > 0 && !InSong();
+        }
+
+        /// <summary>
+        /// From the Gun.UpdateTrigger postfix: this gun fires this frame. Gun.Fire runs after
+        /// UpdateTrigger in the same Gun.Update, and it can't be patched (PreciseTiming.cs), so the
+        /// shot is looked at in LateTick, once native has drawn its beam.
+        /// </summary>
+        private static void QueueLocalShot(Gun gun)
+        {
+            if (!LocalShotsInteract()) return;
+            int hand = HandOf(gun);
+            if (hand < 0) return;
+            pendingShotFrame[hand] = Time.frameCount;
+        }
+
+        /// <summary>From Main.OnLateUpdate: this frame's queued shots, after every Gun.Update.</summary>
+        public static void LateTick()
+        {
+            for (int h = 0; h < 2; h++)
+            {
+                int frame = pendingShotFrame[h];
+                if (frame < 0) continue;
+                pendingShotFrame[h] = -1;
+                if (frame != Time.frameCount) continue;
+                Gun gun = h == 0 ? localGunL : localGunR;
+                if (!IsAlive(gun)) continue;
+                try
+                {
+                    HandleLocalShot(gun, h);
+                }
+                catch (Exception ex)
+                {
+                    Log($"own shot on other players failed: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>
+        /// One of this player's shots, after native drew it:
+        ///  - finds native's beam (the pooled beam that just left the firepoint, the miss pool in menus),
+        ///    and whether native already bounced it (Gun.Fire cuts the beam to the hit: localScale.z
+        ///    shorter than the prefab's)
+        ///  - the nearest other player's disc or thrown gun copy on the beam's line (FindRicochet,
+        ///    localShot), closer than native's own bounce
+        ///  - a thrown gun copy hit there: gunHit to its owner, with the point in that gun's local space
+        ///  - a bounce there: native's beam is cut to it, native's own rebound beam (if any, farther
+        ///    away) is switched off, and a rebound beam from the gun's own miss pool leaves as in
+        ///    Gun.Fire, with the ricochet particle. Native's particle at its own (farther) bounce point
+        ///    has already played and stays
+        /// Without native's beam (none found) the firepoint's line is used, for gunHit only.
+        /// </summary>
+        private static void HandleLocalShot(Gun gun, int hand)
+        {
+            Transform firepoint = gun.firepoint;
+            if (firepoint == null) return;
+
+            GunBeam main = FindNativeBeam(gun, firepoint.position, out Gun.BeamPool mainPool, out int mainIndex);
+            Vector3 position = main != null ? main.transform.position : firepoint.position;
+            Vector3 forward = main != null ? main.transform.forward : firepoint.forward;
+            if (main == null) localBeamsNotFound++;
+
+            float nativeDistance = float.MaxValue;
+            GunBeam mainPrefab = mainPool != null ? mainPool.mPrefab : null;
+            if (main != null && mainPrefab != null)
+            {
+                float cut = main.transform.localScale.z;
+                if (cut < mainPrefab.transform.localScale.z - 1e-3f) nativeDistance = cut;
+            }
+
+            // gunHit: the nearest thrown gun copy in front of anything that stops the beam.
+            bool found = FindRicochet(position, forward, gun.transform.position, default, true, out Ricochet ricochet);
+            float stop = Math.Min(nativeDistance, found ? ricochet.Distance + 1e-3f : float.MaxValue);
+            RemoteGunHit gunHit = FindRemoteGunHit(position, forward, stop);
+            if (gunHit.Remote != null) SendGunHitFor(gunHit, forward);
+
+            if (!found || ricochet.Distance >= nativeDistance || main == null || mainPrefab == null) return;
+
+            // Native bounced farther away (menu glass behind the disc): its rebound beam goes.
+            if (nativeDistance < float.MaxValue) HideNativeRebound(gun, mainPool, mainIndex, firepoint.position);
+
+            Transform mt = main.transform;
+            Vector3 scale = mainPrefab.transform.localScale;
+            main.speed = scale.z / Math.Max(ricochet.Distance, 1e-4f) * mainPrefab.speed;
+            scale.z = ricochet.Distance;
+            mt.localScale = scale;
+
+            Gun.BeamPool missPool = gun.mMissBeams;
+            GunBeam missPrefab = missPool != null ? missPool.mPrefab : null;
+            GunBeam beam = missPool != null ? missPool.GetBeam() : null;
+            if (IsAlive(beam) && missPrefab != null)
+            {
+                Vector3 direction = Vector3.Reflect(forward, ricochet.Normal) + UnityEngine.Random.onUnitSphere * RicochetScatter;
+                if (direction.sqrMagnitude > 1e-8f)
+                {
+                    Transform t = beam.transform;
+                    t.position = ricochet.Point;
+                    t.rotation = Quaternion.LookRotation(direction, Vector3.Cross(forward, direction));
+                    t.localScale = missPrefab.transform.localScale;
+                    beam.speed = missPrefab.speed;
+                    beam.Fire();
+                }
+            }
+            if (nativeDistance == float.MaxValue) PlayRicochetSound(gun.transform.position); // a native bounce already played it
+            PlayRicochetParticle(ricochet, forward, gun.transform.rotation);
+            localRebounds++;
+        }
+
+        /// <summary>
+        /// The beam native just fired: of the current and previous beam in the gun's miss and success
+        /// pools, the active one that starts at the firepoint (within NativeBeamMatchDistance) with the
+        /// least travel. Null if none.
+        /// </summary>
+        private static GunBeam FindNativeBeam(Gun gun, Vector3 firepoint, out Gun.BeamPool pool, out int index)
+        {
+            pool = null;
+            index = -1;
+            GunBeam best = null;
+            float bestTravel = float.MaxValue;
+            Gun.BeamPool[] pools = { gun.mMissBeams, gun.mSuccessBeams };
+            foreach (Gun.BeamPool candidate in pools)
+            {
+                if (candidate == null) continue;
+                var beams = candidate.mBeams;
+                if (beams == null || beams.Length == 0) continue;
+                int cycle = candidate.mCycle;
+                for (int back = 0; back < 2; back++)
+                {
+                    int i = ((cycle - back) % beams.Length + beams.Length) % beams.Length;
+                    GunBeam beam = beams[i];
+                    if (!IsAlive(beam) || !beam.gameObject.activeInHierarchy) continue;
+                    if ((beam.transform.position - firepoint).sqrMagnitude > NativeBeamMatchDistance * NativeBeamMatchDistance) continue;
+                    float travel = beam.mTravel;
+                    if (travel >= bestTravel) continue;
+                    bestTravel = travel;
+                    best = beam;
+                    pool = candidate;
+                    index = i;
+                }
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// Switches off the rebound beam native fired for this shot: the miss pool's beam right after
+        /// the main one (or its current one when the main beam came from the success pool), if it is
+        /// active and away from the firepoint.
+        /// </summary>
+        private static void HideNativeRebound(Gun gun, Gun.BeamPool mainPool, int mainIndex, Vector3 firepoint)
+        {
+            Gun.BeamPool missPool = gun.mMissBeams;
+            if (missPool == null) return;
+            var beams = missPool.mBeams;
+            if (beams == null || beams.Length == 0) return;
+            int i = mainPool != null && mainPool.Pointer == missPool.Pointer ? (mainIndex + 1) % beams.Length : missPool.mCycle;
+            GunBeam beam = beams[i];
+            if (!IsAlive(beam) || !beam.gameObject.activeSelf) return;
+            if ((beam.transform.position - firepoint).sqrMagnitude <= NativeBeamMatchDistance * NativeBeamMatchDistance) return;
+            beam.gameObject.SetActive(false);
+        }
+
+        /// <summary>gunHit to the gun copy's owner, at most once per GunHitSendCooldown per gun.</summary>
+        private static void SendGunHitFor(RemoteGunHit hit, Vector3 forward)
+        {
+            if (!MpSession.GunHitEnabled) return;
+            float now = Time.unscaledTime;
+            if (now - hit.Remote.LastGunHitSent[hit.Hand] < GunHitSendCooldown) return;
+            hit.Remote.LastGunHitSent[hit.Hand] = now;
+            Vector3 local = hit.GunPart.InverseTransformPoint(hit.Point);
+            MpSession.SendGunHit(hit.Remote.UserId, hit.Hand == 0 ? "l" : "r", local, forward.normalized);
+            gunHitsSent++;
+            Log($"gunHit: shot {hit.Remote.UserId}'s {(hit.Hand == 0 ? "left" : "right")} gun at {hit.Distance:F2} m");
+        }
+
+        /// <summary>
+        /// What a shot bounces off, nearest first (Gun.Fire, Ghidra 2026-11-07):
+        ///  - a thrown gun whose thrownShootable has shouldRicochet: at the hit point, normal =
+        ///    normalize(shooter's gun position - gun position). For a remote shot that is one of this
+        ///    player's own (gunHit) or a shown remote player's gun copy; for this player's own shot
+        ///    only the copies (native already handles its own guns)
+        ///  - a platform (KataConfig.groundDisc's CheckIntersection, normal = its up): every shown
+        ///    disc copy, tested by moving the line into the copy's place (the copies are only shifted,
+        ///    never turned), and for a remote shot this player's own platform too. A ghosted disc
+        ///    (Fading discs) is skipped, as this player's own shots go through it then
+        ///  - for a remote shot, menu glass (KataConfig.mRicochetRects, active ones, normal = -forward)
+        /// Gun.Fire checks them in that order; here the nearest wins, since a shot can cross several
+        /// (another player's disc in front of this one's, say). The overdrive condition on the floor
+        /// is song-only, and nothing here runs in songs.
+        /// </summary>
+        private static bool FindRicochet(Vector3 position, Vector3 forward, Vector3 shooterGun, ThrownGunHit gunHit, bool localShot, out Ricochet best)
+        {
+            best = default;
+            best.Distance = float.MaxValue;
+            bool found = false;
+
+            if (!localShot && gunHit.Gun != null && IsAlive(gunHit.Toy) && gunHit.Toy.shouldRicochet)
+            {
+                Vector3 normal = shooterGun - gunHit.Toy.transform.position;
+                if (normal.sqrMagnitude > 1e-8f)
+                {
+                    best = new Ricochet { Point = gunHit.Point, Normal = normal.normalized, Distance = gunHit.Distance, Surface = "my thrown gun" };
+                    found = true;
+                }
+            }
+
+            // Remote players' thrown gun copies (they bounce like a native thrown gun).
+            if (LocalToyRicochets())
+            {
+                RemoteGunHit copyHit = FindRemoteGunHit(position, forward, best.Distance);
+                if (copyHit.Remote != null)
+                {
+                    Vector3 normal = shooterGun - copyHit.GunPart.position;
+                    if (normal.sqrMagnitude > 1e-8f)
+                    {
+                        best = new Ricochet { Point = copyHit.Point, Normal = normal.normalized, Distance = copyHit.Distance, Surface = copyHit.Remote.UserId + "'s thrown gun" };
+                        found = true;
+                    }
+                }
+            }
+
+            KataConfig config = KataConfig.I;
+            if (config == null) return found;
+
+            DiscIntersectable disc = config.groundDisc;
+            if (IsAlive(disc) && disc.gameObject.activeInHierarchy)
+            {
+                Vector3 up = disc.transform.up;
+                if (!localShot) found |= TryDisc(disc, Vector3.zero, up, position, forward, "my platform", ref best);
+                foreach (Remote remote in remotes.Values)
+                {
+                    if (remote.Root == null || !remote.Root.activeSelf) continue;
+                    if (remote.Disc == null || !remote.Disc.gameObject.activeInHierarchy) continue;
+                    if (remote.Fade != null && remote.Fade.Swapped) continue;
+                    found |= TryDisc(disc, remote.Root.transform.position, up, position, forward, remote.UserId + "'s platform", ref best);
+                }
+            }
+
+            if (localShot) return found;
+            var rects = config.mRicochetRects;
+            if (rects != null)
+            {
+                for (int i = 0; i < rects.Count; i++)
+                {
+                    RectIntersectable rect = rects[i];
+                    if (!IsAlive(rect) || !rect.gameObject.activeInHierarchy) continue;
+                    if (!rect.CheckIntersection(position, forward, out Vector3 point)) continue;
+                    float distance = Vector3.Distance(position, point);
+                    if (distance >= best.Distance) continue;
+                    best = new Ricochet { Point = point, Normal = -rect.transform.forward, Distance = distance, Surface = "menu glass" };
+                    found = true;
+                }
+            }
+            return found;
+        }
+
+        /// <summary>
+        /// Whether thrown guns bounce shots: this player's own thrownShootable.shouldRicochet (the
+        /// remote copies have no toy of their own; every player's gun comes from the same prefab).
+        /// </summary>
+        private static bool LocalToyRicochets()
+        {
+            Gun gun = IsAlive(localGunR) ? localGunR : localGunL;
+            if (!IsAlive(gun)) return true;
+            try
+            {
+                ShootableToy toy = gun.thrownShootable;
+                return !IsAlive(toy) || toy.shouldRicochet;
+            }
+            catch
+            {
+                return true;
+            }
+        }
+
+        /// <summary>A remote player's thrown gun copy on a shot's line (Remote is null when none was).</summary>
+        private struct RemoteGunHit
+        {
+            public Remote Remote;
+            public int Hand;
+            public Transform GunPart;
+            public Vector3 Point;
+            public float Distance;
+        }
+
+        /// <summary>
+        /// A remote player's gun counts as thrown when its pose is more than GunThrownDistance from
+        /// that hand (the same test the glove uses). Both parts must be shown.
+        /// </summary>
+        private static bool RemoteGunThrown(Remote remote, int hand)
+        {
+            Transform gun = hand == 0 ? remote.LGun : remote.RGun;
+            Transform handPart = hand == 0 ? remote.LHand : remote.RHand;
+            if (gun == null || handPart == null) return false;
+            if (!gun.gameObject.activeSelf || !handPart.gameObject.activeSelf) return false;
+            return (gun.position - handPart.position).sqrMagnitude > GunThrownDistance * GunThrownDistance;
+        }
+
+        /// <summary>
+        /// The nearest shown remote thrown gun copy on the line, closer than maxDistance, tested
+        /// against the copy's own colliders (the GunX/tricks box copy).
+        /// </summary>
+        private static RemoteGunHit FindRemoteGunHit(Vector3 position, Vector3 forward, float maxDistance)
+        {
+            RemoteGunHit best = default;
+            float nearest = Math.Min(maxDistance, ShotRayLength);
+            Ray ray = new Ray(position, forward);
+            bool synced = false;
+            foreach (Remote remote in remotes.Values)
+            {
+                if (remote.Root == null || !remote.Root.activeSelf) continue;
+                for (int h = 0; h < 2; h++)
+                {
+                    if (!RemoteGunThrown(remote, h)) continue;
+                    if (!synced)
+                    {
+                        Physics.SyncTransforms(); // the copies are moved by their transforms
+                        synced = true;
+                    }
+                    Transform gun = h == 0 ? remote.LGun : remote.RGun;
+                    var colliders = gun.GetComponentsInChildren<Collider>(false);
+                    if (colliders == null) continue;
+                    for (int i = 0; i < colliders.Length; i++)
+                    {
+                        Collider collider = colliders[i];
+                        if (collider == null || !collider.enabled) continue;
+                        if (!collider.Raycast(ray, out RaycastHit hit, nearest)) continue;
+                        nearest = hit.distance;
+                        best = new RemoteGunHit { Remote = remote, Hand = h, GunPart = gun, Point = hit.point, Distance = hit.distance };
+                    }
+                }
+            }
+            return best;
+        }
+
+        /// <summary>The native disc test on a copy shifted by offset: the line is moved back by it, the hit forward again.</summary>
+        private static bool TryDisc(DiscIntersectable disc, Vector3 offset, Vector3 up, Vector3 position, Vector3 forward, string surface, ref Ricochet best)
+        {
+            if (!disc.CheckIntersection(position - offset, forward, out Vector3 point)) return false;
+            point += offset;
+            float distance = Vector3.Distance(position, point);
+            if (distance >= best.Distance) return false;
+            best = new Ricochet { Point = point, Normal = up, Distance = distance, Surface = surface };
+            return true;
+        }
+
+        /// <summary>
+        /// Gun.Fire's rebound for one beam: the beam already fired is cut to end at the hit
+        /// (localScale.z = distance, speed x old z / distance), then the next rebound beam leaves the
+        /// hit point along Reflect(beam forward, normal) + Random.onUnitSphere x 0.15, up =
+        /// Cross(forward, that), with the miss prefab's scale and speed. Without a miss pool the
+        /// success pool is used.
+        /// </summary>
+        private static void FireRicochetBeam(ShotFx fx, GunBeam first, Ricochet ricochet, Vector3 position, Vector3 forward)
+        {
+            Vector3 beamForward = forward;
+            if (IsAlive(first))
+            {
+                Transform ft = first.transform;
+                beamForward = ft.forward;
+                Vector3 scale = ft.localScale;
+                float distance = Vector3.Distance(position, ricochet.Point);
+                if (distance > 1e-4f)
+                {
+                    first.speed = scale.z / distance * first.speed;
+                    scale.z = distance;
+                    ft.localScale = scale;
+                }
+            }
+
+            GunBeam prefab;
+            GunBeam beam;
+            if (fx.MissBeams != null && fx.MissPrefab != null)
+            {
+                fx.MissCycle = (fx.MissCycle + 1) % fx.MissBeams.Length;
+                beam = fx.MissBeams[fx.MissCycle];
+                prefab = fx.MissPrefab;
+            }
+            else
+            {
+                fx.Cycle = (fx.Cycle + 1) % fx.Beams.Length;
+                beam = fx.Beams[fx.Cycle];
+                prefab = fx.Prefab;
+            }
+            if (!IsAlive(beam) || prefab == null) return;
+
+            Vector3 direction = Vector3.Reflect(beamForward, ricochet.Normal) + UnityEngine.Random.onUnitSphere * RicochetScatter;
+            if (direction.sqrMagnitude < 1e-8f) return;
+            Transform t = beam.transform;
+            t.position = ricochet.Point;
+            t.rotation = Quaternion.LookRotation(direction, Vector3.Cross(forward, direction));
+            t.localScale = prefab.transform.localScale;
+            beam.speed = prefab.speed;
+            beam.Fire();
+        }
+
+        /// <summary>
+        /// Gun.Fire's rebound sound: KataConfig.emitterPool.PlayEvent("event:/gameplay/ricochet", the
+        /// shooting gun's position). Logged once and given up on if it throws.
+        /// </summary>
+        private static void PlayRicochetSound(Vector3 gunPosition)
+        {
+            if (ricochetSoundFailed) return;
+            try
+            {
+                KataConfig config = KataConfig.I;
+                OneshotEmitterPool pool = config != null ? config.emitterPool : null;
+                if (pool == null) return;
+                pool.PlayEvent(RicochetSoundEvent, gunPosition);
+            }
+            catch (Exception ex)
+            {
+                ricochetSoundFailed = true;
+                Log($"ricochet sound failed, not trying again: {ex.Message}");
+            }
+        }
+
+        /// <summary>
+        /// Gun.Fire's ricochet particle: ParticleInstantiator.CreateAndPlay(KataConfig.ricochetParticlePrefab,
+        /// hit - forward x distance x 0.1, the shooting gun's rotation, no parent, 3, false, 1). Called by
+        /// reflection, so a different signature only costs the particle (logged once).
+        /// </summary>
+        private static void PlayRicochetParticle(Ricochet ricochet, Vector3 forward, Quaternion gunRotation)
+        {
+            if (particleCallFailed) return;
+            try
+            {
+                KataConfig config = KataConfig.I;
+                GameObject prefab = config != null ? config.ricochetParticlePrefab : null;
+                if (prefab == null) return;
+
+                if (particleCreateAndPlay == null)
+                {
+                    Type type = typeof(KataConfig).Assembly.GetType("ParticleInstantiator");
+                    if (type != null)
+                    {
+                        foreach (System.Reflection.MethodInfo m in type.GetMethods(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))
+                        {
+                            if (m.Name == "CreateAndPlay" && m.GetParameters().Length == 7) { particleCreateAndPlay = m; break; }
+                        }
+                    }
+                    if (particleCreateAndPlay == null)
+                    {
+                        particleCallFailed = true;
+                        Log("ParticleInstantiator.CreateAndPlay (7 arguments) not found, rebounds show no particle");
+                        return;
+                    }
+                }
+
+                var ps = particleCreateAndPlay.GetParameters();
+                Type modeType = ps[4].ParameterType;
+                object mode = modeType.IsEnum ? Enum.ToObject(modeType, RicochetParticleMode) : Convert.ChangeType(RicochetParticleMode, modeType);
+                Vector3 at = ricochet.Point - forward * (ricochet.Distance * 0.1f);
+                particleCreateAndPlay.Invoke(null, new object[] { prefab, at, gunRotation, null, mode, false, 1f });
+            }
+            catch (Exception ex)
+            {
+                particleCallFailed = true;
+                Log($"ricochet particle failed, not trying again: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -1926,6 +2598,23 @@ namespace ExScoringMod
                     fx.Beams[i] = beam;
                 }
 
+                // The rebound beams: the same, from the miss prefab (Gun.SetUp's mMissBeams).
+                GunBeam missPrefab = local.missBeamPrefab;
+                if (missPrefab != null)
+                {
+                    fx.MissPrefab = missPrefab;
+                    fx.MissBeams = new GunBeam[BeamPoolSize];
+                    for (int i = 0; i < BeamPoolSize; i++)
+                    {
+                        GunBeam beam = UnityEngine.Object.Instantiate<GunBeam>(missPrefab, config.transform);
+                        beam.name = $"MpRicochetBeam {HandName(hand)} {remote.UserId}";
+                        beam.Init();
+                        UseBeamMaterials(fx, beam);
+                        beam.gameObject.SetActive(false);
+                        fx.MissBeams[i] = beam;
+                    }
+                }
+
                 // Gun.CreateMuzzleFlash: under instantiateParent, linked to the local gun of the
                 // same hand for its colour slot.
                 if (local.muzzleFlashPrefab != null)
@@ -1941,7 +2630,7 @@ namespace ExScoringMod
                 }
 
                 remote.Fx[hand] = fx;
-                Log($"{remote.UserId} {HandName(hand)}: shot effects built ({BeamPoolSize} beams, muzzle flash={fx.Muzzle != null}, texture={fx.Texture != null})");
+                Log($"{remote.UserId} {HandName(hand)}: shot effects built ({BeamPoolSize} beams, rebound beams={fx.MissBeams != null}, muzzle flash={fx.Muzzle != null}, texture={fx.Texture != null})");
                 return fx;
             }
             catch (Exception ex)
@@ -2033,6 +2722,13 @@ namespace ExScoringMod
             {
                 if (!IsAlive(fx.Beams[i])) return false;
             }
+            if (fx.MissBeams != null)
+            {
+                for (int i = 0; i < fx.MissBeams.Length; i++)
+                {
+                    if (!IsAlive(fx.MissBeams[i])) return false;
+                }
+            }
             return fx.Muzzle == null || IsAlive(fx.Muzzle);
         }
 
@@ -2044,6 +2740,13 @@ namespace ExScoringMod
                 if (fx.Beams != null)
                 {
                     foreach (GunBeam beam in fx.Beams)
+                    {
+                        if (IsAlive(beam)) UnityEngine.Object.Destroy(beam.gameObject);
+                    }
+                }
+                if (fx.MissBeams != null)
+                {
+                    foreach (GunBeam beam in fx.MissBeams)
                     {
                         if (IsAlive(beam)) UnityEngine.Object.Destroy(beam.gameObject);
                     }
@@ -2061,6 +2764,7 @@ namespace ExScoringMod
             }
             fx.Materials.Clear();
             fx.Beams = null;
+            fx.MissBeams = null;
             fx.Muzzle = null;
             fx.Texture = null;
         }
@@ -3961,6 +4665,8 @@ namespace ExScoringMod
             foreach (SlotTemplate entry in slotTemplates.Values) if (entry.Owned != null) customTemplates++;
             sb.AppendLine($"[MpPresence] cosmetics: connection={MpSession.CosmeticsEnabled} showCustom={Config.ShowCustomAvatars} templates={slotTemplates.Count} (custom {customTemplates}) failed={failedTemplates.Count} pendingLoads={pendingLoads.Count} loaded={customLoads} loadFailures={customLoadFailures}");
             sb.AppendLine($"[MpPresence] headshots: connection={MpSession.HeadshotEnabled} effects={Config.HeadshotEffects} sounds={Config.HeadshotSounds} sent={headshotsSent} (own head {selfHeadshotsSent}) received={headshotsReceived} postproc={(IsAlive(postprocController) ? "found" : "not looked up / none")}");
+            sb.AppendLine($"[MpPresence] my shots on others: rebounds={localRebounds} nativeBeamNotFound={localBeamsNotFound} gunHit connection={MpSession.GunHitEnabled} sent={gunHitsSent} received={gunHitsReceived}");
+            sb.AppendLine($"[MpPresence] remote shots: rebounds={ricochetsShown} thrownGunHits={thrownGunHits} particle={(particleCallFailed ? "failed" : (particleCreateAndPlay != null ? "found" : "not looked up"))} thrown L={IsThrown(localGunL)} R={IsThrown(localGunR)}");
             sb.AppendLine($"[MpPresence] sending: {MpSession.PoseRateHz} Hz ({(MpSession.PoseRateEnabled ? "server" : "default")}), my shots L={localShots[0]} R={localShots[1]}, pull L={PullJson(localGunL)} R={PullJson(localGunR)}");
             bool knuckles = UsingKnuckles();
             sb.AppendLine($"[MpPresence] hands: knuckles={knuckles} handAnim L={JsonDump(HandAnimJson(localKataL, 0, knuckles))} R={JsonDump(HandAnimJson(localKataR, 1, knuckles))} fingers L={JsonDump(FingersJson(localKataL, knuckles))} R={JsonDump(FingersJson(localKataR, knuckles))}");
@@ -4003,7 +4709,7 @@ namespace ExScoringMod
         private static string FxDump(ShotFx fx)
         {
             if (fx == null) return "none";
-            return (ShotFxAlive(fx) ? "ok" : "broken") + $"(muzzle={fx.Muzzle != null} tex={fx.Texture != null} color={fx.TextureColorKey ?? "-"})";
+            return (ShotFxAlive(fx) ? "ok" : "broken") + $"(rebound={fx.MissBeams != null} muzzle={fx.Muzzle != null} tex={fx.Texture != null} color={fx.TextureColorKey ?? "-"})";
         }
 
         /// <summary>For the debug dump: shots fired, and the baseline (or "trigger" for the bool fallback).</summary>
@@ -4258,6 +4964,14 @@ namespace ExScoringMod
                 catch (Exception ex)
                 {
                     Log($"headshot check failed: {ex.Message}");
+                }
+                try
+                {
+                    QueueLocalShot(__instance); // rebounds off other players' discs and guns, gunHit (LateTick)
+                }
+                catch (Exception ex)
+                {
+                    Log($"queueing own shot failed: {ex.Message}");
                 }
             }
         }

@@ -52,6 +52,8 @@ namespace ExScoringMod
         private const string HeadshotFeature = "headshot";
         /// <summary>The v2.44 feature name: head, body and gun choices, and custom model packages. Only granted with "presence".</summary>
         private const string CosmeticsFeature = "cosmetics";
+        /// <summary>The v2.45 feature name: shots on other players' thrown guns. Only granted with "presence".</summary>
+        private const string GunHitFeature = "gunHit";
 
         /// <summary>Pose rate without "poseRate" (a v2.39 server), as in v2.39.</summary>
         public const int DefaultPoseRateHz = 15;
@@ -105,6 +107,13 @@ namespace ExScoringMod
         /// headshot with BAD_MESSAGE) and after a disconnect.
         /// </summary>
         public static bool HeadshotEnabled { get; private set; }
+
+        /// <summary>
+        /// True when the last welcome listed "gunHit" (v2.45): gunHit may be sent and gunHit events
+        /// (another player shot one of this player's thrown guns) will arrive. False with a v2.44 or
+        /// older server (which would answer gunHit with BAD_MESSAGE) and after a disconnect.
+        /// </summary>
+        public static bool GunHitEnabled { get; private set; }
 
         /// <summary>
         /// True when the last welcome listed "cosmetics" (v2.44): setCosmetics may be sent and other
@@ -209,6 +218,12 @@ namespace ExScoringMod
         /// since v2.43 can equal shooter (that player shot their own head).
         /// </summary>
         public static event Action<MpHeadshot> OnHeadshot;
+
+        /// <summary>
+        /// Another player's shot hit one of this player's thrown guns (v2.45). Only ever sent to the
+        /// gun's owner; point is in that gun's local space, dir a world direction.
+        /// </summary>
+        public static event Action<MpGunHit> OnGunHit;
 
         /// <summary>
         /// setCosmetics was refused (v2.44): UNKNOWN_PACKAGE / PACKAGE_BLOCKED (with error.package),
@@ -675,6 +690,27 @@ namespace ExScoringMod
             SendFireAndForget("headshot", new JObject { ["target"] = targetUserId });
         }
 
+        /// <summary>
+        /// This player's shot hit another player's thrown gun (v2.45). hand is "l" or "r" (the
+        /// target's gun), point is where it was hit in that gun's own local space (the gun pose they
+        /// send), dir the shot's world direction. Fire-and-forget, no reqId, never queued: dropped
+        /// unless connected, in a lobby and with "gunHit" on. The server relays it to the target only.
+        /// </summary>
+        public static void SendGunHit(string targetUserId, string hand, UnityEngine.Vector3 point, UnityEngine.Vector3 dir)
+        {
+            if (string.IsNullOrEmpty(targetUserId) || targetUserId == MyUserId) return;
+            if (hand != "l" && hand != "r") return;
+            if (!IsConnected || !GunHitEnabled || !InLobby) return;
+            Log($"-> gunHit {targetUserId} {hand}");
+            SendFireAndForget("gunHit", new JObject
+            {
+                ["target"] = targetUserId,
+                ["hand"] = hand,
+                ["point"] = new JArray(Round3(point.x), Round3(point.y), Round3(point.z)),
+                ["dir"] = new JArray(Round3(dir.x), Round3(dir.y), Round3(dir.z))
+            });
+        }
+
         // ── Match (19.5) ──
 
         /// <summary>The song is loaded and holding before playback.</summary>
@@ -758,7 +794,7 @@ namespace ExScoringMod
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("[Mp] ===== MpSession =====");
-            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} headshot={HeadshotEnabled} cosmetics={CosmeticsEnabled} assets={AssetsEnabled} seat={MySeat}");
+            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} cosmetics={CosmeticsEnabled} assets={AssetsEnabled} seat={MySeat}");
             sb.AppendLine($"[Mp] cosmetics: wanted={wantedCosmeticsKey ?? "none"} sent={(wantedCosmeticsKey != null && wantedCosmeticsKey == lastSentCosmeticsKey ? "yes" : "no")}");
             sb.AppendLine($"[Mp] clock: offset={ClockOffsetMs} ms, lastRtt={LastRttMs} ms, bestRtt={BestRttMs} ms, samples={clockSamples.Count}, serverNow={ServerNowMs}");
             sb.AppendLine($"[Mp] pending requests={pendingRequests.Count}, queued={queuedRequests.Count}, location=\"{currentLocation}\" browsing={currentBrowsingSongId ?? "none"}");
@@ -848,11 +884,11 @@ namespace ExScoringMod
                 ["modVersion"] = ExScoring.BuildInfo.Version,
                 ["platform"] = helloPlatform,
                 ["guestName"] = helloGuestName,
-                ["features"] = new JArray(PresenceFeature, PoseRateFeature, HeadshotFeature, CosmeticsFeature)
+                ["features"] = new JArray(PresenceFeature, PoseRateFeature, HeadshotFeature, CosmeticsFeature, GunHitFeature)
             };
             if (!string.IsNullOrEmpty(resumeToken)) hello["resumeToken"] = resumeToken;
 
-            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}, {PoseRateFeature}, {HeadshotFeature}, {CosmeticsFeature}])");
+            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}, {PoseRateFeature}, {HeadshotFeature}, {CosmeticsFeature}, {GunHitFeature}])");
             MpClient.Send(hello.ToString(Formatting.None));
         }
 
@@ -965,6 +1001,10 @@ namespace ExScoringMod
                     HandleHeadshot(message);
                     break;
 
+                case "gunHit":
+                    HandleGunHit(message);
+                    break;
+
                 case "ok":
                     break;
 
@@ -1016,6 +1056,7 @@ namespace ExScoringMod
             PresenceEnabled = false;
             PoseRateEnabled = false;
             HeadshotEnabled = false;
+            GunHitEnabled = false;
             CosmeticsEnabled = false;
             AssetsEnabled = false;
             AssetToken = null;
@@ -1046,6 +1087,8 @@ namespace ExScoringMod
             SetPoseRate(PoseRateEnabled ? welcome.poseRateHz.Value : DefaultPoseRateHz, "welcome");
             // "headshot" only counts with "presence" too (19.14.1).
             HeadshotEnabled = PresenceEnabled && Array.IndexOf(welcome.features, HeadshotFeature) >= 0;
+            // "gunHit" only counts with "presence" too (v2.45).
+            GunHitEnabled = PresenceEnabled && Array.IndexOf(welcome.features, GunHitFeature) >= 0;
             // "cosmetics" only counts with "presence" too (v2.44); assets need the server's storage and a token.
             CosmeticsEnabled = PresenceEnabled && Array.IndexOf(welcome.features, CosmeticsFeature) >= 0;
             AssetToken = CosmeticsEnabled && welcome.assetsEnabled == true && !string.IsNullOrEmpty(welcome.assetToken) ? welcome.assetToken : null;
@@ -1062,7 +1105,7 @@ namespace ExScoringMod
             MpClient.MarkWelcomed();
             nextPingAtMs = 0; // ping right away for a real clock sample
 
-            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz" : "off (" + PoseRateHz + " Hz)")} headshot={HeadshotEnabled} cosmetics={CosmeticsEnabled} assets={AssetsEnabled}");
+            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz" : "off (" + PoseRateHz + " Hz)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} cosmetics={CosmeticsEnabled} assets={AssetsEnabled}");
 
             if (welcome.lobby != null)
             {
@@ -1117,6 +1160,43 @@ namespace ExScoringMod
             }
             Log($"   headshot: {headshot.shooter ?? "?"} -> {headshot.target}{(headshot.target == MyUserId ? " (me)" : "")}");
             SafeInvoke(OnHeadshot, headshot, "OnHeadshot");
+        }
+
+        /// <summary>
+        /// gunHit (v2.45): another player's shot hit one of this player's thrown guns. Ignored without
+        /// "gunHit" on this connection, or when it's malformed (bad hand, point or dir).
+        /// </summary>
+        private static void HandleGunHit(JObject message)
+        {
+            MpGunHit hit;
+            try
+            {
+                hit = message.ToObject<MpGunHit>(MpJson.Serializer);
+            }
+            catch (Exception ex)
+            {
+                Log($"   gunHit unreadable, ignored: {ex.Message}");
+                return;
+            }
+            if (hit == null || (hit.hand != "l" && hit.hand != "r")) return;
+            if (!ValidVector(hit.point) || !ValidVector(hit.dir)) return;
+            if (!GunHitEnabled)
+            {
+                Log("   gunHit ignored: this connection doesn't have gunHit");
+                return;
+            }
+            Log($"   gunHit: {hit.shooter ?? "?"} -> my {hit.hand} gun");
+            SafeInvoke(OnGunHit, hit, "OnGunHit");
+        }
+
+        private static bool ValidVector(float[] v)
+        {
+            if (v == null || v.Length != 3) return false;
+            for (int i = 0; i < 3; i++)
+            {
+                if (float.IsNaN(v[i]) || float.IsInfinity(v[i])) return false;
+            }
+            return true;
         }
 
         /// <summary>Sets PoseRateHz (clamped to the contract's 15..90) and tells listeners when it changed.</summary>

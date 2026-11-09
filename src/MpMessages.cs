@@ -262,6 +262,20 @@ namespace ExScoringMod
         public long serverTime;
     }
 
+    /// <summary>
+    /// gunHit (v2.45): shooter's shot hit this player's thrown gun. Sent only to the gun's owner.
+    /// hand = "l" / "r" (which of the owner's guns), point = the hit in that gun's local space (the
+    /// gun pose the owner sends), dir = the shot's world direction. serverTime = when relayed (server ms).
+    /// </summary>
+    public class MpGunHit
+    {
+        public string shooter;
+        public string hand;
+        public float[] point;
+        public float[] dir;
+        public long serverTime;
+    }
+
     /// <summary>matchPrepare.participants entry (19.5).</summary>
     public class MpMatchParticipant
     {
