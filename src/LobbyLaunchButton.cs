@@ -20,6 +20,12 @@ namespace ExScoringMod
     /// lobby keeps the last pool song, and the lobby panel's Start Song is greyed out until the
     /// host is back on the lobby's song (HostOnLobbySong). Becoming host doesn't send the song you
     /// happen to be on; only picking a song or difficulty afterwards does.
+    ///
+    /// When the lobby allows player difficulty, the host's difficulty is only the host's own
+    /// (set with the lobby panel's difficulty toggles, like everyone else's): selections compare
+    /// the song only, so changing difficulty in the song list never re-selects the song for the
+    /// lobby, and Start Song only needs the host on the lobby's song. Select still suggests the
+    /// song at the song list's difficulty either way.
     /// </summary>
     internal static class LobbyLaunchButton
     {
@@ -114,7 +120,7 @@ namespace ExScoringMod
             MpLobbyState lobby = MpSession.Lobby;
             bool isHost = MpSession.IsHost;
             MpSongRef current = isHost ? CurrentSongRef() : null;
-            string key = current != null ? current.songId + "|" + current.difficulty : null;
+            string key = SelectionKey(current);
             bool inPool = current != null && LobbySongList.FindSuggester(current.songId) != null;
 
             if (!isHost || lobby == null)
@@ -138,7 +144,7 @@ namespace ExScoringMod
             if (!MpSession.IsConnected || lobby.phase != "lobby") return; // retried once back in the lobby
 
             MpSongRef selected = lobby.selectedSong;
-            if (selected != null && selected.songId == current.songId && selected.difficulty == current.difficulty)
+            if (SameSelection(selected, current))
             {
                 lastSelectionKey = key;
                 return;
@@ -154,16 +160,33 @@ namespace ExScoringMod
         // ── State ──
 
         /// <summary>
-        /// True when the host's song-list selection (song + difficulty) is the lobby's selected song,
+        /// True when the host's song-list selection (song, plus difficulty unless player difficulty
+        /// is on) is the lobby's selected song,
         /// so the lobby panel's Start Song can start it.
         /// </summary>
         public static bool HostOnLobbySong()
         {
-            MpSongRef selected = MpSession.Lobby?.selectedSong;
-            MpSongRef current = CurrentSongRef();
-            return selected != null && current != null
-                   && selected.songId == current.songId && selected.difficulty == current.difficulty;
+            return SameSelection(MpSession.Lobby?.selectedSong, CurrentSongRef());
         }
+
+        /// <summary>
+        /// Same song, and same difficulty unless the lobby allows player difficulty (then the
+        /// host's difficulty is only their own and doesn't count as a different selection).
+        /// </summary>
+        private static bool SameSelection(MpSongRef a, MpSongRef b)
+        {
+            if (a == null || b == null || a.songId != b.songId) return false;
+            return PlayerDifficulty || a.difficulty == b.difficulty;
+        }
+
+        /// <summary>What counts as "the host picked something new": song, plus difficulty unless player difficulty is on.</summary>
+        private static string SelectionKey(MpSongRef song)
+        {
+            if (song == null) return null;
+            return PlayerDifficulty ? song.songId : song.songId + "|" + song.difficulty;
+        }
+
+        private static bool PlayerDifficulty => MpSession.Lobby != null && MpSession.Lobby.allowPlayerDifficulty;
 
         private static MpSongRef CurrentSongRef()
         {

@@ -17,6 +17,10 @@ namespace ExScoringMod
     /// they are in the menus, ready, song status and difficulty; during a match, the live scores
     /// sorted by the player's own scoring mode; after a match, the last results until the next.
     ///
+    /// When the lobby allows player difficulty, a column of difficulty toggles sits to the left of
+    /// the panel (setDifficulty). The pick is remembered and re-applied to every newly selected
+    /// song (or the closest difficulty that song has).
+    ///
     /// Rebuilt from MpSession's state at most 4 times a second, and only pushed to the text when
     /// it changed. All layout values are constants below so they can be tuned.
     /// </summary>
@@ -57,6 +61,38 @@ namespace ExScoringMod
         // unless Force Start is on. Position from in-game tuning (2026-10-24).
         private static readonly Vector3 StartButtonPosition = new Vector3(-0.125f, -0.125f, -0.005f);
         private const float DisabledLabelAlpha = 0.25f;
+
+        // Difficulty toggles (only when the lobby allows player difficulty): a column of four
+        // options-menu toggle rows to the left of the panel, same scale as Ready / Start, Expert on
+        // top. The checkbox shows this player's effective difficulty (PlayerState.difficulty).
+        // Difficulties the selected song doesn't have for this player (songStatus
+        // .availableDifficulties) are greyed out. Positions are relative to the panel's bottom
+        // center, like Ready / Start; same 0.081 spacing as Ready -> Start. Tuned in game
+        // (2026-11-09): Beginner (bottom) at (-0.53, 0.05), the others above it.
+        private const float DifficultyColumnX = -0.53f;
+        private const float DifficultyTopY = 0.293f; // = Beginner's 0.05 + 3 * 0.081
+        private const float DifficultySpacingY = 0.081f;
+        private static readonly KataConfig.Difficulty[] DifficultyOrder =
+        {
+            KataConfig.Difficulty.Expert, KataConfig.Difficulty.Hard, KataConfig.Difficulty.Normal, KataConfig.Difficulty.Easy
+        };
+        // Easiest to hardest, for the closest-available fallback.
+        private static readonly KataConfig.Difficulty[] DifficultyAscending =
+        {
+            KataConfig.Difficulty.Easy, KataConfig.Difficulty.Normal, KataConfig.Difficulty.Hard, KataConfig.Difficulty.Expert
+        };
+
+        private static readonly GameObject[] difficultyObjects = new GameObject[4];
+        private static readonly GunButton[] difficultyButtons = new GunButton[4];
+        private static readonly TextMeshPro[] difficultyLabels = new TextMeshPro[4];
+
+        // The difficulty this player last picked on the panel (enum name), null until they pick
+        // one. Kept for the whole session: each newly selected song gets it again (or the closest
+        // one the song has) once the server knows which difficulties this player has for it.
+        private static string preferredDifficulty;
+        // songId|difficulty of the setDifficulty in flight, so it isn't re-sent every refresh.
+        // Cleared once the server's state shows it (so a later reset gets corrected again).
+        private static string pendingDifficultyKey;
 
         private static GameObject readyObject;
         private static GunButton readyButton;
@@ -99,6 +135,16 @@ namespace ExScoringMod
             catch (Exception ex)
             {
                 DebugLog.Log("[LobbyPanel] ready button update failed: " + ex.Message);
+            }
+
+            try
+            {
+                SyncPreferredDifficulty();
+                UpdateDifficultyButtons();
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Log("[LobbyPanel] difficulty buttons update failed: " + ex.Message);
             }
 
             string content;
@@ -290,6 +336,209 @@ namespace ExScoringMod
             nextRefreshMs = 0;
         }
 
+        // ── Player difficulty (setDifficulty, 19.4.1) ──
+
+        /// <summary>
+        /// Shown in the lobby phase, outside songs, when the lobby allows player difficulty and a
+        /// song is selected. Each toggle is usable only for a difficulty the server lists in this
+        /// player's songStatus.availableDifficulties (setDifficulty is refused otherwise).
+        /// </summary>
+        private static void UpdateDifficultyButtons()
+        {
+            MpLobbyState lobby = MpSession.Lobby;
+            MenuState.State state = ExScoring.menuState;
+            bool inSong = state == MenuState.State.Launching || state == MenuState.State.Launched;
+            bool want = !inSong && lobby != null && lobby.phase == "lobby"
+                        && lobby.allowPlayerDifficulty && lobby.selectedSong != null;
+
+            if (!want)
+            {
+                SetDifficultyButtonsActive(false);
+                return;
+            }
+
+            if (!EnsureDifficultyButtons()) return;
+            SetDifficultyButtonsActive(true);
+
+            ShellPage page = CurrentShellPage();
+            string[] available = MyAvailableDifficulties();
+            for (int i = 0; i < DifficultyOrder.Length; i++)
+            {
+                if (difficultyButtons[i] == null) continue;
+                if (page != null) difficultyButtons[i].mShellPage = page;
+
+                bool enabled = available != null && Array.IndexOf(available, DifficultyOrder[i].ToString()) >= 0;
+                difficultyButtons[i].SetInteractable(enabled);
+                if (difficultyLabels[i] != null)
+                {
+                    float alpha = enabled ? 1f : DisabledLabelAlpha;
+                    if (difficultyLabels[i].alpha != alpha) difficultyLabels[i].alpha = alpha;
+                }
+            }
+        }
+
+        private static void SetDifficultyButtonsActive(bool active)
+        {
+            foreach (GameObject obj in difficultyObjects)
+            {
+                if (obj != null && obj.activeSelf != active) obj.SetActive(active);
+            }
+        }
+
+        /// <summary>The difficulties the server has for this player on the selected song, or null.</summary>
+        private static string[] MyAvailableDifficulties()
+        {
+            MpSongStatus status = MpSession.MyPlayer?.songStatus;
+            if (status == null || status.status != "have") return null;
+            if (status.availableDifficulties == null || status.availableDifficulties.Length == 0) return null;
+            return status.availableDifficulties;
+        }
+
+        private static bool EnsureDifficultyButtons()
+        {
+            bool all = true;
+            for (int i = 0; i < DifficultyOrder.Length; i++)
+            {
+                if (difficultyObjects[i] != null && difficultyButtons[i] != null) continue; // Unity-null: rebuilt if destroyed
+                if (!CreateDifficultyButton(i)) all = false;
+            }
+            return all;
+        }
+
+        private static bool CreateDifficultyButton(int index)
+        {
+            if (!OptionsMenuClone.EnsureClone() || OptionsMenuClone.Menu == null) return false;
+
+            KataConfig.Difficulty difficulty = DifficultyOrder[index];
+            string name = difficulty.ToString();
+
+            OptionsMenuButton toggle = OptionsMenuClone.Menu.AddButton(0, DifficultyDisplayName(name),
+                new Action(() => OnDifficultyShot(name)),
+                new Func<bool>(() => MpSession.MyPlayer != null && MpSession.MyPlayer.difficulty == name),
+                "Your difficulty for the lobby's selected song");
+            if (toggle == null || toggle.button == null)
+            {
+                DebugLog.Log($"[LobbyPanel] couldn't make the {name} difficulty toggle");
+                if (toggle != null) GameObject.Destroy(toggle.gameObject);
+                return false;
+            }
+
+            GameObject obj = toggle.gameObject;
+            // No "(Clone)" in the name, and off the options menu, so its Wipe() never touches it.
+            obj.name = "DifficultyButton_" + name;
+            obj.transform.SetParent(root.transform, false);
+            obj.transform.localPosition = new Vector3(DifficultyColumnX, DifficultyTopY - index * DifficultySpacingY, -0.005f);
+            obj.transform.localRotation = Quaternion.identity;
+            obj.transform.localScale = PanelButtonScale;
+
+            GunButton button = toggle.button;
+            button.disableOnShot = false;
+            button.destroyOnShot = false;
+            if (toggle.help != null) toggle.help.forceDisable = true; // no hover help bubble on the panel
+
+            difficultyObjects[index] = obj;
+            difficultyButtons[index] = button;
+            difficultyLabels[index] = obj.GetComponentInChildren<TextMeshPro>(true);
+
+            DebugLog.Log($"[LobbyPanel] {name} difficulty toggle created");
+            return true;
+        }
+
+        private static void OnDifficultyShot(string difficulty)
+        {
+            preferredDifficulty = difficulty;
+            pendingDifficultyKey = null;
+            DebugLog.Log($"[LobbyPanel] difficulty picked: {difficulty}");
+            SyncPreferredDifficulty();
+            nextRefreshMs = 0;
+        }
+
+        /// <summary>
+        /// Makes this player's effective difficulty on the server follow their pick: right after a
+        /// pick, and again on every newly selected song once its songStatus (with this player's
+        /// availableDifficulties) is in. A song without the picked difficulty gets the closest one
+        /// it has (easier side on ties, like SongListUI.EnsureValidDifficultySelected); the pick
+        /// itself is kept, so the next song that has it goes back to it.
+        /// </summary>
+        private static void SyncPreferredDifficulty()
+        {
+            MpLobbyState lobby = MpSession.Lobby;
+            MpPlayerState me = MpSession.MyPlayer;
+            if (lobby == null || me == null || !lobby.allowPlayerDifficulty)
+            {
+                pendingDifficultyKey = null;
+                return;
+            }
+            if (preferredDifficulty == null || lobby.phase != "lobby" || lobby.selectedSong == null) return;
+            if (!MpSession.IsConnected) return;
+
+            string target = ClosestAvailable(preferredDifficulty, MyAvailableDifficulties());
+            if (target == null) return; // song status not in yet (or nothing playable)
+
+            if (me.difficulty == target)
+            {
+                pendingDifficultyKey = null;
+                return;
+            }
+
+            string key = lobby.selectedSong.songId + "|" + target;
+            if (key == pendingDifficultyKey) return; // sent; waiting for the lobbyState (or it was refused)
+            pendingDifficultyKey = key;
+
+            DebugLog.Log($"[LobbyPanel] setting difficulty {target} for {lobby.selectedSong.songId} (picked {preferredDifficulty}, was {me.difficulty ?? "none"})");
+            MpSession.SetDifficulty(target, error =>
+            {
+                if (error != null) DebugLog.Log("[LobbyPanel] difficulty: " + OnlinePlayMenu.Describe(error));
+            });
+        }
+
+        /// <summary>The wanted difficulty if available, else the closest available one (easier on ties), or null.</summary>
+        private static string ClosestAvailable(string wanted, string[] available)
+        {
+            if (available == null || available.Length == 0) return null;
+            if (Array.IndexOf(available, wanted) >= 0) return wanted;
+
+            int wantedIndex = -1;
+            for (int i = 0; i < DifficultyAscending.Length; i++)
+            {
+                if (DifficultyAscending[i].ToString() == wanted) wantedIndex = i;
+            }
+            if (wantedIndex < 0) return null;
+
+            int best = -1;
+            int bestDist = int.MaxValue;
+            for (int i = 0; i < DifficultyAscending.Length; i++) // ascending + strict '<' keeps the easier side on ties
+            {
+                if (Array.IndexOf(available, DifficultyAscending[i].ToString()) < 0) continue;
+                int dist = Mathf.Abs(i - wantedIndex);
+                if (dist < bestDist)
+                {
+                    bestDist = dist;
+                    best = i;
+                }
+            }
+            return best >= 0 ? DifficultyAscending[best].ToString() : null;
+        }
+
+        /// <summary>The game's (localized) name for a difficulty enum name; the enum name as a fallback.</summary>
+        private static string DifficultyDisplayName(string difficulty)
+        {
+            if (string.IsNullOrEmpty(difficulty)) return "";
+            try
+            {
+                if (Enum.TryParse(difficulty, out KataConfig.Difficulty parsed))
+                {
+                    string name = KataConfig.GetDifficultyName(parsed);
+                    if (!string.IsNullOrEmpty(name)) return name;
+                }
+            }
+            catch
+            {
+                // Fall back to the enum name.
+            }
+            return difficulty;
+        }
+
         internal static ShellPage CurrentShellPage()
         {
             if (OnlinePlayScreen.IsOpen && OnlinePlayScreen.Page != null) return OnlinePlayScreen.Page;
@@ -427,9 +676,13 @@ namespace ExScoringMod
                 output.Add("<color=#ffaa33>Connection lost, reconnecting...</color>");
             }
 
-            string song = lobby.selectedSong != null
-                ? $"{Safe(lobby.selectedSong.title)} [{lobby.selectedSong.difficulty}]"
-                : "No song selected";
+            // With player difficulty on, the song's own difficulty means nothing to the others:
+            // each player's is on their line instead.
+            string song = lobby.selectedSong == null
+                ? "No song selected"
+                : lobby.allowPlayerDifficulty
+                    ? Safe(lobby.selectedSong.title)
+                    : $"{Safe(lobby.selectedSong.title)} [{DifficultyDisplayName(lobby.selectedSong.difficulty)}]";
             string phase = lobby.phase == "loading" ? "Loading" : lobby.phase == "playing" ? "Playing" : "In lobby";
             output.Add($"<color=#d8d8d8>{phase} - {song}</color>");
             output.Add("");
@@ -474,7 +727,10 @@ namespace ExScoringMod
 
                 string songStatus = SongStatusText(p.songStatus);
                 if (songStatus.Length > 0) line.Append("  ").Append(songStatus);
-                if (!string.IsNullOrEmpty(p.difficulty) && lobby.allowPlayerDifficulty) line.Append("  ").Append(p.difficulty);
+                if (!string.IsNullOrEmpty(p.difficulty) && lobby.allowPlayerDifficulty)
+                {
+                    line.Append("  <color=#66ccff>").Append(DifficultyDisplayName(p.difficulty)).Append("</color>");
+                }
 
                 output.Add(line.ToString());
             }
