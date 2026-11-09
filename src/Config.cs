@@ -65,7 +65,7 @@ namespace ExScoringMod
         public static bool OptionsBackToSongList;
         public static bool PracticeModeMinimizeButtonEnabled;
         public static int RandomSongScope; // 0 = Folder Songs, 1 = All Songs
-        public static int MenuMusic; // 0 = Environment, 1..5 = arena 1..5 menu music
+        public static int MenuMusic; // 0 = Environment, 1..5 = arena 1..5 menu music, 6 = Tutorial
         public static bool ShowStatsOnFail;
         public static bool MenuAimAssist;
         public static float MenuAimAssistWindowMs;
@@ -206,7 +206,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(OptionsBackToSongList), true, "While in the song list's Options menu, the bottom Back button returns to the song list instead of the main menu");
             MelonPrefs.RegisterBool(Category, nameof(PracticeModeMinimizeButtonEnabled), true, "Adds a button in practice mode to minimize its panel");
             MelonPrefs.RegisterInt(Category, nameof(RandomSongScope), 0, "Random Song source: 0 = Folder Songs, 1 = All Songs");
-            MelonPrefs.RegisterInt(Category, nameof(MenuMusic), 0, "Menu music: 0 = follows the environment, 1..5 = always that environment's music");
+            MelonPrefs.RegisterInt(Category, nameof(MenuMusic), 0, "Menu music: 0 = follows the environment, 1..5 = always that environment's music, 6 = the tutorial song");
             MelonPrefs.RegisterBool(Category, nameof(ShowStatsOnFail), false, "Shows the stats screen after failing a song instead of the fail screen");
 
             MelonPrefs.RegisterString(Category, nameof(dataHeader), "", "[Header]Data");
