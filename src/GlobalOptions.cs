@@ -627,6 +627,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetRandomSongScope();
                 OptionsMenuFunctions.GetMenuMusic();
                 OptionsMenuFunctions.GetMenuMusicVolume();
+                OptionsMenuFunctions.GetLanguageOverride();
                 OptionsMenuFunctions.GetShowStatsOnFail();
                 OptionsMenuFunctions.GetSearchKeyboardPosX();
                 OptionsMenuFunctions.GetSearchKeyboardPosY();
@@ -678,6 +679,13 @@ namespace ExScoringMod
                     0f, 100f, 5f, 100f, "N0",
                     "Volume of the menu music in %, relative to the Music Level. Song previews aren't affected.");
                 OptionsMenuClone.AddRow(menuMusicCycle, menuMusicVolumeSlider);
+
+                var languageCycle = OptionsMenuClone.CreateCycle(0, "Language", LanguageOverride.OptionLabels,
+                    () => OptionsMenuFunctions.languageOverrideIndex,
+                    v => { OptionsMenuFunctions.languageOverrideIndex = v; OptionsMenuFunctions.SetLanguageOverride(v); },
+                    0,
+                    "Overrides the game's language, saved for the next launches. Game Default: the language the game picks itself. Some text only updates when its menu is reopened.");
+                OptionsMenuClone.AddRow(languageCycle);
 
                 var scrollSpeedSlider = OptionsMenuClone.CreateSlider(0, "Scroll Speed",
                     () => OptionsMenuFunctions.scrollSpeedMultiplier,

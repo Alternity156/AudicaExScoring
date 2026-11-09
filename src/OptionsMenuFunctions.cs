@@ -72,6 +72,7 @@ namespace ExScoringMod
         public static int randomSongScope;
         public static int menuMusic;
         public static float menuMusicVolume;
+        public static int languageOverrideIndex;
         public static float maxRunsPerSong;
         public static float maxRunDataSizeMB;
         public static float latestMaudicaPageSize;
@@ -658,6 +659,21 @@ namespace ExScoringMod
         {
             menuMusicVolume = value;
             Config.UpdateMenuMusicVolume(value);
+        }
+
+        public static void GetLanguageOverride()
+        {
+            languageOverrideIndex = LanguageOverride.ToIndex(Config.LanguageOverride);
+        }
+
+        /// <summary>Takes the Language cycle's index; saves the language and applies it at once.</summary>
+        public static void SetLanguageOverride(int index)
+        {
+            int value = LanguageOverride.FromIndex(index);
+            languageOverrideIndex = LanguageOverride.ToIndex(value);
+            if (value == Config.LanguageOverride) return;
+            Config.UpdateLanguageOverride(value);
+            LanguageOverride.Apply();
         }
 
         public static void GetShowStatsOnFail()
