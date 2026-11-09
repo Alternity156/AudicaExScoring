@@ -625,6 +625,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetFirstPlayBlind();
                 OptionsMenuFunctions.GetPracticeModeMinimizeButtonEnabled();
                 OptionsMenuFunctions.GetRandomSongScope();
+                OptionsMenuFunctions.GetMenuMusic();
                 OptionsMenuFunctions.GetShowStatsOnFail();
                 OptionsMenuFunctions.GetSearchKeyboardPosX();
                 OptionsMenuFunctions.GetSearchKeyboardPosY();
@@ -664,6 +665,13 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.purpleMenuEnabled = v; OptionsMenuFunctions.SetPurpleMenuEnabled(v); },
                     "Tints the stage purple while browsing menus, for aesthetic purposes");
                 OptionsMenuClone.AddRow(purpleMenuToggle);
+
+                var menuMusicCycle = OptionsMenuClone.CreateCycle(0, "Menu Music", MenuMusic.GetOptionLabels(),
+                    () => OptionsMenuFunctions.menuMusic,
+                    v => { OptionsMenuFunctions.menuMusic = v; OptionsMenuFunctions.SetMenuMusic(v); },
+                    0,
+                    "Picks the music played in the menus, independent of the environment. Environment: follows the current environment. Song previews still replace it.");
+                OptionsMenuClone.AddRow(menuMusicCycle);
 
                 var scrollSpeedSlider = OptionsMenuClone.CreateSlider(0, "Scroll Speed",
                     () => OptionsMenuFunctions.scrollSpeedMultiplier,

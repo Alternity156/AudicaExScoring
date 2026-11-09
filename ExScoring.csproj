@@ -233,6 +233,7 @@
     <Compile Include="src\MaudicaCatalog.cs" />
     <Compile Include="src\MaudicaLookup.cs" />
     <Compile Include="src\MenuAimAssist.cs" />
+    <Compile Include="src\MenuMusic.cs" />
     <Compile Include="src\ModeButtons.cs" />
     <Compile Include="src\ModifiersPage.cs" />
     <Compile Include="src\ModSettingsBlocker.cs" />

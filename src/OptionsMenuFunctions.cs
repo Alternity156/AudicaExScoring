@@ -70,6 +70,7 @@ namespace ExScoringMod
         public static bool practiceModeMinimizeButtonEnabled;
         public static readonly string[] RandomSongScopeOptions = { "Folder Songs", "All Songs" };
         public static int randomSongScope;
+        public static int menuMusic;
         public static float maxRunsPerSong;
         public static float maxRunDataSizeMB;
         public static float latestMaudicaPageSize;
@@ -632,6 +633,19 @@ namespace ExScoringMod
         {
             randomSongScope = value;
             Config.UpdateRandomSongScope(value);
+        }
+
+        public static void GetMenuMusic()
+        {
+            menuMusic = Config.MenuMusic;
+        }
+
+        public static void SetMenuMusic(int value)
+        {
+            if (value == Config.MenuMusic) return;
+            menuMusic = value;
+            Config.UpdateMenuMusic(value);
+            MenuMusic.Apply();
         }
 
         public static void GetShowStatsOnFail()

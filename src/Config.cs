@@ -65,6 +65,7 @@ namespace ExScoringMod
         public static bool OptionsBackToSongList;
         public static bool PracticeModeMinimizeButtonEnabled;
         public static int RandomSongScope; // 0 = Folder Songs, 1 = All Songs
+        public static int MenuMusic; // 0 = Environment, 1..5 = arena 1..5 menu music
         public static bool ShowStatsOnFail;
         public static bool MenuAimAssist;
         public static float MenuAimAssistWindowMs;
@@ -205,6 +206,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(OptionsBackToSongList), true, "While in the song list's Options menu, the bottom Back button returns to the song list instead of the main menu");
             MelonPrefs.RegisterBool(Category, nameof(PracticeModeMinimizeButtonEnabled), true, "Adds a button in practice mode to minimize its panel");
             MelonPrefs.RegisterInt(Category, nameof(RandomSongScope), 0, "Random Song source: 0 = Folder Songs, 1 = All Songs");
+            MelonPrefs.RegisterInt(Category, nameof(MenuMusic), 0, "Menu music: 0 = follows the environment, 1..5 = always that environment's music");
             MelonPrefs.RegisterBool(Category, nameof(ShowStatsOnFail), false, "Shows the stats screen after failing a song instead of the fail screen");
 
             MelonPrefs.RegisterString(Category, nameof(dataHeader), "", "[Header]Data");
@@ -316,6 +318,7 @@ namespace ExScoringMod
             OptionsBackToSongList = MelonPrefs.GetBool(Category, nameof(OptionsBackToSongList));
             PracticeModeMinimizeButtonEnabled = MelonPrefs.GetBool(Category, nameof(PracticeModeMinimizeButtonEnabled));
             RandomSongScope = MelonPrefs.GetInt(Category, nameof(RandomSongScope));
+            MenuMusic = ExScoringMod.MenuMusic.Clamp(MelonPrefs.GetInt(Category, nameof(MenuMusic)));
             MaxRunsPerSong = MelonPrefs.GetInt(Category, nameof(MaxRunsPerSong));
             MaxRunDataSizeMB = MelonPrefs.GetFloat(Category, nameof(MaxRunDataSizeMB));
             EnableRunDataSaving = MelonPrefs.GetBool(Category, nameof(EnableRunDataSaving));
@@ -601,6 +604,14 @@ namespace ExScoringMod
         {
             MelonPrefs.SetInt(Category, nameof(RandomSongScope), value);
             RandomSongScope = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateMenuMusic(int value)
+        {
+            value = ExScoringMod.MenuMusic.Clamp(value);
+            MelonPrefs.SetInt(Category, nameof(MenuMusic), value);
+            MenuMusic = value;
             MelonPrefs.SaveConfig();
         }
 
