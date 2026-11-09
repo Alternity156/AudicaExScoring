@@ -65,7 +65,8 @@ namespace ExScoringMod
         public static bool OptionsBackToSongList;
         public static bool PracticeModeMinimizeButtonEnabled;
         public static int RandomSongScope; // 0 = Folder Songs, 1 = All Songs
-        public static int MenuMusic; // 0 = Environment, 1..5 = arena 1..5 menu music, 6 = Tutorial
+        public static int MenuMusic; // 0 = Environment, 1..5 = arena 1..5 menu music, 6 = Tutorial, 7 = Random Song
+        public static float MenuMusicVolume; // 0..100 %, relative to the game's Music Level
         public static bool ShowStatsOnFail;
         public static bool MenuAimAssist;
         public static float MenuAimAssistWindowMs;
@@ -206,7 +207,8 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(OptionsBackToSongList), true, "While in the song list's Options menu, the bottom Back button returns to the song list instead of the main menu");
             MelonPrefs.RegisterBool(Category, nameof(PracticeModeMinimizeButtonEnabled), true, "Adds a button in practice mode to minimize its panel");
             MelonPrefs.RegisterInt(Category, nameof(RandomSongScope), 0, "Random Song source: 0 = Folder Songs, 1 = All Songs");
-            MelonPrefs.RegisterInt(Category, nameof(MenuMusic), 0, "Menu music: 0 = follows the environment, 1..5 = always that environment's music, 6 = the tutorial song");
+            MelonPrefs.RegisterInt(Category, nameof(MenuMusic), 0, "Menu music: 0 = follows the environment, 1..5 = always that environment's music, 6 = the tutorial song, 7 = a random song from your library");
+            MelonPrefs.RegisterFloat(Category, nameof(MenuMusicVolume), 100f, "Menu music volume in %, relative to the Music Level (song previews aren't affected) [0,100,5,100]");
             MelonPrefs.RegisterBool(Category, nameof(ShowStatsOnFail), false, "Shows the stats screen after failing a song instead of the fail screen");
 
             MelonPrefs.RegisterString(Category, nameof(dataHeader), "", "[Header]Data");
@@ -319,6 +321,7 @@ namespace ExScoringMod
             PracticeModeMinimizeButtonEnabled = MelonPrefs.GetBool(Category, nameof(PracticeModeMinimizeButtonEnabled));
             RandomSongScope = MelonPrefs.GetInt(Category, nameof(RandomSongScope));
             MenuMusic = ExScoringMod.MenuMusic.Clamp(MelonPrefs.GetInt(Category, nameof(MenuMusic)));
+            MenuMusicVolume = Mathf.Clamp(MelonPrefs.GetFloat(Category, nameof(MenuMusicVolume)), 0f, 100f);
             MaxRunsPerSong = MelonPrefs.GetInt(Category, nameof(MaxRunsPerSong));
             MaxRunDataSizeMB = MelonPrefs.GetFloat(Category, nameof(MaxRunDataSizeMB));
             EnableRunDataSaving = MelonPrefs.GetBool(Category, nameof(EnableRunDataSaving));
@@ -612,6 +615,15 @@ namespace ExScoringMod
             value = ExScoringMod.MenuMusic.Clamp(value);
             MelonPrefs.SetInt(Category, nameof(MenuMusic), value);
             MenuMusic = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateMenuMusicVolume(float value)
+        {
+            if (value < 0f) value = 0f;
+            if (value > 100f) value = 100f;
+            MelonPrefs.SetFloat(Category, nameof(MenuMusicVolume), value);
+            MenuMusicVolume = value;
             MelonPrefs.SaveConfig();
         }
 

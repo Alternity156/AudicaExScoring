@@ -290,7 +290,7 @@ namespace ExScoringMod
             nextRefreshMs = 0;
         }
 
-        private static ShellPage CurrentShellPage()
+        internal static ShellPage CurrentShellPage()
         {
             if (OnlinePlayScreen.IsOpen && OnlinePlayScreen.Page != null) return OnlinePlayScreen.Page;
 
@@ -370,7 +370,7 @@ namespace ExScoringMod
         /// native Main page label instead (the Main page is where the panel usually first appears);
         /// keeps the default when none is around (e.g. created mid-song after a reconnect).
         /// </summary>
-        private static void ApplyGameFont(TextMeshPro target)
+        internal static void ApplyGameFont(TextMeshPro target)
         {
             try
             {
@@ -392,7 +392,7 @@ namespace ExScoringMod
             }
         }
 
-        private static Mesh BuildQuadMesh()
+        internal static Mesh BuildQuadMesh()
         {
             Mesh mesh = new Mesh();
             mesh.vertices = new[]

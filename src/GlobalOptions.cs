@@ -626,6 +626,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetPracticeModeMinimizeButtonEnabled();
                 OptionsMenuFunctions.GetRandomSongScope();
                 OptionsMenuFunctions.GetMenuMusic();
+                OptionsMenuFunctions.GetMenuMusicVolume();
                 OptionsMenuFunctions.GetShowStatsOnFail();
                 OptionsMenuFunctions.GetSearchKeyboardPosX();
                 OptionsMenuFunctions.GetSearchKeyboardPosY();
@@ -670,8 +671,13 @@ namespace ExScoringMod
                     () => OptionsMenuFunctions.menuMusic,
                     v => { OptionsMenuFunctions.menuMusic = v; OptionsMenuFunctions.SetMenuMusic(v); },
                     0,
-                    "Picks the music played in the menus, independent of the environment. Environment: follows the current environment. Song previews still replace it.");
-                OptionsMenuClone.AddRow(menuMusicCycle);
+                    "Picks the music played in the menus, independent of the environment. Environment: follows the current environment. Random Song: plays your songs one after another. Song previews still replace it.");
+                var menuMusicVolumeSlider = OptionsMenuClone.CreateSlider(1, "Menu Music Volume",
+                    () => OptionsMenuFunctions.menuMusicVolume,
+                    v => { OptionsMenuFunctions.menuMusicVolume = v; OptionsMenuFunctions.SetMenuMusicVolume(v); },
+                    0f, 100f, 5f, 100f, "N0",
+                    "Volume of the menu music in %, relative to the Music Level. Song previews aren't affected.");
+                OptionsMenuClone.AddRow(menuMusicCycle, menuMusicVolumeSlider);
 
                 var scrollSpeedSlider = OptionsMenuClone.CreateSlider(0, "Scroll Speed",
                     () => OptionsMenuFunctions.scrollSpeedMultiplier,

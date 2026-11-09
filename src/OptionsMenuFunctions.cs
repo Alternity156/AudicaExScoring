@@ -71,6 +71,7 @@ namespace ExScoringMod
         public static readonly string[] RandomSongScopeOptions = { "Folder Songs", "All Songs" };
         public static int randomSongScope;
         public static int menuMusic;
+        public static float menuMusicVolume;
         public static float maxRunsPerSong;
         public static float maxRunDataSizeMB;
         public static float latestMaudicaPageSize;
@@ -646,6 +647,17 @@ namespace ExScoringMod
             menuMusic = value;
             Config.UpdateMenuMusic(value);
             MenuMusic.Apply();
+        }
+
+        public static void GetMenuMusicVolume()
+        {
+            menuMusicVolume = Config.MenuMusicVolume;
+        }
+
+        public static void SetMenuMusicVolume(float value)
+        {
+            menuMusicVolume = value;
+            Config.UpdateMenuMusicVolume(value);
         }
 
         public static void GetShowStatsOnFail()
