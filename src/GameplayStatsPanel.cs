@@ -120,7 +120,7 @@ namespace ExScoringMod
             apiStatusLabel = CreateTimingLabel(resultsPanelParent, "ExApiStatusDisplay (Clone)",
                 new Vector3(-23.1f, -0.5f, 0f) * ResultsScreenScaleMultiplier + new Vector3(0f, ResultsScreenYOffset, 0f),
                 currentApiStatusColor, TextAlignmentOptions.Right);
-            apiStatusLabel.text = currentApiStatusText;
+            ApplyApiStatusLabel();
             apiStatusLabel.transform.localScale = new Vector3(1.8f, 1.8f, 1.8f) * ResultsScreenScaleMultiplier;
         }
 
@@ -147,10 +147,38 @@ namespace ExScoringMod
             currentApiStatusText = text;
             currentApiStatusColor = color;
 
-            if (apiStatusLabel != null)
+            ApplyApiStatusLabel();
+        }
+
+        internal static ApiSubmitStatus CurrentApiSubmitStatus => currentApiSubmitStatus;
+
+        /// <summary>
+        /// Replaces the stored status text, keeping its status and colour. Used by MpResultsHold
+        /// to show a personal best's rank refreshed after everyone in the match is done.
+        /// </summary>
+        internal static void OverrideApiSubmitText(string text)
+        {
+            currentApiStatusText = text;
+            ApplyApiStatusLabel();
+        }
+
+        /// <summary>
+        /// Pushes the stored status to the results-screen label, or "Waiting for players..." while
+        /// a multiplayer match holds it (MpResultsHold).
+        /// </summary>
+        internal static void ApplyApiStatusLabel()
+        {
+            if (apiStatusLabel == null) return;
+
+            if (MpResultsHold.HoldsStatusLabel)
             {
-                apiStatusLabel.text = text;
-                apiStatusLabel.color = color;
+                apiStatusLabel.text = MpResultsHold.WaitingText;
+                apiStatusLabel.color = Color.white;
+            }
+            else
+            {
+                apiStatusLabel.text = currentApiStatusText;
+                apiStatusLabel.color = currentApiStatusColor;
             }
         }
 

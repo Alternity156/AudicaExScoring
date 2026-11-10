@@ -246,6 +246,7 @@
     <Compile Include="src\MpLobbyPreview.cs" />
     <Compile Include="src\MpMessages.cs" />
     <Compile Include="src\MpPresence.cs" />
+    <Compile Include="src\MpResultHold.cs" />
     <Compile Include="src\MpSession.cs" />
     <Compile Include="src\NowPlayingLabel.cs" />
     <Compile Include="src\OnlinePlayButton.cs" />

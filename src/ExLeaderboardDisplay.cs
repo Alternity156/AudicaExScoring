@@ -175,6 +175,14 @@ namespace ExScoringMod
                 string songId = selectedSongData.songID;
                 string difficulty = KataConfig.I.GetDifficulty().ToString();
 
+                // Results screen of a multiplayer match: wait until everyone is done, so the
+                // others' runs are on it (MpResultsHold fetches once released).
+                if (MpResultsHold.HoldLeaderboard(display, songId, difficulty, view))
+                {
+                    BlankAllLeaderboardRows(display);
+                    return false;
+                }
+
                 FetchAndPopulateSongLeaderboard(display, songId, difficulty, view);
 
                 return false; // skip native — we're driving the rows ourselves
@@ -186,9 +194,11 @@ namespace ExScoringMod
         /// `view` and writes it into the panel's rows. view=self asks for kNumRows entries and the
         /// server centers that page on the player's rank, clamping at the top/bottom of the list, so
         /// rank #1 still shows ranks 1..kNumRows. If view=self comes back empty (no run on this
-        /// chart yet), this fetches Top instead.
+        /// chart yet), this fetches Top instead. onDone (optional, used by MpResultsHold) is called
+        /// exactly once when the fetch is over: with the applied response, or null when it failed
+        /// or was discarded.
         /// </summary>
-        private static void FetchAndPopulateSongLeaderboard(LeaderboardDisplay display, string songId, string difficulty, string view)
+        internal static void FetchAndPopulateSongLeaderboard(LeaderboardDisplay display, string songId, string difficulty, string view, Action<LeaderboardApiResponse> onDone = null)
         {
             int rowLimit = LeaderboardDisplay.kNumRows;
 
@@ -200,12 +210,14 @@ namespace ExScoringMod
                 if (requestVersion != leaderboardRequestVersion)
                 {
                     DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} result discarded (stale — current is #{leaderboardRequestVersion}).");
+                    onDone?.Invoke(null);
                     return;
                 }
 
                 if (!Config.ExType)
                 {
                     DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} result discarded (scoring type changed mid-fetch).");
+                    onDone?.Invoke(null);
                     return;
                 }
 
@@ -213,13 +225,14 @@ namespace ExScoringMod
                 {
                     DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} failed (see ApiClient log above), blanking rows.");
                     BlankAllLeaderboardRows(display);
+                    onDone?.Invoke(null);
                     return;
                 }
 
                 if (IsEmptySelfResponse(view, response.entries?.Length ?? 0))
                 {
                     DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} (self) returned no entries (no run on {songId} {difficulty}), showing Top instead.");
-                    FetchAndPopulateSongLeaderboard(display, songId, difficulty, ViewTopParam);
+                    FetchAndPopulateSongLeaderboard(display, songId, difficulty, ViewTopParam, onDone);
                     return;
                 }
 
@@ -228,6 +241,7 @@ namespace ExScoringMod
 
                 DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX fetch #{requestVersion} ({view}) applying {response.entries?.Length ?? 0} row(s), requesterRank={response.requesterRank?.ToString() ?? "null"}.");
                 PopulateLeaderboardRows(display, response);
+                onDone?.Invoke(response);
             });
         }
 

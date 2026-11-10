@@ -134,6 +134,8 @@ namespace ExScoringMod
                         $"grade={response.grade?.text}, judgementPercent={response.judgementPercent:N2}, personalBest={response.isPersonalBest}, " +
                         $"mapDataNeeded={response.mapDataNeeded}");
 
+                    MpResultsHold.NoteRunSubmitted(response.isPersonalBest, response.rank);
+
                     string statusText = response.isPersonalBest
                         ? $"Personal Best!\nRank #{response.rank}"
                         : $"Rank #{response.rank}";

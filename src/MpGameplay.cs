@@ -909,6 +909,7 @@ namespace ExScoringMod
             };
 
             finishedSent = true;
+            MpResultsHold.Begin(runMatchId);
             Log($"Song over in match {runMatchId}: failed={report.failed} ex={report.exPercent:F2} classic={report.classicScore} " +
                 $"misses={report.misses} maxCombo={report.maxCombo} fc={report.fullCombo} upload={(clientRunId != null ? "yes" : "no")}");
             MpSession.SendFinished(report);
