@@ -29,6 +29,7 @@ namespace ExScoringMod
         public static bool DisableGunBeamRedirection;
         public static bool UnifyTargetSpeed;
         public static bool DisableAutoRecenter;
+        public static bool AutoRestartOnHighscoreLoss;
 
         public static string chainArrowHeader = "[Header]Chain Arrow";
         public static int ArrowColorMode;      // 0 = White, 1 = Hand Color
@@ -170,6 +171,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(DisableGunBeamRedirection), true, "Disables the gun beam redirection visual, has no effect on scoring");
             MelonPrefs.RegisterBool(Category, nameof(UnifyTargetSpeed), false, "Makes targets travel at Expert speed on every difficulty instead of slowing down on lower difficulties");
             MelonPrefs.RegisterBool(Category, nameof(DisableAutoRecenter), true, "Stops the game from recentering you when you walk away from the middle of the platform; clicking the joystick still recenters");
+            MelonPrefs.RegisterBool(Category, nameof(AutoRestartOnHighscoreLoss), false, "Restarts the song as soon as you can no longer tie your best score on the current scoring type (Audica or EX). Off in practice mode, No Fail, playlists and online matches");
 
             MelonPrefs.RegisterString(Category, nameof(chainArrowHeader), "", "[Header]Chain Arrow");
             MelonPrefs.RegisterBool(Category, nameof(EnableChainArrow), true, "Shows a directional arrow on chain lines");
@@ -292,6 +294,7 @@ namespace ExScoringMod
             DisableGunBeamRedirection = MelonPrefs.GetBool(Category, nameof(DisableGunBeamRedirection));
             UnifyTargetSpeed = MelonPrefs.GetBool(Category, nameof(UnifyTargetSpeed));
             DisableAutoRecenter = MelonPrefs.GetBool(Category, nameof(DisableAutoRecenter));
+            AutoRestartOnHighscoreLoss = MelonPrefs.GetBool(Category, nameof(AutoRestartOnHighscoreLoss));
             ArrowColorMode = MelonPrefs.GetInt(Category, nameof(ArrowColorMode));
             ChainLineColorMode = MelonPrefs.GetInt(Category, nameof(ChainLineColorMode));
             ArrowWidth = MelonPrefs.GetFloat(Category, nameof(ArrowWidth));
@@ -914,6 +917,13 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(UnifyTargetSpeed), value);
             UnifyTargetSpeed = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateAutoRestartOnHighscoreLoss(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(AutoRestartOnHighscoreLoss), value);
+            AutoRestartOnHighscoreLoss = value;
             MelonPrefs.SaveConfig();
         }
 

@@ -48,6 +48,7 @@ namespace ExScoringMod
             SetApiSubmitStatus(ApiSubmitStatus.NotSubmitted, "", Color.white);
             apiStatusLabel = null;
             processedCuesIndexes.Clear();
+            AutoRestart.Reset();
             exCues.Clear();
             runSaved = false;
             currentRunFailed = false;

@@ -39,6 +39,7 @@ namespace ExScoringMod
         public static bool forceHitSounds;
         public static bool disableGunBeamRedirection;
         public static bool unifyTargetSpeed;
+        public static bool autoRestartOnHighscoreLoss;
         public static bool disableAutoRecenter;
         public static readonly string[] ArrowColorOptions = { "White", "Hand Color" };
         public static readonly string[] ChainLineColorOptions = { "Default (Black)", "Hand Color" };
@@ -806,6 +807,17 @@ namespace ExScoringMod
         {
             unifyTargetSpeed = value;
             Config.UpdateUnifyTargetSpeed(value);
+        }
+
+        public static void GetAutoRestartOnHighscoreLoss()
+        {
+            autoRestartOnHighscoreLoss = Config.AutoRestartOnHighscoreLoss;
+        }
+
+        public static void SetAutoRestartOnHighscoreLoss(bool value)
+        {
+            autoRestartOnHighscoreLoss = value;
+            Config.UpdateAutoRestartOnHighscoreLoss(value);
         }
 
         public static void GetDisableAutoRecenter()

@@ -304,6 +304,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetMirrorMode();
                 OptionsMenuFunctions.GetFlipSlotTargets();
                 OptionsMenuFunctions.GetDisableAutoRecenter();
+                OptionsMenuFunctions.GetAutoRestartOnHighscoreLoss();
                 OptionsMenuFunctions.GetTargetingHapticsStrength();
                 OptionsMenuFunctions.GetExShockwave();
                 OptionsMenuFunctions.GetExLowHealthVisual();
@@ -399,7 +400,11 @@ namespace ExScoringMod
                     () => OptionsMenuFunctions.disableAutoRecenter,
                     v => { OptionsMenuFunctions.disableAutoRecenter = v; OptionsMenuFunctions.SetDisableAutoRecenter(v); },
                     "Stops the game from moving you back to the middle when you step away from it. Clicking the joystick still recenters.");
-                OptionsMenuClone.AddRow(disableAutoRecenterToggle);
+                var autoRestartToggle = OptionsMenuClone.CreateToggle(1, "Auto Restart",
+                    () => OptionsMenuFunctions.autoRestartOnHighscoreLoss,
+                    v => { OptionsMenuFunctions.autoRestartOnHighscoreLoss = v; OptionsMenuFunctions.SetAutoRestartOnHighscoreLoss(v); },
+                    "Restarts the song as soon as you can no longer tie your best score on the current scoring type (Audica or EX). Off in practice mode, No Fail, playlists and online matches.");
+                OptionsMenuClone.AddRow(disableAutoRecenterToggle, autoRestartToggle);
 
                 var hapticsHeader = OptionsMenuClone.CreateHeader(0, "Haptics");
                 OptionsMenuClone.AddRow(hapticsHeader);
