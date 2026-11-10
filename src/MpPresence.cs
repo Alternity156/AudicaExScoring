@@ -227,6 +227,15 @@ namespace ExScoringMod
     ///    on this player's avatar. Same guards as above except Show Other Players (it only decides
     ///    what this player sees), at most once per HeadshotSendCooldown. This player's own effect stays
     ///    the native one; the server never echoes it back. A v2.42 or older server drops it silently.
+    ///  - Thrown guns (v2.48): one of this player's guns touching a shown remote avatar's head while
+    ///    thrown is a headshot on that player too. Checked in LateTick: the gun's solid tricks box,
+    ///    grown by ThrownHeadMargin (the head collider bounces the gun, so they never really overlap),
+    ///    overlapped against the Player layer, plus a box sweep from last frame's position so a fast
+    ///    gun can't pass through a head between frames. Only this player's guns against other players'
+    ///    heads: the own head has no collider there, so a thrown gun never headshots its owner, and a
+    ///    remote player's thrown gun hitting this player is reported by that player's client. Same
+    ///    guards and per-target cooldown as a shot; each gun then waits ThrownHeadshotCooldown before
+    ///    it can headshot anyone again, so a gun floating around a head doesn't keep firing.
     ///  - This player hit: PostprocController.OnShotHead(position, null), exactly what shooting your
     ///    own head does (Ghidra: mShotHeadCountdown = 1 and one FMOD event; gun is unused).
     ///  - Another player hit (seen by the shooter and by everyone else): the native timing and curve
@@ -313,6 +322,8 @@ namespace ExScoringMod
         private const float HeadshotMaxBoost = 4f;       // native exposure is 2^(4 c^2) = 16x at the start; capped so the avatar isn't pure white
         private const float HeadshotRayLength = 100f;
         private const float HeadshotSendCooldown = 0.15f; // per target; the server keeps 10/s anyway
+        private const float ThrownHeadshotCooldown = 1f;  // v2.48: per gun, after a thrown gun headshots someone
+        private const float ThrownHeadMargin = 0.02f;     // v2.48: grows the gun's box so touching counts
         private const string ColorProperty = "_Color";
 
         // Name labels.
@@ -753,6 +764,14 @@ namespace ExScoringMod
         private static bool particleCallFailed, ricochetSoundFailed;
         private static int selfHeadshotsSent;
         private static float lastSelfHeadshotSent = -100f;
+        // Thrown-gun headshots (v2.48), per hand: the gun's solid box (found while in hand, kept while
+        // thrown), last frame's box centre while thrown, and when that gun last headshot someone.
+        private static readonly BoxCollider[] thrownHeadBox = new BoxCollider[2];
+        private static readonly Vector3[] thrownHeadLastCenter = new Vector3[2];
+        private static readonly bool[] thrownHeadHasLast = new bool[2];
+        private static readonly float[] lastThrownHeadshot = { -100f, -100f };
+        private static int thrownHeadshotsSent;
+        private static bool thrownHeadshotFailed;
 
         // Cosmetics (v2.44): templates per slot and model key (under templateHolder), and the custom
         // models waiting to be loaded (one per frame).
@@ -2114,6 +2133,8 @@ namespace ExScoringMod
                     Log($"own shot on other players failed: {ex.Message}");
                 }
             }
+
+            CheckThrownGunHeadshots();
         }
 
         /// <summary>
@@ -4670,7 +4691,7 @@ namespace ExScoringMod
             int customTemplates = 0;
             foreach (SlotTemplate entry in slotTemplates.Values) if (entry.Owned != null) customTemplates++;
             sb.AppendLine($"[MpPresence] cosmetics: connection={MpSession.CosmeticsEnabled} showCustom={Config.ShowCustomAvatars} templates={slotTemplates.Count} (custom {customTemplates}) failed={failedTemplates.Count} pendingLoads={pendingLoads.Count} loaded={customLoads} loadFailures={customLoadFailures}");
-            sb.AppendLine($"[MpPresence] headshots: connection={MpSession.HeadshotEnabled} effects={Config.HeadshotEffects} sounds={Config.HeadshotSounds} sent={headshotsSent} (own head {selfHeadshotsSent}) received={headshotsReceived} postproc={(IsAlive(postprocController) ? "found" : "not looked up / none")}");
+            sb.AppendLine($"[MpPresence] headshots: connection={MpSession.HeadshotEnabled} effects={Config.HeadshotEffects} sounds={Config.HeadshotSounds} sent={headshotsSent} (own head {selfHeadshotsSent}, thrown gun {thrownHeadshotsSent}{(thrownHeadshotFailed ? " FAILED" : "")}) received={headshotsReceived} postproc={(IsAlive(postprocController) ? "found" : "not looked up / none")}");
             sb.AppendLine($"[MpPresence] my shots on others: rebounds={localRebounds} nativeBeamNotFound={localBeamsNotFound} gunHit connection={MpSession.GunHitEnabled} sent={gunHitsSent} received={gunHitsReceived}");
             sb.AppendLine($"[MpPresence] remote shots: rebounds={ricochetsShown} thrownGunHits={thrownGunHits} particle={(particleCallFailed ? "failed" : (particleCreateAndPlay != null ? "found" : "not looked up"))} thrown L={IsThrown(localGunL)} R={IsThrown(localGunR)}");
             sb.AppendLine($"[MpPresence] sending: {MpSession.PoseRateHz} Hz ({(MpSession.PoseRateEnabled ? "server" : "default")}), my shots L={localShots[0]} R={localShots[1]}, pull L={PullJson(localGunL)} R={PullJson(localGunR)}");
@@ -4763,14 +4784,142 @@ namespace ExScoringMod
             }
             if (victim == null || !victimHead) return; // a miss, or their body or gun took it
 
+            SendHeadshotOn(victim, $"{(hand == 0 ? "left" : "right")} gun hit {victim.UserId}'s head at {nearest:F2} m");
+        }
+
+        /// <summary>
+        /// Reports a headshot on another player and plays the effect on their avatar, unless that player
+        /// was reported less than HeadshotSendCooldown ago. True when it was sent.
+        /// </summary>
+        private static bool SendHeadshotOn(Remote victim, string logLine)
+        {
             float now = Time.unscaledTime;
-            if (now - victim.LastHeadshotSent < HeadshotSendCooldown) return;
+            if (now - victim.LastHeadshotSent < HeadshotSendCooldown) return false;
             victim.LastHeadshotSent = now;
             headshotsSent++;
-            Log($"headshot: {(hand == 0 ? "left" : "right")} gun hit {victim.UserId}'s head at {nearest:F2} m");
+            Log("headshot: " + logLine);
 
             MpSession.SendHeadshot(victim.UserId);
             PlayRemoteHeadshot(victim); // the server never echoes it back (19.14.2)
+            return true;
+        }
+
+        /// <summary>
+        /// v2.48, from LateTick: did one of this player's thrown guns touch a shown remote avatar's head
+        /// this frame? The gun's solid tricks box, grown by ThrownHeadMargin, is overlapped against the
+        /// Player layer where it is now, and swept from where it was last frame. Only a head counts
+        /// (RemoteOwning skips the local guns and anything that isn't another player). After a hit,
+        /// that gun waits ThrownHeadshotCooldown before it can headshot anyone again.
+        /// </summary>
+        private static void CheckThrownGunHeadshots()
+        {
+            bool allowed = MpSession.HeadshotEnabled && MpSession.PresenceEnabled && MpSession.InLobby
+                && Config.ShowOtherPlayers && remotes.Count > 0 && !InSong() && !thrownHeadshotFailed;
+            bool synced = false;
+
+            for (int h = 0; h < 2; h++)
+            {
+                Gun gun = h == 0 ? localGunL : localGunR;
+                BoxCollider box = ThrownHeadBox(gun, h);
+                if (!allowed || box == null || !IsThrown(gun))
+                {
+                    thrownHeadHasLast[h] = false;
+                    continue;
+                }
+
+                try
+                {
+                    Transform t = box.transform;
+                    Vector3 center = t.TransformPoint(box.center);
+                    Vector3 scale = t.lossyScale;
+                    Vector3 half = new Vector3(
+                        Mathf.Abs(box.size.x * scale.x) * 0.5f + ThrownHeadMargin,
+                        Mathf.Abs(box.size.y * scale.y) * 0.5f + ThrownHeadMargin,
+                        Mathf.Abs(box.size.z * scale.z) * 0.5f + ThrownHeadMargin);
+                    Quaternion rotation = t.rotation;
+                    Vector3 last = thrownHeadHasLast[h] ? thrownHeadLastCenter[h] : center;
+                    thrownHeadLastCenter[h] = center;
+                    thrownHeadHasLast[h] = true;
+
+                    if (Time.unscaledTime - lastThrownHeadshot[h] < ThrownHeadshotCooldown) continue;
+
+                    if (!synced)
+                    {
+                        Physics.SyncTransforms(); // the avatar copies are moved by their transforms
+                        synced = true;
+                    }
+
+                    int mask = 1 << PartColliderLayer;
+                    Remote victim = null;
+                    var overlaps = Physics.OverlapBox(center, half, rotation, mask, QueryTriggerInteraction.Ignore);
+                    if (overlaps != null)
+                    {
+                        for (int i = 0; i < overlaps.Length && victim == null; i++)
+                            victim = HeadOwner(overlaps[i]);
+                    }
+
+                    // A fast gun can cross a head between two frames: sweep from last frame's position.
+                    Vector3 travel = center - last;
+                    float distance = travel.magnitude;
+                    if (victim == null && distance > 0.001f)
+                    {
+                        var hits = Physics.BoxCastAll(last, half, travel / distance, rotation, distance, mask, QueryTriggerInteraction.Ignore);
+                        if (hits != null)
+                        {
+                            float nearest = float.MaxValue;
+                            for (int i = 0; i < hits.Length; i++)
+                            {
+                                RaycastHit hit = hits[i];
+                                if (hit.distance >= nearest) continue;
+                                Remote owner = HeadOwner(hit.collider);
+                                if (owner == null) continue;
+                                nearest = hit.distance;
+                                victim = owner;
+                            }
+                        }
+                    }
+                    if (victim == null) continue;
+
+                    if (SendHeadshotOn(victim, $"thrown {(h == 0 ? "left" : "right")} gun hit {victim.UserId}'s head"))
+                    {
+                        lastThrownHeadshot[h] = Time.unscaledTime;
+                        thrownHeadshotsSent++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    thrownHeadshotFailed = true; // logged once, not every frame
+                    Log($"thrown gun headshot check failed, turned off for this session: {ex.Message}");
+                }
+            }
+        }
+
+        /// <summary>The shown remote avatar whose head this collider is part of, or null.</summary>
+        private static Remote HeadOwner(Collider collider)
+        {
+            if (collider == null) return null;
+            Remote owner = RemoteOwning(collider.transform, out bool isHead);
+            return isHead ? owner : null;
+        }
+
+        /// <summary>
+        /// A local gun's solid box on GunX/tricks. Looked up under the Gun while it's in hand; while the
+        /// gun is thrown "tricks" isn't under the Gun anymore, so the box found last is kept.
+        /// </summary>
+        private static BoxCollider ThrownHeadBox(Gun gun, int hand)
+        {
+            if (!IsAlive(gun)) return null;
+            Transform tricks = gun.transform.Find(GunColliderPath);
+            if (tricks != null)
+            {
+                BoxCollider box = tricks.GetComponent<BoxCollider>();
+                thrownHeadBox[hand] = box != null && !box.isTrigger ? box : null;
+            }
+            else if (!IsAlive(thrownHeadBox[hand]))
+            {
+                thrownHeadBox[hand] = null;
+            }
+            return thrownHeadBox[hand];
         }
 
         /// <summary>
