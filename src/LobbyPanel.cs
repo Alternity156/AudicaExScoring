@@ -110,6 +110,8 @@ namespace ExScoringMod
         /// <summary>Once per frame from ExScoring.OnUpdate.</summary>
         public static void Tick()
         {
+            PickCounter.EnsureSubscribed();
+
             bool show = Config.EnableOnlinePlay && MpSession.InLobby;
             if (!show)
             {
@@ -715,6 +717,9 @@ namespace ExScoringMod
                 line.Append(p.isHost ? "<color=#ffd24d>*</color> " : "  ");
                 line.Append(Name(p));
 
+                int picks = PickCounter.Get(p.userId);
+                if (picks > 0) line.Append(" <color=#a0a0a0>(").Append(picks).Append(")</color>");
+
                 if (!p.connected)
                 {
                     line.Append("  <color=#ffaa33>reconnecting...</color>");
@@ -893,6 +898,144 @@ namespace ExScoringMod
                 sb.Append(name[i]);
             }
             return sb.ToString();
+        }
+
+        // ── Pick counter ──
+
+        /// <summary>
+        /// Client-side count of how many times each player's suggestion got played in this lobby,
+        /// shown as a grey "(n)" after their name. Counted at matchPrepare: the players whose
+        /// current songChoice has the match's songId (difficulty ignored) are found, and only the
+        /// one who suggested it first gets +1. "First" is the order this client saw each choice
+        /// appear or change; choices already there when the lobby was joined are ordered by seat.
+        /// A match is counted once (by matchId), so a catch-up matchPrepare isn't counted twice.
+        /// Kept per userId for the lobby (a player who leaves and comes back keeps theirs), wiped
+        /// on leaving or switching lobby. A late joiner sees nothing for earlier matches.
+        /// </summary>
+        private static class PickCounter
+        {
+            private static bool subscribed;
+            private static string lobbyId;
+            private static long nextSequence;
+            private static string lastCountedMatchId;
+
+            private static readonly Dictionary<string, int> counts = new Dictionary<string, int>();
+            // userId -> songId of their current choice, and when this client first saw it.
+            private static readonly Dictionary<string, string> choiceSongIds = new Dictionary<string, string>();
+            private static readonly Dictionary<string, long> choiceSequences = new Dictionary<string, long>();
+
+            public static void EnsureSubscribed()
+            {
+                if (subscribed) return;
+                subscribed = true;
+
+                MpSession.OnLobbyState += OnLobbyState;
+                MpSession.OnLeftLobby += _ => Reset(null);
+                MpSession.OnMatchPrepare += OnMatchPrepare;
+
+                // Already in a lobby (subscribed after its first lobbyState): start from it now.
+                if (MpSession.Lobby != null) OnLobbyState(MpSession.Lobby);
+            }
+
+            public static int Get(string userId)
+            {
+                if (userId == null) return 0;
+                return counts.TryGetValue(userId, out int n) ? n : 0;
+            }
+
+            private static void Reset(string newLobbyId)
+            {
+                lobbyId = newLobbyId;
+                nextSequence = 0;
+                lastCountedMatchId = null;
+                counts.Clear();
+                choiceSongIds.Clear();
+                choiceSequences.Clear();
+            }
+
+            private static void OnLobbyState(MpLobbyState lobby)
+            {
+                try
+                {
+                    if (lobby == null) return;
+                    if (lobby.lobbyId != lobbyId) Reset(lobby.lobbyId);
+                    if (lobby.players == null) return;
+
+                    // Players come in seat order, so choices seen for the first time together
+                    // (e.g. on joining) are ordered by seat.
+                    HashSet<string> present = new HashSet<string>();
+                    foreach (MpPlayerState p in lobby.players)
+                    {
+                        if (p == null || p.userId == null) continue;
+                        present.Add(p.userId);
+
+                        string songId = p.songChoice?.songId;
+                        choiceSongIds.TryGetValue(p.userId, out string known);
+                        if (songId == known) continue;
+
+                        if (songId == null)
+                        {
+                            choiceSongIds.Remove(p.userId);
+                            choiceSequences.Remove(p.userId);
+                        }
+                        else
+                        {
+                            choiceSongIds[p.userId] = songId;
+                            choiceSequences[p.userId] = nextSequence++;
+                        }
+                    }
+
+                    // Someone who left takes their choice with them (counts stay).
+                    foreach (string userId in choiceSongIds.Keys.Where(id => !present.Contains(id)).ToList())
+                    {
+                        choiceSongIds.Remove(userId);
+                        choiceSequences.Remove(userId);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.Log("[LobbyPanel] pick counter lobbyState failed: " + ex.Message);
+                }
+            }
+
+            private static void OnMatchPrepare(MpMatchPrepare match)
+            {
+                try
+                {
+                    if (match == null || match.song == null || string.IsNullOrEmpty(match.song.songId)) return;
+                    if (match.matchId != null && match.matchId == lastCountedMatchId) return;
+                    lastCountedMatchId = match.matchId;
+
+                    // Catch up on the latest choices first, in case lobbyState hasn't been handled yet.
+                    if (MpSession.Lobby != null) OnLobbyState(MpSession.Lobby);
+
+                    string first = null;
+                    long firstSequence = long.MaxValue;
+                    foreach (KeyValuePair<string, string> choice in choiceSongIds)
+                    {
+                        if (choice.Value != match.song.songId) continue;
+                        long sequence = choiceSequences.TryGetValue(choice.Key, out long s) ? s : long.MaxValue;
+                        if (first == null || sequence < firstSequence)
+                        {
+                            first = choice.Key;
+                            firstSequence = sequence;
+                        }
+                    }
+
+                    if (first == null)
+                    {
+                        DebugLog.Log($"[LobbyPanel] match {match.matchId}: {match.song.title} wasn't anyone's suggestion, no pick counted");
+                        return;
+                    }
+
+                    counts[first] = Get(first) + 1;
+                    DebugLog.Log($"[LobbyPanel] match {match.matchId}: pick counted for {first} ({counts[first]} total)");
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.Log("[LobbyPanel] pick counter matchPrepare failed: " + ex.Message);
+                }
+            }
         }
     }
 }
