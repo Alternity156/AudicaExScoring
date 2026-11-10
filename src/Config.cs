@@ -69,6 +69,8 @@ namespace ExScoringMod
         public static int MenuMusic; // 0 = Environment, 1..5 = arena 1..5 menu music, 6 = Tutorial, 7 = Random Song
         public static float MenuMusicVolume; // 0..100 %, relative to the game's Music Level
         public static float SongPreviewVolume; // 0..100 %, song list previews, relative to the game's Music Level
+        public static bool NormalizeSongVolume; // plays every song at the same loudness (AudioNormalizer / SongLoudness)
+        public static float NormalizeTargetLufs; // -20..-10 LUFS, loudness songs are normalized to
         public static int LanguageOverride; // 0 = game default, otherwise a Localizer.KataLanguage value
         public static bool ShowStatsOnFail;
         public static bool MenuAimAssist;
@@ -214,6 +216,8 @@ namespace ExScoringMod
             MelonPrefs.RegisterInt(Category, nameof(MenuMusic), 0, "Menu music: 0 = follows the environment, 1..5 = always that environment's music, 6 = the tutorial song, 7 = a random song from your library");
             MelonPrefs.RegisterFloat(Category, nameof(MenuMusicVolume), 100f, "Menu music volume in %, relative to the Music Level (song previews aren't affected) [0,100,5,100]");
             MelonPrefs.RegisterFloat(Category, nameof(SongPreviewVolume), 100f, "Song list preview volume in %, relative to the Music Level (lobby previews aren't affected) [0,100,5,100]");
+            MelonPrefs.RegisterBool(Category, nameof(NormalizeSongVolume), true, "Plays every song at the same loudness. Official songs are pre-measured, custom songs are measured once in the background and remembered");
+            MelonPrefs.RegisterFloat(Category, nameof(NormalizeTargetLufs), -15f, "Loudness songs are normalized to, in LUFS (-15 = the official songs' median, higher is louder) [-20,-10,0.5,-15]");
             MelonPrefs.RegisterInt(Category, nameof(LanguageOverride), 0, "Game language: 0 = game default, 1 = English, 2 = French, 3 = German, 4 = Italian, 5 = Spanish (LA), 6 = Dutch, 7 = Finnish, 8 = Norwegian, 9 = Polish, 10 = Portuguese (LA), 11 = Swedish, 12 = Japanese, 13 = Korean");
             MelonPrefs.RegisterBool(Category, nameof(ShowStatsOnFail), false, "Shows the stats screen after failing a song instead of the fail screen");
 
@@ -330,6 +334,8 @@ namespace ExScoringMod
             MenuMusic = ExScoringMod.MenuMusic.Clamp(MelonPrefs.GetInt(Category, nameof(MenuMusic)));
             MenuMusicVolume = Mathf.Clamp(MelonPrefs.GetFloat(Category, nameof(MenuMusicVolume)), 0f, 100f);
             SongPreviewVolume = Mathf.Clamp(MelonPrefs.GetFloat(Category, nameof(SongPreviewVolume)), 0f, 100f);
+            NormalizeSongVolume = MelonPrefs.GetBool(Category, nameof(NormalizeSongVolume));
+            NormalizeTargetLufs = Mathf.Clamp(MelonPrefs.GetFloat(Category, nameof(NormalizeTargetLufs)), -20f, -10f);
             LanguageOverride = ExScoringMod.LanguageOverride.ClampValue(MelonPrefs.GetInt(Category, nameof(LanguageOverride)));
             MaxRunsPerSong = MelonPrefs.GetInt(Category, nameof(MaxRunsPerSong));
             MaxRunDataSizeMB = MelonPrefs.GetFloat(Category, nameof(MaxRunDataSizeMB));
@@ -642,6 +648,22 @@ namespace ExScoringMod
             if (value > 100f) value = 100f;
             MelonPrefs.SetFloat(Category, nameof(SongPreviewVolume), value);
             SongPreviewVolume = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateNormalizeSongVolume(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(NormalizeSongVolume), value);
+            NormalizeSongVolume = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateNormalizeTargetLufs(float value)
+        {
+            if (value < -20f) value = -20f;
+            if (value > -10f) value = -10f;
+            MelonPrefs.SetFloat(Category, nameof(NormalizeTargetLufs), value);
+            NormalizeTargetLufs = value;
             MelonPrefs.SaveConfig();
         }
 

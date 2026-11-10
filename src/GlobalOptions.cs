@@ -190,6 +190,8 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetParticleKillerCount();
                 OptionsMenuFunctions.GetMusicLevel();
                 OptionsMenuFunctions.GetSfxLevel();
+                OptionsMenuFunctions.GetNormalizeSongVolume();
+                OptionsMenuFunctions.GetNormalizeTargetLufs();
                 OptionsMenuFunctions.GetMissFilter();
                 OptionsMenuFunctions.GetWeaponSfxMode();
                 OptionsMenuFunctions.GetMineSounds();
@@ -231,6 +233,18 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.sfxLevel = v; OptionsMenuFunctions.SetSfxLevel(v); },
                     0f, 10f, 1f, 5f, "N0");
                 OptionsMenuClone.AddRow(musicLevelSlider, sfxLevelSlider);
+
+                var normalizeToggle = OptionsMenuClone.CreateToggle(0, "Normalize Song Volume",
+                    () => OptionsMenuFunctions.normalizeSongVolume,
+                    v => { OptionsMenuFunctions.normalizeSongVolume = v; OptionsMenuFunctions.SetNormalizeSongVolume(v); },
+                    "Plays every song at the same loudness, in songs, previews and the menu music. Official songs are pre-measured; custom songs are measured once in the background and remembered. Music Level still applies on top.");
+                var normalizeTargetSlider = OptionsMenuClone.CreateSlider(1, "Normalize Target",
+                    () => OptionsMenuFunctions.normalizeTargetLufs,
+                    v => { OptionsMenuFunctions.normalizeTargetLufs = v; OptionsMenuFunctions.SetNormalizeTargetLufs(v); },
+                    -20f, -10f, 0.5f, -15f,
+                    v => v.ToString("0.0") + " LUFS",
+                    "Loudness every song is brought to. -15 LUFS matches the official songs' average; higher is louder. Quiet songs are only boosted as far as their peaks allow (at most +6 dB).");
+                OptionsMenuClone.AddRow(normalizeToggle, normalizeTargetSlider);
 
                 var missFilterToggle = OptionsMenuClone.CreateToggle(0, "Miss Filter",
                     () => OptionsMenuFunctions.missFilter,

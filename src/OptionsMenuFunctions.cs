@@ -74,6 +74,8 @@ namespace ExScoringMod
         public static int menuMusic;
         public static float menuMusicVolume;
         public static float songPreviewVolume;
+        public static bool normalizeSongVolume;
+        public static float normalizeTargetLufs;
         public static int languageOverrideIndex;
         public static float maxRunsPerSong;
         public static float maxRunDataSizeMB;
@@ -672,6 +674,28 @@ namespace ExScoringMod
         {
             songPreviewVolume = value;
             Config.UpdateSongPreviewVolume(value);
+        }
+
+        public static void GetNormalizeSongVolume()
+        {
+            normalizeSongVolume = Config.NormalizeSongVolume;
+        }
+
+        public static void SetNormalizeSongVolume(bool value)
+        {
+            normalizeSongVolume = value;
+            Config.UpdateNormalizeSongVolume(value);
+        }
+
+        public static void GetNormalizeTargetLufs()
+        {
+            normalizeTargetLufs = Config.NormalizeTargetLufs;
+        }
+
+        public static void SetNormalizeTargetLufs(float value)
+        {
+            normalizeTargetLufs = value;
+            Config.UpdateNormalizeTargetLufs(value);
         }
 
         public static void GetLanguageOverride()

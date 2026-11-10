@@ -32,8 +32,12 @@ namespace ExScoringMod
     ///    is picked each time the menus are entered. Shown by <see cref="NowPlayingLabel"/>.
     ///
     /// Menu Music Volume (0..100 %, relative to the game's Music Level) scales the Tutorial/Random
-    /// track's gain and sets the environment music's volume (Sound.SetVolume, so it doesn't fight
-    /// AudioAmbience's preview ducking, which goes through the gain). Song previews aren't affected.
+    /// track's gain and the environment music's gain. Song previews aren't affected. With Normalize
+    /// Song Volume on, AudioNormalizer also scales the Tutorial/Random track to its song's loudness
+    /// (through MenuTrackHandle / MenuTrackSong).
+    /// Sound volume and gain are the same value (volume in dB = 20 * log10(gain), confirmed in game
+    /// 2026-11-10), so the environment music can't get a separate volume: native AudioAmbience.Update
+    /// sets its gain every frame (preview ducking), and that call is scaled instead (ShellGainPatch).
     ///
     /// Config.MenuMusic: 0 = Environment (native), 1..5 = arena 1..5, 6 = Tutorial, 7 = Random Song.
     /// </summary>
@@ -78,6 +82,13 @@ namespace ExScoringMod
         /// starts the next one, the same way a song reaching its end does.
         /// </summary>
         public static void NextRandomSong() => MenuTrack.Skip();
+
+        /// <summary>
+        /// The Tutorial / Random Song track's sound and song (kInvalidSoundHandle / null when none),
+        /// for AudioNormalizer, which scales that track's per-frame gain to the song's loudness.
+        /// </summary>
+        internal static uint MenuTrackHandle => MenuTrack.Handle;
+        internal static SongList.SongData MenuTrackSong => MenuTrack.Song;
 
         /// <summary>Menu Music Volume as a 0..1 factor.</summary>
         private static float VolumeFactor => Mathf.Clamp01(Config.MenuMusicVolume / 100f);
@@ -199,42 +210,38 @@ namespace ExScoringMod
         {
             private static void Postfix(AudioAmbience __instance)
             {
-                ShellVolume.Update(__instance);
                 MenuTrack.Update(__instance);
             }
         }
 
-        /// <summary>Menu Music Volume for the environment music, through Sound.SetVolume.</summary>
-        private static class ShellVolume
+        /// <summary>
+        /// Menu Music Volume for the environment music. Every frame in the menus, native
+        /// AudioAmbience.Update calls Sound.SetGain(mShellMusicHandle, 0 or 1, 1 s fade): 0 while
+        /// SongPreview fades in, plays or fades out, 1 otherwise. AudioAmbience.Update is the only
+        /// caller of this 3-argument overload, and it's a real call (not inlined), so scaling its gain
+        /// here keeps the ducking and its fade exactly as native, at the chosen level. Takes effect
+        /// on the next frame when the option changes. With Tutorial/Random Song selected,
+        /// MenuTrack.Update (AudioAmbience.Update postfix, so after this call) still forces gain 0.
+        /// </summary>
+        [HarmonyPatch(typeof(Hmx.Audio.Sound), "SetGain", new Type[] { typeof(uint), typeof(float), typeof(float) })]
+        private static class ShellGainPatch
         {
-            private static uint lastHandle;
-            private static float lastDb = float.NaN;
+            private static bool loggedError;
 
-            public static void Update(AudioAmbience ambience)
+            private static void Prefix(uint h, ref float gain)
             {
                 try
                 {
-                    if (ambience == null) return;
-                    uint handle = ambience.mShellMusicHandle;
-                    if (handle == 0 || handle == Hmx.Audio.Sound.kInvalidSoundHandle) return;
-
-                    float db = ToDb(VolumeFactor);
-                    if (handle == lastHandle && db == lastDb) return;
-                    Hmx.Audio.Sound.SetVolume(handle, db);
-                    lastHandle = handle;
-                    lastDb = db;
+                    AudioAmbience ambience = AudioAmbience.I;
+                    if (ambience == null || h != ambience.mShellMusicHandle) return;
+                    gain *= VolumeFactor;
                 }
                 catch (Exception ex)
                 {
-                    DebugLog.Log($"[MenuMusic] environment music volume failed: {ex.Message}");
-                    lastHandle = 0;
+                    if (loggedError) return;
+                    loggedError = true;
+                    DebugLog.Log($"[MenuMusic] environment music gain scaling failed (logged once): {ex.Message}");
                 }
-            }
-
-            private static float ToDb(float factor)
-            {
-                if (factor <= 0.0001f) return -96f;
-                return Mathf.Max(-96f, 20f * Mathf.Log10(factor));
             }
         }
 
@@ -261,6 +268,9 @@ namespace ExScoringMod
             private static float lastTimelineMs = -1f;
             private static bool loggedNativeLoop;
             private static bool loggedNoSongs;
+
+            public static uint Handle => handle;
+            public static SongList.SongData Song => song;
 
             /// <summary>Random Song: move on to the next song (fade out, then the next one fades in).</summary>
             public static void Skip()
