@@ -78,6 +78,9 @@ namespace ExScoringMod
         public static bool shouldShowKeyboard = false;
         public static string downloadsDirectory;
         public static string mainSongDirectory;
+        // Older versions of maps replaced by an update (DeleteButton.cs, BackUpOtherVersions).
+        // Next to Downloads, so the game never loads them.
+        public static string songBackupDirectory;
 
         // ── Song deletion fields ──
         public static string deletedDownloadsListPath;
@@ -141,6 +144,7 @@ namespace ExScoringMod
             // Set up download directories
             mainSongDirectory = Path.Combine(Application.streamingAssetsPath, "HmxAudioAssets", "songs");
             downloadsDirectory = Application.dataPath.Replace("Audica_Data", "Downloads");
+            songBackupDirectory = Application.dataPath.Replace("Audica_Data", "SongBackups");
             deletedDownloadsListPath = Path.Combine(downloadsDirectory, "ExScoring_DeletedFiles");
             CheckFolderDirectories();
 
@@ -200,11 +204,26 @@ namespace ExScoringMod
 
                 try
                 {
-                    if (File.Exists(destination))
+                    if (File.Exists(destination) && FilesIdentical(filePath, destination))
                     {
                         // Already in songs folder — just clean up the download copy
                         File.Delete(filePath);
                         DebugLog.Log($"  Deleted duplicate: {fileName}");
+                    }
+                    else if (File.Exists(destination))
+                    {
+                        // Same name, different contents: another version of the map. The download
+                        // is the newer one (a Maudica update keeps the file name), so the one in the
+                        // songs folder goes to SongBackups. This used to delete the download.
+                        if (MoveToBackup(destination, null))
+                        {
+                            File.Move(filePath, destination);
+                            DebugLog.Log($"  Moved: {fileName} (older version backed up)");
+                        }
+                        else
+                        {
+                            DebugLog.Log($"  Kept {fileName} in Downloads: the older version in the songs folder couldn't be moved");
+                        }
                     }
                     else
                     {

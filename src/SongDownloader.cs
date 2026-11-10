@@ -162,23 +162,61 @@ namespace ExScoringMod
 
             yield return null;
         }
+
+        /// <summary>
+        /// Coroutine that downloads a Maudica map into Downloads and adds it to the song list.
+        ///
+        /// Without <paramref name="expectedSongId"/> (song search, playlists, requests), a file of
+        /// that name already on disk counts as the map: nothing is downloaded, and the file on
+        /// disk is processed in place.
+        ///
+        /// With <paramref name="expectedSongId"/> (online lobbies: the exact in-game version the
+        /// lobby wants), a file of that name on disk while that version isn't installed is an
+        /// older version of the map (a Maudica update keeps the file name). The map is downloaded
+        /// anyway. If Maudica's file is the same as the one on disk, nothing changes. Otherwise
+        /// the old version is taken out of the song list and moved to the SongBackups folder
+        /// (ExScoring.BackUpOtherVersions) before the new one is written. Success then means the
+        /// expected version is installed afterwards.
         /// </summary>
         public static IEnumerator DownloadSong(string songID, string downloadUrl, Action<string, bool> onDownloadComplete = null,
-                                               Action<string, float> onProgress = null)
+                                               Action<string, float> onProgress = null, string expectedSongId = null)
         {
             string audicaName = songID + ".audica";
             string path = Path.Combine(ExScoring.mainSongDirectory, audicaName);
             string downloadPath = Path.Combine(ExScoring.downloadsDirectory, audicaName);
+            bool hasExpected = !string.IsNullOrEmpty(expectedSongId);
+
+            if (hasExpected && SongList.I != null && SongList.I.GetSong(expectedSongId) != null)
+            {
+                onProgress?.Invoke(songID, 1f);
+                onDownloadComplete?.Invoke(songID, true); // that version is already installed
+                yield break;
+            }
+
+            bool onDisk = File.Exists(path) || File.Exists(downloadPath);
+            bool update = onDisk && hasExpected;
 
             byte[] results = null;
-            if (!File.Exists(path) && !File.Exists(downloadPath))
+            if (!onDisk || update)
             {
+                if (update)
+                    DebugLog.Log($"[SongDownloader] {audicaName} is on disk but {expectedSongId} isn't installed: downloading the current version to update it");
+
                 WWW www = new WWW(downloadUrl);
                 while (!www.isDone)
                 {
                     onProgress?.Invoke(songID, www.progress);
                     yield return null;
                 }
+
+                if (!string.IsNullOrEmpty(www.error) || www.bytes == null || www.bytes.Length == 0)
+                {
+                    DebugLog.Log($"[SongDownloader] Download of {audicaName} failed: {(string.IsNullOrEmpty(www.error) ? "empty response" : www.error)}");
+                    failedDownloads.Add(audicaName);
+                    onDownloadComplete?.Invoke(songID, false);
+                    yield break;
+                }
+
                 onProgress?.Invoke(songID, 1f);
                 results = www.bytes;
             }
@@ -187,29 +225,120 @@ namespace ExScoringMod
                 onProgress?.Invoke(songID, 1f); // already on disk
             }
 
-            if (results != null)
+            if (update)
             {
-                File.WriteAllBytes(downloadPath, results);
+                if (SameAsFile(results, path) || SameAsFile(results, downloadPath))
+                {
+                    DebugLog.Log($"[SongDownloader] Maudica's {audicaName} is the file already installed, not {expectedSongId}: nothing to update");
+                    onDownloadComplete?.Invoke(songID, false);
+                    yield break;
+                }
+
+                ExScoring.BackUpOtherVersions(audicaName, expectedSongId);
+                if (File.Exists(downloadPath))
+                {
+                    // The old version is in Downloads and couldn't be moved (in use): the new one
+                    // has nowhere to go. It's moved to SongBackups on quit; the next try works.
+                    DebugLog.Log($"[SongDownloader] Couldn't move the old {audicaName} out of Downloads: not updating it now");
+                    onDownloadComplete?.Invoke(songID, false);
+                    yield break;
+                }
             }
 
-            // Process the downloaded song into the song list
-            SongList.SongSourceDir dir = new SongList.SongSourceDir(Application.dataPath, ExScoring.downloadsDirectory);
-            string file = downloadPath.Replace('\\', '/');
-            bool success = SongList.I.ProcessSingleSong(dir, file, new Il2CppSystem.Collections.Generic.HashSet<string>());
+            SongList.SongSourceDir dir;
+            string file;
+            if (results != null)
+            {
+                try
+                {
+                    // A path queued for deletion (an old file that was locked) must not take the new file with it.
+                    ExScoring.ForgetPendingDelete(downloadPath);
+                    File.WriteAllBytes(downloadPath, results);
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.Log($"[SongDownloader] Couldn't write {downloadPath}: {ex.Message}");
+                    failedDownloads.Add(audicaName);
+                    onDownloadComplete?.Invoke(songID, false);
+                    yield break;
+                }
+                dir = new SongList.SongSourceDir(Application.dataPath, ExScoring.downloadsDirectory);
+                file = downloadPath;
+            }
+            else if (File.Exists(downloadPath))
+            {
+                dir = new SongList.SongSourceDir(Application.dataPath, ExScoring.downloadsDirectory);
+                file = downloadPath;
+            }
+            else
+            {
+                // Already in the songs folder (this used to process the missing Downloads path and fail).
+                dir = new SongList.SongSourceDir(Application.streamingAssetsPath, ExScoring.mainSongDirectory);
+                file = path;
+            }
+
+            // Process the song into the song list
+            bool processed = SongList.I.ProcessSingleSong(dir, file.Replace('\\', '/'), new Il2CppSystem.Collections.Generic.HashSet<string>());
             downloadedFileNames.Add(audicaName);
 
-            if (success)
+            if (processed)
             {
                 needRefresh = true;
             }
             else
             {
                 failedDownloads.Add(audicaName);
-                if (File.Exists(downloadPath))
+                // Only a file this call just wrote is removed; one that was already on disk stays.
+                if (results != null && File.Exists(downloadPath))
                     File.Delete(downloadPath);
             }
 
+            bool success = processed && (!hasExpected || SongList.I.GetSong(expectedSongId) != null);
+            if (processed && !success)
+                DebugLog.Log($"[SongDownloader] {audicaName} was added, but it isn't {expectedSongId} (Maudica has another version of the map)");
+
             onDownloadComplete?.Invoke(songID, success);
+        }
+
+        /// <summary>True when the file exists and holds exactly these bytes.</summary>
+        private static bool SameAsFile(byte[] bytes, string filePath)
+        {
+            try
+            {
+                if (bytes == null || !File.Exists(filePath)) return false;
+                if (new FileInfo(filePath).Length != bytes.Length) return false;
+                byte[] onDisk = File.ReadAllBytes(filePath);
+                for (int i = 0; i < bytes.Length; i++)
+                    if (bytes[i] != onDisk[i]) return false;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Log($"[SongDownloader] Couldn't compare with {filePath}: {ex.Message}");
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// The installed song that is another version of <paramref name="songId"/> (same file
+        /// name, different cue checksum), or null when songId itself is installed, isn't a
+        /// custom song, or no other version is installed. A custom song's ID is its file name
+        /// plus "_" and a 32-character checksum.
+        /// </summary>
+        public static SongList.SongData FindOtherVersion(string songId)
+        {
+            if (SongList.I == null || string.IsNullOrEmpty(songId) || !SongSearch.IsCustomSong(songId)) return null;
+            if (SongList.I.GetSong(songId) != null) return null;
+
+            string baseName = songId.Substring(0, songId.LastIndexOf('_'));
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                SongList.SongData sd = SongList.I.songs[i];
+                if (sd == null || sd.songID == songId) continue;
+                string name = !string.IsNullOrEmpty(sd.zipPath) ? Path.GetFileNameWithoutExtension(sd.zipPath) : sd.originalSongID;
+                if (string.Equals(name, baseName, StringComparison.OrdinalIgnoreCase)) return sd;
+            }
+            return null;
         }
 
         /// <summary>

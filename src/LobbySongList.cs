@@ -26,6 +26,11 @@ namespace ExScoringMod
     /// only after the selected song (MpGameplay downloads that one). Not during songs, and never a
     /// song the player deleted this session (ExScoring.IsDeletedThisSession): its row says so and
     /// still downloads it when shot.
+    ///
+    /// Downloads ask for the suggestion's exact version (SongDownloader.DownloadSong with an
+    /// expected song ID): when another version of the map is installed under the same file
+    /// name, the row says "Different version installed - shoot to update", and the download
+    /// replaces it (the installed one goes to SongBackups). Auto-download does this too.
     /// </summary>
     internal static class LobbySongList
     {
@@ -157,10 +162,12 @@ namespace ExScoringMod
                     lookup.label = label;
                     var row = ViewRow.DownloadableSongRow(lookup.map.song_id, label, song.artist, song.mapper,
                         lookup.map.download_url, DownloadableColor, () => Download(song.songId));
-                    if (lookup.downloading) row.subLabel = $"Downloading... {Math.Max(0, lookup.percent)}%";
-                    else if (MpGameplay.DownloadingSongId == song.songId) row.subLabel = "Downloading...";
+                    bool otherVersion = SongDownloader.FindOtherVersion(song.songId) != null;
+                    if (lookup.downloading) row.subLabel = $"{(otherVersion ? "Updating" : "Downloading")}... {Math.Max(0, lookup.percent)}%";
+                    else if (MpGameplay.DownloadingSongId == song.songId) row.subLabel = otherVersion ? "Updating..." : "Downloading...";
                     else if (lookup.failed) row.subLabel = "Download failed - shoot to retry";
                     else if (ExScoring.IsDeletedThisSession(song.songId)) row.subLabel = "Deleted - shoot to download again";
+                    else if (otherVersion) row.subLabel = "Different version installed - shoot to update";
                     return row;
 
                 case LookupState.NotFound:
@@ -251,9 +258,11 @@ namespace ExScoringMod
             if (lookups.TryGetValue(songId, out Lookup lookup))
             {
                 lookup.downloading = false;
-                lookup.failed = false;
                 lookup.percent = -1;
             }
+            // Every failure is forgotten, not just this song's: deleting an old version of a
+            // suggestion frees its file name, and that suggestion is under its own (new) ID.
+            foreach (Lookup other in lookups.Values) other.failed = false;
             lastSignature = null; // rebuild on the next lobby state, even if nothing else changed
         }
 
@@ -309,11 +318,21 @@ namespace ExScoringMod
                 }
 
                 string selectedId = MpSession.Lobby?.selectedSong?.songId;
-                foreach (var entry in GetSuggestions())
+                List<KeyValuePair<MpPlayerState, MpSongRef>> suggestions = GetSuggestions();
+                var inUse = new HashSet<string>();
+                if (!string.IsNullOrEmpty(selectedId)) inUse.Add(selectedId);
+                foreach (var entry in suggestions) inUse.Add(entry.Value.songId);
+
+                foreach (var entry in suggestions)
                 {
                     MpSongRef song = entry.Value;
                     if (song.songId == selectedId || IsInstalled(song.songId)) continue;
                     if (ExScoring.IsDeletedThisSession(song.songId)) continue;
+
+                    // Updating would move away a version the lobby uses (the selected song, or
+                    // another suggestion): only on a shot at the row, never on its own.
+                    SongList.SongData other = SongDownloader.FindOtherVersion(song.songId);
+                    if (other != null && inUse.Contains(other.songID)) continue;
 
                     Lookup lookup = EnsureLookup(song);
                     if (lookup.state != LookupState.Found || lookup.downloading || lookup.failed) continue;
@@ -355,7 +374,8 @@ namespace ExScoringMod
                     if (percent == lookup.percent) return;
                     lookup.percent = percent;
                     VirtualSongList.UpdateActionRowText(map.song_id, lookup.label, $"Downloading... {percent}%");
-                }));
+                },
+                songId)); // the exact version: an older one with the same file name gets updated
         }
     }
 }

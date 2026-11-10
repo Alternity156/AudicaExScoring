@@ -30,6 +30,11 @@ namespace ExScoringMod
     ///    (deletedSongs), so a suggestion doesn't bring it straight back. Shooting its row in
     ///    the Suggested Songs folder still downloads it by hand.
     /// Every step is logged with a [DeleteSong] prefix.
+    ///
+    /// Also here: BackUpOtherVersions, for an online lobby's update of a map to the version the
+    /// lobby wants (SongDownloader.DownloadSong). The older version is taken out of the game
+    /// the same way, but its file is moved to the SongBackups folder (next to Downloads, not
+    /// loaded by the game) instead of being deleted, and nothing is blocked.
     /// </summary>
     public partial class ExScoring
     {
@@ -282,7 +287,46 @@ namespace ExScoringMod
                 files = new List<string>();
             }
 
-            // 1. Song list.
+            // 1. Song list, song cache and song trackers.
+            RemoveSongFromGame(song);
+
+            // 2. Auto-download block for this session.
+            if (!deletedSongs.Contains(songId)) deletedSongs.Add(songId);
+
+            // 3. Files.
+            if (files.Count > 0)
+                MelonCoroutines.Start(DeleteFilesWhenSafe(files, inSong));
+
+            // 4. Folders and search results (the views rebuild when the song list is shown).
+            RebuildSongViews();
+
+            // 5. Online lobby.
+            try
+            {
+                LobbySongList.OnSongDeleted(songId);
+                MpGameplay.OnSongDeleted(songId);
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Log($"{LogPrefix} Couldn't update the lobby state: {ex.Message}");
+            }
+
+            PlaylistUtil.Popup("Deleted " + title);
+            return true;
+        }
+
+        /// <summary>
+        /// Takes a song out of the running game: SongList.I.songs, the song cache (saved) and the
+        /// download trackers. Leaves its files, the session's delete list and the views alone.
+        /// Shared by DeleteSong and BackUpOtherVersions.
+        /// </summary>
+        private static void RemoveSongFromGame(SongList.SongData song)
+        {
+            string songId = song.songID;
+            string zipPath = song.zipPath;
+            string fileName = string.IsNullOrEmpty(zipPath) ? null : Path.GetFileName(zipPath);
+
+            // Song list.
             int removed = 0;
             for (int i = SongList.I.songs.Count - 1; i >= 0; i--)
             {
@@ -293,14 +337,11 @@ namespace ExScoringMod
                     removed++;
                 }
             }
-            DebugLog.Log($"{LogPrefix} Removed {removed} entr{(removed == 1 ? "y" : "ies")} from the song list");
+            DebugLog.Log($"{LogPrefix} Removed {removed} entr{(removed == 1 ? "y" : "ies")} of {songId} from the song list");
             if (SongList.I.GetSong(songId) != null)
                 DebugLog.Log($"{LogPrefix} [WARNING] SongList.GetSong still finds {songId} after removing it from SongList.songs");
 
-            // 2. Auto-download block for this session.
-            if (!deletedSongs.Contains(songId)) deletedSongs.Add(songId);
-
-            // 3. Song cache.
+            // Song cache.
             try
             {
                 int cacheRemoved = SongCache.RemoveSong(songId, zipPath);
@@ -312,7 +353,7 @@ namespace ExScoringMod
                 DebugLog.Log($"{LogPrefix} Couldn't update the song cache: {ex.Message}");
             }
 
-            // 4. Song trackers (download state, filename lookups).
+            // Song trackers (download state, filename lookups).
             try
             {
                 SongDownloadTracker.songIDs.Remove(songId);
@@ -337,12 +378,11 @@ namespace ExScoringMod
             {
                 DebugLog.Log($"{LogPrefix} Couldn't update the song trackers: {ex.Message}");
             }
+        }
 
-            // 5. Files.
-            if (files.Count > 0)
-                MelonCoroutines.Start(DeleteFilesWhenSafe(files, inSong));
-
-            // 6. Folders and search results (the views rebuild when the song list is shown).
+        /// <summary>Rebuilds the folders and search results (the views rebuild when the song list is shown).</summary>
+        private static void RebuildSongViews()
+        {
             try
             {
                 SongFolderManager.Rebuild(mainSongDirectory);
@@ -352,20 +392,135 @@ namespace ExScoringMod
             {
                 DebugLog.Log($"{LogPrefix} Couldn't rebuild the folders: {ex.Message}");
             }
+        }
 
-            // 7. Online lobby.
+        // ── Old versions (SongDownloader.DownloadSong with an expected song ID) ──
+
+        /// <summary>
+        /// Before a new version of a map is written: takes every installed song loaded from a
+        /// file named <paramref name="fileName"/> (other than <paramref name="keepSongId"/>) out
+        /// of the game, and moves its file, plus any file of that name in the songs folder or
+        /// Downloads, to the SongBackups folder, which the game doesn't load. Not a delete: the
+        /// old ID isn't blocked from auto-download, and the lobby isn't told. A file that can't
+        /// be moved now (in use) is copied to SongBackups and deleted on quit. Returns true when
+        /// every file was moved.
+        /// </summary>
+        internal static bool BackUpOtherVersions(string fileName, string keepSongId)
+        {
+            if (string.IsNullOrEmpty(fileName)) return true;
+
+            // Full path → the song ID it was loaded as (null for a file that isn't loaded).
+            var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var oldSongs = new List<SongList.SongData>();
+
+            if (SongList.I != null)
+            {
+                for (int i = 0; i < SongList.I.songs.Count; i++)
+                {
+                    SongList.SongData sd = SongList.I.songs[i];
+                    if (sd == null || sd.songID == keepSongId || string.IsNullOrEmpty(sd.zipPath)) continue;
+                    if (!string.Equals(Path.GetFileName(sd.zipPath), fileName, StringComparison.OrdinalIgnoreCase)) continue;
+                    oldSongs.Add(sd);
+                }
+            }
+
+            foreach (SongList.SongData sd in oldSongs)
+            {
+                DebugLog.Log($"{LogPrefix} Backing up older version {sd.songID} \"{sd.title}\" (zipPath={sd.zipPath})");
+                try
+                {
+                    string primary = ResolveSongFile(sd);
+                    if (primary != null) files[primary] = sd.songID;
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.Log($"{LogPrefix} Couldn't locate the file of {sd.songID}: {ex.Message}");
+                }
+                RemoveSongFromGame(sd);
+            }
+
+            // Files of that name that aren't loaded (a failed import, or already removed).
+            foreach (string dir in new[] { mainSongDirectory, downloadsDirectory })
+            {
+                try
+                {
+                    string candidate = Path.GetFullPath(Path.Combine(dir, fileName));
+                    if (File.Exists(candidate) && !files.ContainsKey(candidate)) files[candidate] = null;
+                }
+                catch { }
+            }
+
+            bool allMoved = true;
+            foreach (var kv in files)
+            {
+                if (!MoveToBackup(kv.Key, kv.Value)) allMoved = false;
+            }
+
+            if (oldSongs.Count > 0) RebuildSongViews();
+            return allMoved;
+        }
+
+        /// <summary>
+        /// Moves a song file into SongBackups, named after the version's song ID when known
+        /// (else the file name plus a timestamp). An identical backup already there just means
+        /// the file is deleted. A file that can't be moved (in use) is copied and queued for
+        /// deletion on quit. Returns true when the file is gone from its old place.
+        /// </summary>
+        internal static bool MoveToBackup(string filePath, string songId)
+        {
             try
             {
-                LobbySongList.OnSongDeleted(songId);
-                MpGameplay.OnSongDeleted(songId);
+                if (!File.Exists(filePath)) return true;
+                Directory.CreateDirectory(songBackupDirectory);
+
+                string baseName = !string.IsNullOrEmpty(songId)
+                    ? songId
+                    : Path.GetFileNameWithoutExtension(filePath) + "_" + DateTime.Now.ToString("yyyyMMdd-HHmmss");
+                string target = Path.Combine(songBackupDirectory, baseName + ".audica");
+
+                if (File.Exists(target))
+                {
+                    if (FilesIdentical(filePath, target))
+                    {
+                        File.Delete(filePath);
+                        DebugLog.Log($"{LogPrefix} {filePath} is already backed up as {target}: deleted");
+                        return true;
+                    }
+                    target = Path.Combine(songBackupDirectory, baseName + "_" + DateTime.Now.ToString("yyyyMMdd-HHmmss") + ".audica");
+                }
+
+                try
+                {
+                    File.Move(filePath, target);
+                    DebugLog.Log($"{LogPrefix} Backed up {filePath} to {target}");
+                    return true;
+                }
+                catch (Exception moveEx)
+                {
+                    File.Copy(filePath, target, true);
+                    if (!deletedSongPaths.Contains(filePath)) deletedSongPaths.Add(filePath);
+                    DebugLog.Log($"{LogPrefix} Couldn't move {filePath} ({moveEx.Message}): copied to {target}, the original is deleted on quit");
+                    return false;
+                }
             }
             catch (Exception ex)
             {
-                DebugLog.Log($"{LogPrefix} Couldn't update the lobby state: {ex.Message}");
+                DebugLog.Log($"{LogPrefix} Couldn't back up {filePath}: {ex.Message}");
+                return false;
             }
+        }
 
-            PlaylistUtil.Popup("Deleted " + title);
-            return true;
+        /// <summary>A new file is about to be written at this path: it's no longer to be deleted on quit.</summary>
+        internal static void ForgetPendingDelete(string filePath)
+        {
+            if (string.IsNullOrEmpty(filePath)) return;
+            string full;
+            try { full = Path.GetFullPath(filePath); } catch { full = filePath; }
+            deletedSongPaths.RemoveAll(p =>
+            {
+                try { return string.Equals(Path.GetFullPath(p), full, StringComparison.OrdinalIgnoreCase); }
+                catch { return false; }
+            });
         }
 
         /// <summary>The .audica file a song was loaded from, or null when it isn't on disk.</summary>

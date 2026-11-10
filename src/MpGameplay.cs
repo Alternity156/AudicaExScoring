@@ -319,6 +319,11 @@ namespace ExScoringMod
                 return;
             }
 
+            // Another version of the map is installed (same file name, different cues): the
+            // player has an older (or newer) version than the lobby's. Downloading it updates
+            // the map and moves the installed version to SongBackups (SongDownloader.DownloadSong).
+            LogOtherVersion(songId);
+
             // Never for a song the player deleted this session (DeleteButton.cs).
             if (Config.AutoDownloadSongs && !IsDeletedThisSession(songId))
             {
@@ -342,15 +347,35 @@ namespace ExScoringMod
         /// <summary>The selected song being downloaded by the lobby's auto-download, or null.</summary>
         public static string DownloadingSongId => downloadingSongId;
 
+        private static string lastOtherVersionLogKey;
+
+        /// <summary>Logs once per selected song when another version of it is installed.</summary>
+        private static void LogOtherVersion(string songId)
+        {
+            SongList.SongData other = SongDownloader.FindOtherVersion(songId);
+            if (other == null) return;
+            string key = songId + "|" + other.songID;
+            if (key == lastOtherVersionLogKey) return;
+            lastOtherVersionLogKey = key;
+            Log($"The lobby's song is {songId}, but {other.songID} is installed (another version of the map): it will be updated when downloaded");
+        }
+
         /// <summary>
         /// From ExScoring.DeleteSong: forget the cached availability so the lobby is told right
         /// away that the song is now missing (it isn't auto-downloaded again this session).
+        ///
+        /// Every failed download is forgotten too, not just this song's. Deleting a file can be
+        /// what fixes another song's download: deleting an old version of the lobby's song
+        /// frees its file name, but the failure was recorded under the lobby's (new) song ID,
+        /// so clearing only the deleted ID left the lobby's song "unavailable" all session.
         /// </summary>
         public static void OnSongDeleted(string songId)
         {
             if (string.IsNullOrEmpty(songId)) return;
-            if (statusSongId == songId) statusAvailableDifficulties = null;
-            failedDownloadSongIds.Remove(songId);
+            statusAvailableDifficulties = null;
+            if (failedDownloadSongIds.Count > 0)
+                Log($"Forgetting {failedDownloadSongIds.Count} failed download(s) after a delete: they'll be tried again");
+            failedDownloadSongIds.Clear();
             nextStatusCheckMs = 0;
             Log($"{songId} was deleted: no auto-download for it this session");
         }
@@ -399,7 +424,10 @@ namespace ExScoringMod
         {
             string songId = selected.songId;
             downloadingSongId = songId;
-            Log($"Selected song {songId} is missing: looking it up on Maudica to download it");
+            SongList.SongData other = SongDownloader.FindOtherVersion(songId);
+            Log(other != null
+                ? $"Selected song {songId} is missing ({other.songID} is installed, another version): looking it up on Maudica to update it"
+                : $"Selected song {songId} is missing: looking it up on Maudica to download it");
             MpSession.SetSongStatus(songId, "downloading", 0f, new string[0]);
 
             // audica_id first, then the server's maudicaId, then a title search (MaudicaLookup).
@@ -433,11 +461,12 @@ namespace ExScoringMod
                 (id, progress) =>
                 {
                     if (downloadingSongId == songId) MpSession.SetSongStatus(songId, "downloading", progress * 0.99f, new string[0]);
-                }));
+                },
+                songId)); // the exact version: an older one with the same file name gets updated
 
             while (!downloadDone) yield return null;
 
-            FinishDownload(songId, success, success ? null : "the download or import failed");
+            FinishDownload(songId, success, success ? null : "the download or import failed, or Maudica doesn't have this version");
         }
 
         private static void FinishDownload(string songId, bool success, string failure)
