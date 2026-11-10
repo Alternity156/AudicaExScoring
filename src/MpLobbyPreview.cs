@@ -26,6 +26,11 @@ namespace ExScoringMod
     /// Lobby mode: online play on, in a lobby in the "lobby" phase with a selected song that is
     /// installed (a missing song stays silent until it's downloaded), Lobby Song Preview on, and
     /// not on the song list, the title screen, the credits or in a song (results screen included).
+    ///
+    /// Outside lobby mode, the same patch applies the Song Preview Volume setting (0..100 %) to the
+    /// song list previews: gain (hovered song button) and gainLaunchScreen (selected song on the
+    /// launch panel) are scaled during Update and put back in the postfix, so MenuMusic, which
+    /// reads SongPreview.gain from AudioAmbience.Update, still sees the native value.
     /// </summary>
     internal static class MpLobbyPreview
     {
@@ -45,6 +50,12 @@ namespace ExScoringMod
         private static SongList.SongData savedSongData;
         private static bool savedPreviewPref;
         private static float savedGainLaunchScreen;
+
+        // Song Preview Volume (outside lobby mode), restored in the postfix.
+        private static bool volumeScaled;
+        private static float savedGain;
+        private static float savedVolumeGainLaunchScreen;
+        private static float lastVolumeFactor = 1f;
 
         private static bool wasActive;
         private static string lastLoggedSongId;
@@ -111,12 +122,37 @@ namespace ExScoringMod
             return 5f;
         }
 
+        /// <summary>Song Preview Volume as a 0..1 factor.</summary>
+        private static float SongPreviewVolumeFactor => Mathf.Clamp01(Config.SongPreviewVolume / 100f);
+
+        /// <summary>Scales the native song list preview gains by Song Preview Volume for this Update.</summary>
+        private static void ApplySongPreviewVolume(SongPreview preview)
+        {
+            float factor = SongPreviewVolumeFactor;
+            bool changed = !Mathf.Approximately(factor, lastVolumeFactor);
+            lastVolumeFactor = factor;
+
+            // Native Update only ever lowers mDesiredFullGain while something plays, so lift it
+            // whenever we scale (and once when going back to 100 %) for changes to apply at once.
+            if (factor < 1f || changed)
+                preview.mDesiredFullGain = float.MaxValue;
+
+            if (factor >= 1f) return;
+
+            savedGain = preview.gain;
+            savedVolumeGainLaunchScreen = preview.gainLaunchScreen;
+            preview.gain = savedGain * factor;
+            preview.gainLaunchScreen = savedVolumeGainLaunchScreen * factor;
+            volumeScaled = true;
+        }
+
         [HarmonyPatch(typeof(SongPreview), "Update")]
         private static class SongPreviewUpdatePatch
         {
             private static void Prefix(SongPreview __instance)
             {
                 swapped = false;
+                volumeScaled = false;
                 Feeding = false;
 
                 SongList.SongData lobbySong;
@@ -140,6 +176,15 @@ namespace ExScoringMod
                         lastLoggedSongId = null;
                         __instance.mDesiredFullGain = float.MaxValue;
                         DebugLog.Log("[LobbyPreview] lobby mode off, native preview back in charge");
+                    }
+
+                    try
+                    {
+                        ApplySongPreviewVolume(__instance);
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog.Log($"[LobbyPreview] song preview volume failed: {ex.Message}");
                     }
                     return;
                 }
@@ -172,6 +217,21 @@ namespace ExScoringMod
             private static void Postfix(SongPreview __instance)
             {
                 Feeding = false;
+
+                if (volumeScaled)
+                {
+                    volumeScaled = false;
+                    try
+                    {
+                        __instance.gain = savedGain;
+                        __instance.gainLaunchScreen = savedVolumeGainLaunchScreen;
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog.Log($"[LobbyPreview] song preview volume restore failed: {ex.Message}");
+                    }
+                }
+
                 if (!swapped) return;
                 swapped = false;
 

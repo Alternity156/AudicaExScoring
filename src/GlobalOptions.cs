@@ -632,6 +632,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetRandomSongScope();
                 OptionsMenuFunctions.GetMenuMusic();
                 OptionsMenuFunctions.GetMenuMusicVolume();
+                OptionsMenuFunctions.GetSongPreviewVolume();
                 OptionsMenuFunctions.GetLanguageOverride();
                 OptionsMenuFunctions.GetShowStatsOnFail();
                 OptionsMenuFunctions.GetSearchKeyboardPosX();
@@ -684,6 +685,13 @@ namespace ExScoringMod
                     0f, 100f, 5f, 100f, "N0",
                     "Volume of the menu music in %, relative to the Music Level. Song previews aren't affected.");
                 OptionsMenuClone.AddRow(menuMusicCycle, menuMusicVolumeSlider);
+
+                var songPreviewVolumeSlider = OptionsMenuClone.CreateSlider(0, "Song Preview Volume",
+                    () => OptionsMenuFunctions.songPreviewVolume,
+                    v => { OptionsMenuFunctions.songPreviewVolume = v; OptionsMenuFunctions.SetSongPreviewVolume(v); },
+                    0f, 100f, 5f, 100f, "N0",
+                    "Volume of the song previews in the song list in %, relative to the Music Level. Lobby previews have their own volume.");
+                OptionsMenuClone.AddRow(songPreviewVolumeSlider);
 
                 var languageCycle = OptionsMenuClone.CreateCycle(0, "Language", LanguageOverride.OptionLabels,
                     () => OptionsMenuFunctions.languageOverrideIndex,

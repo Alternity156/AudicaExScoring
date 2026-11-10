@@ -68,6 +68,7 @@ namespace ExScoringMod
         public static int RandomSongScope; // 0 = Folder Songs, 1 = All Songs
         public static int MenuMusic; // 0 = Environment, 1..5 = arena 1..5 menu music, 6 = Tutorial, 7 = Random Song
         public static float MenuMusicVolume; // 0..100 %, relative to the game's Music Level
+        public static float SongPreviewVolume; // 0..100 %, song list previews, relative to the game's Music Level
         public static int LanguageOverride; // 0 = game default, otherwise a Localizer.KataLanguage value
         public static bool ShowStatsOnFail;
         public static bool MenuAimAssist;
@@ -212,6 +213,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterInt(Category, nameof(RandomSongScope), 0, "Random Song source: 0 = Folder Songs, 1 = All Songs");
             MelonPrefs.RegisterInt(Category, nameof(MenuMusic), 0, "Menu music: 0 = follows the environment, 1..5 = always that environment's music, 6 = the tutorial song, 7 = a random song from your library");
             MelonPrefs.RegisterFloat(Category, nameof(MenuMusicVolume), 100f, "Menu music volume in %, relative to the Music Level (song previews aren't affected) [0,100,5,100]");
+            MelonPrefs.RegisterFloat(Category, nameof(SongPreviewVolume), 100f, "Song list preview volume in %, relative to the Music Level (lobby previews aren't affected) [0,100,5,100]");
             MelonPrefs.RegisterInt(Category, nameof(LanguageOverride), 0, "Game language: 0 = game default, 1 = English, 2 = French, 3 = German, 4 = Italian, 5 = Spanish (LA), 6 = Dutch, 7 = Finnish, 8 = Norwegian, 9 = Polish, 10 = Portuguese (LA), 11 = Swedish, 12 = Japanese, 13 = Korean");
             MelonPrefs.RegisterBool(Category, nameof(ShowStatsOnFail), false, "Shows the stats screen after failing a song instead of the fail screen");
 
@@ -327,6 +329,7 @@ namespace ExScoringMod
             RandomSongScope = MelonPrefs.GetInt(Category, nameof(RandomSongScope));
             MenuMusic = ExScoringMod.MenuMusic.Clamp(MelonPrefs.GetInt(Category, nameof(MenuMusic)));
             MenuMusicVolume = Mathf.Clamp(MelonPrefs.GetFloat(Category, nameof(MenuMusicVolume)), 0f, 100f);
+            SongPreviewVolume = Mathf.Clamp(MelonPrefs.GetFloat(Category, nameof(SongPreviewVolume)), 0f, 100f);
             LanguageOverride = ExScoringMod.LanguageOverride.ClampValue(MelonPrefs.GetInt(Category, nameof(LanguageOverride)));
             MaxRunsPerSong = MelonPrefs.GetInt(Category, nameof(MaxRunsPerSong));
             MaxRunDataSizeMB = MelonPrefs.GetFloat(Category, nameof(MaxRunDataSizeMB));
@@ -630,6 +633,15 @@ namespace ExScoringMod
             if (value > 100f) value = 100f;
             MelonPrefs.SetFloat(Category, nameof(MenuMusicVolume), value);
             MenuMusicVolume = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateSongPreviewVolume(float value)
+        {
+            if (value < 0f) value = 0f;
+            if (value > 100f) value = 100f;
+            MelonPrefs.SetFloat(Category, nameof(SongPreviewVolume), value);
+            SongPreviewVolume = value;
             MelonPrefs.SaveConfig();
         }
 

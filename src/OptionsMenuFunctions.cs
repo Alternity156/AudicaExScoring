@@ -73,6 +73,7 @@ namespace ExScoringMod
         public static int randomSongScope;
         public static int menuMusic;
         public static float menuMusicVolume;
+        public static float songPreviewVolume;
         public static int languageOverrideIndex;
         public static float maxRunsPerSong;
         public static float maxRunDataSizeMB;
@@ -660,6 +661,17 @@ namespace ExScoringMod
         {
             menuMusicVolume = value;
             Config.UpdateMenuMusicVolume(value);
+        }
+
+        public static void GetSongPreviewVolume()
+        {
+            songPreviewVolume = Config.SongPreviewVolume;
+        }
+
+        public static void SetSongPreviewVolume(float value)
+        {
+            songPreviewVolume = value;
+            Config.UpdateSongPreviewVolume(value);
         }
 
         public static void GetLanguageOverride()
