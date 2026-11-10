@@ -139,6 +139,11 @@ namespace ExScoringMod
                 // LaunchPanel.Back cleanup never fires). No-op without AuthorableModifiers.
                 AuthorableBridge.OnMenuStateChanged(menuState, state);
 
+                // A song is starting (solo, restart, endless, or a host launching an online match):
+                // the search keyboard must never survive into gameplay, whoever opened it.
+                if (state == MenuState.State.Launching || state == MenuState.State.Launched)
+                    SearchKeyboard.ForceClose();
+
                 if (state == MenuState.State.Launching)
                     CheckSelectionOnLaunch();
 

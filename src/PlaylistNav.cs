@@ -335,7 +335,8 @@ namespace ExScoringMod
             FolderRowManager.OnPlaylistCreated(name);
         }
 
-        private static void CancelCreate()
+        /// <summary>Stops playlist-name entry and hides the keyboard. Also used by SearchKeyboard.ForceClose.</summary>
+        public static void CancelCreate()
         {
             if (!Creating) return;
             Creating = false;

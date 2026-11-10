@@ -511,6 +511,12 @@ namespace ExScoringMod
             LobbySongList.Tick();
             OnlinePlayButton.Tick();
             FolderRowManager.TickSortLabels();
+
+            // Safety net: never let the search keyboard stay up during a song, even if it was
+            // reopened mid-launch or the launch skipped MenuState.SetState.
+            if ((menuState == MenuState.State.Launching || menuState == MenuState.State.Launched)
+                && SearchKeyboard.IsVisible)
+                SearchKeyboard.ForceClose();
         }
 
         public override void OnLateUpdate()

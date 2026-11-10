@@ -113,5 +113,29 @@ namespace ExScoringMod
             if (keyboardCopy != null)
                 keyboardCopy.SetActive(false);
         }
+
+        /// <summary>True while the keyboard copy exists and is shown.</summary>
+        public static bool IsVisible => keyboardCopy != null && keyboardCopy.activeSelf;
+
+        /// <summary>
+        /// Closes the keyboard no matter which context opened it (song search, playlist creation,
+        /// lobby code entry) and clears every input-routing flag, so nothing is left stuck open.
+        /// Called when a song launches. The typed search query is kept for the next search.
+        /// </summary>
+        public static void ForceClose()
+        {
+            bool wasOpen = IsVisible || ExScoring.shouldShowKeyboard || SongSearch.searchInProgress
+                           || PlaylistNav.Creating || OnlinePlayMenu.EnteringCode;
+            if (!wasOpen) return;
+
+            try { if (PlaylistNav.Creating) PlaylistNav.CancelCreate(); }
+            catch (System.Exception e) { DebugLog.Log("[SearchKeyboard] CancelCreate failed: " + e); }
+
+            try { if (OnlinePlayMenu.EnteringCode) OnlinePlayMenu.CancelCodeEntry(); }
+            catch (System.Exception e) { DebugLog.Log("[SearchKeyboard] CancelCodeEntry failed: " + e); }
+
+            Hide();
+            DebugLog.Log("[SearchKeyboard] Force-closed");
+        }
     }
 }
