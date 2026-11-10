@@ -2660,6 +2660,7 @@ namespace ExScoringMod
                 if (!fx.Materials.TryGetValue(source.Pointer, out Material copy) || copy == null)
                 {
                     copy = new Material(source) { mainTexture = fx.Texture };
+                    copy.hideFlags = HideFlags.DontUnloadUnusedAsset; // only the mod holds it between shots
                     fx.Materials[source.Pointer] = copy;
                 }
                 quad.sharedMaterial = copy;
@@ -2686,6 +2687,7 @@ namespace ExScoringMod
                 if (source == null) return false;
                 fx.Texture = UnityEngine.Object.Instantiate<RenderTexture>(source);
                 fx.Texture.name = "MpBeamTexture";
+                fx.Texture.hideFlags = HideFlags.DontUnloadUnusedAsset;
             }
 
             RenderTexture texture = fx.Texture;
@@ -2695,6 +2697,7 @@ namespace ExScoringMod
                 // The game handed back a different texture: use that one everywhere.
                 UnityEngine.Object.Destroy(fx.Texture);
                 fx.Texture = texture;
+                fx.Texture.hideFlags = HideFlags.DontUnloadUnusedAsset;
                 foreach (Material material in fx.Materials.Values)
                 {
                     if (material != null) material.mainTexture = texture;
@@ -3244,6 +3247,14 @@ namespace ExScoringMod
                 return;
             }
 
+            // A ghost destroyed behind our back (an asset unload) would swap the disc to a missing
+            // material (pink): rebuild the state, putting the scene's materials back first if swapped.
+            if (remote.Fade != null && remote.Fade.Disc == remote.Disc && remote.Fade.Ghost == null)
+            {
+                Log($"{remote.UserId}'s disc ghost material was destroyed, rebuilding its fade");
+                ResetDiscFade(remote, true);
+            }
+
             if (remote.Fade == null || remote.Fade.Disc != remote.Disc)
             {
                 ResetDiscFade(remote, false);
@@ -3333,6 +3344,10 @@ namespace ExScoringMod
 
                 DiscFade fade = new DiscFade { Disc = disc };
                 fade.Ghost = new Material(ghostShader) { name = "MpDiscGhost", color = GhostColor };
+                // Between fades only the mod holds the ghost, and Unity can't see that: without this,
+                // the game's own Resources.UnloadUnusedAssets destroys it and the next fade swaps the
+                // renderers to a dead material, which draws pink. Destroyed by ResetDiscFade instead.
+                fade.Ghost.hideFlags = HideFlags.DontUnloadUnusedAsset;
                 fade.Renderers = renderers.ToArray();
                 fade.Originals = new Il2CppReferenceArray<Material>[fade.Renderers.Length];
                 fade.GhostSets = new Il2CppReferenceArray<Material>[fade.Renderers.Length];
@@ -3463,7 +3478,8 @@ namespace ExScoringMod
 
             DiscShade shade = remote.Shade;
             bool stale = shade != null &&
-                         (shade.Disc != remote.Disc || shade.Overlays.Length == 0 || !IsAlive(shade.Overlays[0]));
+                         (shade.Disc != remote.Disc || shade.Overlays.Length == 0 || !IsAlive(shade.Overlays[0]) ||
+                          shade.Material == null); // destroyed by an asset unload: the overlays would draw pink
             if (stale)
             {
                 ResetDiscShade(remote);
@@ -3535,6 +3551,7 @@ namespace ExScoringMod
             try
             {
                 material = new Material(shadeShader) { name = "MpDiscShade", color = new Color(0f, 0f, 0f, 0f) };
+                material.hideFlags = HideFlags.DontUnloadUnusedAsset; // like the ghost; destroyed by ResetDiscShade
 
                 var found = disc.GetComponentsInChildren<MeshRenderer>(true);
                 List<MeshRenderer> overlays = new List<MeshRenderer>();
