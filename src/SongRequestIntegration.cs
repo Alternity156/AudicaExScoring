@@ -33,6 +33,8 @@ namespace ExScoringMod
             public string Artist;
             public string Mapper;
             public string DownloadURL;
+            public string PreviewURL;   // missing requests only
+            public string RequestedBy;
         }
 
         private static bool initialized;
@@ -56,7 +58,7 @@ namespace ExScoringMod
         private static FieldInfo letModsIgnoreField;
 
         // Field accessors for the request element types (public instance fields).
-        private static FieldInfo fSongID, fTitle, fArtist, fMapper, fDownloadURL;
+        private static FieldInfo fSongID, fTitle, fArtist, fMapper, fRequestedBy, fDownloadURL, fPreviewURL;
 
         /// <summary>True if a usable SongRequest mod is loaded.</summary>
         public static bool IsPresent
@@ -65,6 +67,16 @@ namespace ExScoringMod
             {
                 EnsureInitialized();
                 return present;
+            }
+        }
+
+        /// <summary>AudicaModding.SongRequests, or null when the mod is absent (used to patch its removals).</summary>
+        public static Type SongRequestsType
+        {
+            get
+            {
+                EnsureInitialized();
+                return songRequestsType;
             }
         }
 
@@ -129,6 +141,7 @@ namespace ExScoringMod
                 fTitle = requestType.GetField("Title", PUB_INST);
                 fArtist = requestType.GetField("Artist", PUB_INST);
                 fMapper = requestType.GetField("Mapper", PUB_INST);
+                fRequestedBy = requestType.GetField("RequestedBy", PUB_INST);
             }
             else
             {
@@ -136,7 +149,10 @@ namespace ExScoringMod
             }
 
             if (missingType != null)
+            {
                 fDownloadURL = missingType.GetField("DownloadURL", PUB_INST);
+                fPreviewURL = missingType.GetField("PreviewURL", PUB_INST);
+            }
             else
                 DebugLog.Log("[SongRequestIntegration] AudicaModding.MissingRequest not found — download URLs unavailable.");
         }
@@ -187,8 +203,11 @@ namespace ExScoringMod
                 if (fTitle != null) info.Title = fTitle.GetValue(req) as string;
                 if (fArtist != null) info.Artist = fArtist.GetValue(req) as string;
                 if (fMapper != null) info.Mapper = fMapper.GetValue(req) as string;
+                if (fRequestedBy != null) info.RequestedBy = fRequestedBy.GetValue(req) as string;
                 if (includeDownloadUrl && fDownloadURL != null)
                     info.DownloadURL = fDownloadURL.GetValue(req) as string;
+                if (includeDownloadUrl && fPreviewURL != null)
+                    info.PreviewURL = fPreviewURL.GetValue(req) as string;
             }
             catch (Exception e)
             {

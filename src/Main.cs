@@ -139,6 +139,7 @@ namespace ExScoringMod
                 DebugLog.Log("SongRequest detected — request folder integration enabled");
                 SongRequestBlocker.Apply();
                 SongRequestInterceptor.Apply();
+                SongRequestHistoryHook.Apply();
             }
 
             // Set up download directories
@@ -500,6 +501,11 @@ namespace ExScoringMod
 
             if (Input.GetKeyDown(KeyCode.F6))
                 SongRequestIntegration.LogSnapshot();
+
+            // A request left the list (played / removed / cleared, possibly from chat) — refresh the song
+            // list so Song Requests and Song Request History update in place. No-op off the song list.
+            if (SongRequestHistoryStore.ConsumeDirty())
+                FolderRowManager.RefreshList();
 
             TrippyMenu.Tick();
             TickGradeVisualAnimation();

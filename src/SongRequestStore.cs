@@ -86,20 +86,37 @@ namespace ExScoringMod
             return true;
         }
 
-        public static void Remove(string songID)
+        /// <summary>
+        /// Removes an entry. By default the removed entry is recorded in the Song Request History; pass
+        /// toHistory=false when the request isn't really leaving the list (e.g. it was just downloaded and
+        /// is being moved into SongRequest's available queue).
+        /// </summary>
+        public static void Remove(string songID, bool toHistory = true)
         {
             EnsureLoaded();
             if (string.IsNullOrEmpty(songID)) return;
+            if (toHistory)
+                foreach (var s in store.Songs)
+                    if (s.SongID == songID) RecordHistory(s);
             int removed = store.Songs.RemoveAll(s => s.SongID == songID);
             if (removed > 0) Save();
         }
 
+        /// <summary>Clears every entry, recording each one in the Song Request History.</summary>
         public static void Clear()
         {
             EnsureLoaded();
             if (store.Songs.Count == 0) return;
+            // Oldest first, so the history ends up in the same order the list was in.
+            for (int i = store.Songs.Count - 1; i >= 0; i--)
+                RecordHistory(store.Songs[i]);
             store.Songs.Clear();
             Save();
+        }
+
+        private static void RecordHistory(RequestedSong s)
+        {
+            SongRequestHistoryStore.Add(s.SongID, s.Title, s.Artist, s.Mapper, s.DownloadURL, s.PreviewURL, s.RequestedBy);
         }
 
         public static List<RequestedSong> GetAll()

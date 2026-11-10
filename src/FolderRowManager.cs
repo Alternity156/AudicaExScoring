@@ -121,7 +121,8 @@ namespace ExScoringMod
         {
             if (level != NavLevel.Root) return; // folder headers only exist at Level 0
             MarathonSetup.CancelIfActive();
-            srClearArmed = false; // any folder toggle cancels a pending Clear List confirm
+            srClearArmed = false;   // any folder toggle cancels a pending Clear List confirm
+            histClearArmed = false; // ...and a pending Clear History confirm
 
             // Preserve the clicked header's on-screen offset across the rebuild. SetView
             // otherwise preserves the raw numeric scroll index, which is only correct if
@@ -604,6 +605,7 @@ namespace ExScoringMod
                 case SongFolderManager.FolderAudicaDLC: return ColorSettings.FolderAudicaDLC.Value;
                 case SongFolderManager.FolderCustom: return ColorSettings.FolderUnsorted.Value;      // "Unsorted"
                 case SongFolderManager.FolderSongRequests: return ColorSettings.FolderSongRequests.Value;
+                case SongFolderManager.FolderSongRequestHistory: return ColorSettings.FolderSongRequestHistory.Value;
                 case SongFolderManager.FolderLatestMaudica: return ColorSettings.FolderLatestMaudica.Value;
                 default:
                     // Search-results folder (dynamic name).
@@ -649,10 +651,27 @@ namespace ExScoringMod
             rows.Add(ViewRow.ActionRow("Playlists", ColorSettings.RowPlaylists.Value,
                 EnterPlaylistList, $"{plCount} playlist{(plCount != 1 ? "s" : "")}"));
 
+            // Song Request History only appears once something has been played / removed / cleared.
+            bool hasHistory = SongRequestHistoryStore.Count > 0;
+            if (!hasHistory && SongFolderManager.openFolder == SongFolderManager.FolderSongRequestHistory)
+            {
+                SongFolderManager.openFolder = null; // history was just cleared while open
+                histClearArmed = false;
+            }
+
             string open = SongFolderManager.openFolder;
             foreach (string folder in SongFolderManager.availableFolders)
             {
-                if (folder == SongFolderManager.FolderSongRequests)
+                if (folder == SongFolderManager.FolderSongRequestHistory)
+                {
+                    if (!hasHistory) continue;
+                    GetHistoryCounts(out int total, out int missing);
+                    string sub = missing > 0
+                        ? $"{total} song{(total != 1 ? "s" : "")} ({missing} missing)"
+                        : null;
+                    rows.Add(ViewRow.Header(folder, total, sub, FolderColorFor(folder)));
+                }
+                else if (folder == SongFolderManager.FolderSongRequests)
                 {
                     GetSongRequestCounts(out int total, out int missing);
                     string sub = missing > 0
@@ -678,6 +697,8 @@ namespace ExScoringMod
                 {
                     if (folder == SongFolderManager.FolderSongRequests)
                         AppendSongRequestRows(rows);
+                    else if (folder == SongFolderManager.FolderSongRequestHistory)
+                        AppendHistoryRows(rows);
                     else if (folder == SongFolderManager.searchFolderName)
                         AppendSearchRows(rows);
                     else if (folder == SongFolderManager.FolderLatestMaudica)
@@ -751,6 +772,9 @@ namespace ExScoringMod
 
             if (folder == SongFolderManager.FolderSongRequests)
                 return GetSongRequestSongIDs();
+
+            if (folder == SongFolderManager.FolderSongRequestHistory)
+                return GetHistorySongIDs();
 
             if (folder == SongFolderManager.FolderLatestMaudica)
                 return GetLatestMaudicaSongIDs();
@@ -2020,7 +2044,7 @@ namespace ExScoringMod
                     : DateTime.Now;
                 SongRequestIntegration.AddAvailableRequest(local, entry.RequestedBy, at);
             }
-            SongRequestStore.Remove(entry.SongID);
+            SongRequestStore.Remove(entry.SongID, toHistory: false); // moved to the available queue, not removed
         }
 
         private static IEnumerator RefreshAfterReload()
@@ -2067,6 +2091,131 @@ namespace ExScoringMod
             yield return null;
             yield return null;
             RefreshList();
+        }
+
+        // ── Song Request History folder ───────────────────────────────────────────
+        // Requests that left the list (played / removed / cleared), newest first. Downloaded songs show as
+        // normal song rows; never-downloaded ones as downloadable rows (downloading does NOT re-request).
+
+        // Two-shot Clear History: armed shows "Confirm Clear?" until shot again or a folder is toggled.
+        private static bool histClearArmed;
+
+        private static void OnClearHistory()
+        {
+            if (!histClearArmed)
+            {
+                histClearArmed = true;
+                RefreshList();
+                return;
+            }
+
+            histClearArmed = false;
+            SongRequestHistoryStore.Clear();
+            RefreshList(); // BuildDefaultRootView collapses + hides the now-empty folder
+        }
+
+        /// <summary>Header counts: total entries; missing = not downloaded locally.</summary>
+        private static void GetHistoryCounts(out int total, out int missing)
+        {
+            var all = SongRequestHistoryStore.GetAll();
+            total = all.Count;
+            missing = 0;
+            foreach (var h in all)
+                if (FindLocalRequestSong(h.Title, h.Artist, h.Mapper, h.SongID) == null)
+                    missing++;
+        }
+
+        /// <summary>Playable (downloaded) history song IDs in display order, for auto-select / random.</summary>
+        private static List<string> GetHistorySongIDs()
+        {
+            var ids = new List<string>();
+            var seen = new HashSet<string>();
+            foreach (var h in SongRequestHistoryStore.GetAll())
+            {
+                var local = FindLocalRequestSong(h.Title, h.Artist, h.Mapper, h.SongID);
+                if (local != null && !local.hidden && seen.Add(local.songID))
+                    ids.Add(local.songID);
+            }
+            return ids;
+        }
+
+        private static void AppendHistoryRows(List<ViewRow> rows)
+        {
+            var all = SongRequestHistoryStore.GetAll();
+
+            rows.Add(ViewRow.ActionRow(
+                histClearArmed ? "Confirm Clear?" : "Clear History",
+                histClearArmed ? PlaylistNav.ConfirmDeleteColor : PlaylistNav.DeleteColor,
+                OnClearHistory,
+                histClearArmed ? "Shoot again to confirm" : $"{all.Count} song{(all.Count != 1 ? "s" : "")}",
+                "srh_clear"));
+
+            var seen = new HashSet<string>();
+            foreach (var h in all)
+            {
+                var local = FindLocalRequestSong(h.Title, h.Artist, h.Mapper, h.SongID);
+                if (local != null)
+                {
+                    if (!local.hidden && seen.Add(local.songID))
+                        rows.Add(ViewRow.SongRow(local.songID));
+                    continue;
+                }
+
+                if (string.IsNullOrEmpty(h.SongID) || !seen.Add(h.SongID)) continue;
+                string id = h.SongID;
+                if (!string.IsNullOrEmpty(h.DownloadURL))
+                    rows.Add(ViewRow.DownloadableSongRow(id, h.Title, h.Artist, h.Mapper, h.DownloadURL,
+                             SR_DownloadableColor, () => OnDownloadHistory(id)));
+                else
+                    rows.Add(ViewRow.DisabledRow(h.Title ?? id, SR_DownloadableColor, "Not downloaded", id));
+            }
+        }
+
+        private static SongRequestHistoryStore.HistoryEntry FindHistory(string songId)
+        {
+            foreach (var h in SongRequestHistoryStore.GetAll())
+                if (h.SongID == songId) return h;
+            return null;
+        }
+
+        private static void OnDownloadHistory(string songId)
+        {
+            if (srDownloadingAll) return;
+            var entry = FindHistory(songId);
+            if (entry == null || string.IsNullOrEmpty(entry.DownloadURL)) return;
+            if (!srDownloading.Add(songId)) return; // already downloading
+
+            srLastPct[songId] = -1;
+            VirtualSongList.UpdateActionRowText(songId, entry.Title, "Downloading... 0%");
+            MelonCoroutines.Start(SongDownloader.DownloadSong(
+                entry.SongID, entry.DownloadURL,
+                (id, ok) => OnHistoryDownloadComplete(entry, ok),
+                (id, pct) =>
+                {
+                    int p = (int)(pct * 100f);
+                    if (p < 0) p = 0;
+                    if (p > 100) p = 100;
+                    if (srLastPct.TryGetValue(entry.SongID, out int last) && last == p) return;
+                    srLastPct[entry.SongID] = p;
+                    VirtualSongList.UpdateActionRowText(entry.SongID, entry.Title, $"Downloading... {p}%");
+                }));
+        }
+
+        private static void OnHistoryDownloadComplete(SongRequestHistoryStore.HistoryEntry entry, bool success)
+        {
+            srDownloading.Remove(entry.SongID);
+            srLastPct.Remove(entry.SongID);
+
+            if (!success)
+            {
+                VirtualSongList.UpdateActionRowText(entry.SongID, entry.Title, "Download failed - tap to retry");
+                return;
+            }
+
+            // History only: the song is NOT put back in the request queue. Once the reload lands,
+            // FindLocalRequestSong resolves it and the row turns into a normal song row.
+            ExScoring.ReloadSongList(false);
+            MelonCoroutines.Start(RefreshAfterReload());
         }
 
         /// <summary>maudica results that aren't already installed locally, deduped by id.</summary>

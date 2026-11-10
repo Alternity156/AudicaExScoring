@@ -53,6 +53,7 @@ namespace ExScoringMod
         public static readonly ColorSetting FolderAudicaDLC = new ColorSetting("ColorFolderAudicaDLC", "Audica DLC", C(0.30f, 0.30f, 0.30f), ColorSection.SongList);
         public static readonly ColorSetting FolderUnsorted = new ColorSetting("ColorFolderUnsorted", "Unsorted", C(0.30f, 0.30f, 0.30f), ColorSection.SongList);
         public static readonly ColorSetting FolderSongRequests = new ColorSetting("ColorFolderSongRequests", "Song Requests", C(0.30f, 0.30f, 0.30f), ColorSection.SongList);
+        public static readonly ColorSetting FolderSongRequestHistory = new ColorSetting("ColorFolderSongRequestHistory", "Song Request History", C(0.30f, 0.30f, 0.30f), ColorSection.SongList);
         public static readonly ColorSetting FolderLatestMaudica = new ColorSetting("ColorFolderLatestMaudica", "Latest Maudica", C(0.30f, 0.30f, 0.30f), ColorSection.SongList);
         public static readonly ColorSetting FolderSearch = new ColorSetting("ColorFolderSearch", "Search Results", C(0.30f, 0.30f, 0.30f), ColorSection.SongList);
         public static readonly ColorSetting FolderOther = new ColorSetting("ColorFolderOther", "Other Folders", C(0.18f, 0.18f, 0.18f), ColorSection.SongList);
@@ -86,7 +87,7 @@ namespace ExScoringMod
             JudgementImpeccable, JudgementFantastic, JudgementExcellent, JudgementGreat, JudgementGood, JudgementMiss,
 
             FolderFavorites, FolderAudica, FolderAudicaDLC, FolderUnsorted,
-            FolderSongRequests, FolderLatestMaudica, FolderSearch, FolderOther,
+            FolderSongRequests, FolderSongRequestHistory, FolderLatestMaudica, FolderSearch, FolderOther,
 
             RowOptions, RowOptionCategory, RowPlaylists, RowPlaylistEntry, RowPlaylistTitle,
             RowBack, RowCreate, RowDelete, RowConfirmDelete, RowMarathon,

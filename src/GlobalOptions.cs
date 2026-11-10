@@ -536,7 +536,8 @@ namespace ExScoringMod
                 AddColorRows(
                     ColorSettings.FolderFavorites, ColorSettings.FolderAudica,
                     ColorSettings.FolderAudicaDLC, ColorSettings.FolderUnsorted,
-                    ColorSettings.FolderSongRequests, ColorSettings.FolderLatestMaudica,
+                    ColorSettings.FolderSongRequests, ColorSettings.FolderSongRequestHistory,
+                    ColorSettings.FolderLatestMaudica,
                     ColorSettings.FolderSearch, ColorSettings.FolderOther);
 
                 OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Song List Rows"));

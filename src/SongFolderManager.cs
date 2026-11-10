@@ -17,6 +17,7 @@ namespace ExScoringMod
         public const string FolderAudicaDLC = "Audica DLC";
         public const string FolderCustom = "Unsorted";
         public const string FolderSongRequests = "Song Requests";
+        public const string FolderSongRequestHistory = "Song Request History";
         public const string FolderLatestMaudica = "Latest Maudica";
 
         /// <summary>Maps songID -> folder name.</summary>
@@ -183,11 +184,15 @@ namespace ExScoringMod
                 }
             }
 
-            // Favorites (virtual) → Song Requests (virtual) → Latest Maudica (virtual, web)
+            // Favorites (virtual) → Song Requests (virtual) → Song Request History (virtual, hidden while
+            // empty — see FolderRowManager.BuildDefaultRootView) → Latest Maudica (virtual, web)
             // → Audica → Audica DLC → Unsorted → custom subfolders
             availableFolders.Add(FolderFavorites);
             if (SongRequestIntegration.IsPresent)
+            {
                 availableFolders.Add(FolderSongRequests);
+                availableFolders.Add(FolderSongRequestHistory);
+            }
             availableFolders.Add(FolderLatestMaudica);
             if (hasAudica) availableFolders.Add(FolderAudica);
             if (hasAudicaDLC) availableFolders.Add(FolderAudicaDLC);
