@@ -12,7 +12,7 @@ namespace ExScoringMod
     /// Every numeric setting is a signed offset added on top of the player's global value for the
     /// duration of the song: global Input Offset 3 + song offset -1 = 2 while that song plays, then
     /// back to 3. Force Hit Sounds is a toggle, so it is a 3-state override instead (Use Global / On
-    /// / Off).
+    /// / Off). Test Song is a plain flag: while on, runs on that exact songID are not uploaded.
     ///
     /// Applying writes FloatPref.mVal DIRECTLY and never calls Set()/Adjust(), so a per-song value
     /// can never be persisted to disk as the player's global setting — even if the game crashes
@@ -65,6 +65,11 @@ namespace ExScoringMod
             public float dartPreGlowPercent;
 
             public int forceHitSounds; // ForceHitSoundsGlobal / On / Off
+
+            // Test song: runs are never uploaded to AudicaEx (see ExScoring.WillSubmitRun). Local
+            // run data is still saved. Keyed by the exact songID, so an edited version of the map
+            // (new cue checksum -> new songID) starts unflagged.
+            public bool testSong;
         }
 
         [Serializable]
@@ -190,7 +195,7 @@ namespace ExScoringMod
             return e.inputOffsetMs == 0f && e.musicLevel == 0f && e.sfxLevel == 0f &&
                    e.targetSpeedPercent == 0f && e.meleeSpeedPercent == 0f &&
                    e.dartSpeedPercent == 0f && e.dartPreGlowPercent == 0f &&
-                   e.forceHitSounds == ForceHitSoundsGlobal;
+                   e.forceHitSounds == ForceHitSoundsGlobal && !e.testSong;
         }
 
         /// <summary>True if the song has at least one non-default per-song setting.</summary>
@@ -269,6 +274,31 @@ namespace ExScoringMod
             e.forceHitSounds = mode;
             if (IsDefault(e)) bySong.Remove(songID);
             Save();
+        }
+
+        /// <summary>True if the song is flagged as a test song (its runs are not uploaded).</summary>
+        public static bool IsTestSong(string songID)
+        {
+            var e = GetEntry(songID);
+            return e != null && e.testSong;
+        }
+
+        public static void SetTestSong(string songID, bool value)
+        {
+            if (string.IsNullOrEmpty(songID)) return;
+            EnsureLoaded();
+
+            if (!bySong.TryGetValue(songID, out PerSongEntry e))
+            {
+                if (!value) return;
+                e = new PerSongEntry { songID = songID };
+                bySong[songID] = e;
+            }
+
+            e.testSong = value;
+            if (IsDefault(e)) bySong.Remove(songID);
+            Save();
+            DebugLog.Log($"[PerSongSettings] Test song {(value ? "on" : "off")} for {songID}");
         }
 
         public static void ResetSong(string songID)

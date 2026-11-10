@@ -289,6 +289,15 @@ namespace ExScoringMod
                 "Sets every setting for this song back to the global value");
             OptionsMenuClone.AddRow(backButton, resetButton);
 
+            var uploadHeader = OptionsMenuClone.CreateHeader(0, "AudicaEx");
+            OptionsMenuClone.AddRow(uploadHeader);
+
+            var testSongToggle = OptionsMenuClone.CreateToggle(0, "Test Song",
+                () => PerSongSettings.IsTestSong(songID),
+                v => { PerSongSettings.SetTestSong(songID, v); UpdateButton(); },
+                "Runs on this exact version of the song are not uploaded to AudicaEx. Local run data is still saved.");
+            OptionsMenuClone.AddRow(testSongToggle);
+
             var audioHeader = OptionsMenuClone.CreateHeader(0, "Audio");
             OptionsMenuClone.AddRow(audioHeader);
 

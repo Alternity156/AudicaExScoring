@@ -27,6 +27,14 @@ namespace ExScoringMod
         /// </summary>
         public static void SubmitRun(bool failed)
         {
+            // Test songs: tell the results screen why nothing was sent (only when it otherwise
+            // would have been), so a missing score doesn't look like an error.
+            if (!failed && Config.EnableScoreUpload && !string.IsNullOrEmpty(Config.ApiKey) &&
+                selectedSongData != null && PerSongSettings.IsTestSong(selectedSongData.songID))
+            {
+                SetApiSubmitStatus(ApiSubmitStatus.NotSubmitted, "Test song - not uploaded", Color.yellow);
+            }
+
             if (!WillSubmitRun(failed)) return;
 
             try
@@ -77,6 +85,11 @@ namespace ExScoringMod
             if (string.IsNullOrEmpty(Config.ApiKey)) return false;
             if (exCues.Count == 0) return false;
             if (selectedSongData == null) return false;
+            if (PerSongSettings.IsTestSong(selectedSongData.songID))
+            {
+                DebugLog.Log($"[ExScoring] Not uploading run {currentRunId}: {selectedSongData.songID} is flagged as a test song.");
+                return false;
+            }
             if (MpGameplay.ShouldSuppressUpload(currentRunId))
             {
                 DebugLog.Log($"[ExScoring] Not uploading run {currentRunId}: it failed during an online match.");
