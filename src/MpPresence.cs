@@ -74,7 +74,9 @@ namespace ExScoringMod
     ///    too, visual only: their owner is told by the shooter.
     ///  - Rebounds: the nearest of a thrown gun with shouldRicochet, a platform (this player's own and
     ///    every shown disc copy, through KataConfig.groundDisc's own test with the line shifted into
-    ///    the copy's place; ghosted discs skipped) or active menu glass (KataConfig.mRicochetRects).
+    ///    the copy's place; ghosted discs skipped). Menu glass (KataConfig.mRicochetRects) does NOT
+    ///    bounce another player's beam here: it goes straight through (only this player's own shots,
+    ///    natively, bounce off glass).
     ///    As in Gun.Fire: the beam is cut to end there, a rebound beam from the miss prefab (its own
     ///    pool per remote hand, in that player's colour) leaves along the reflection plus 0.15 scatter,
     ///    and KataConfig.ricochetParticlePrefab and the rebound sound (emitterPool.PlayEvent(
@@ -1894,7 +1896,7 @@ namespace ExScoringMod
             float roll = gunPart.eulerAngles.z;
 
             // What the shot meets (Gun.Fire's miss branch): this player's thrown guns get pushed, and
-            // the nearest thrown gun, platform or menu glass bounces the beam.
+            // the nearest thrown gun or platform bounces the beam (menu glass doesn't, see FindRicochet).
             ThrownGunHit gunHit = FindThrownGunHit(position, forward);
             bool bounces = FindRicochet(position, forward, gunPart.position, gunHit, false, out Ricochet ricochet);
 
@@ -2260,7 +2262,8 @@ namespace ExScoringMod
         ///    disc copy, tested by moving the line into the copy's place (the copies are only shifted,
         ///    never turned), and for a remote shot this player's own platform too. A ghosted disc
         ///    (Fading discs) is skipped, as this player's own shots go through it then
-        ///  - for a remote shot, menu glass (KataConfig.mRicochetRects, active ones, normal = -forward)
+        /// Menu glass (KataConfig.mRicochetRects) is left out on purpose: another player's beam goes
+        /// through glass on this client, and for this player's own shots native handles glass.
         /// Gun.Fire checks them in that order; here the nearest wins, since a shot can cross several
         /// (another player's disc in front of this one's, say). The overdrive condition on the floor
         /// is song-only, and nothing here runs in songs.
@@ -2313,21 +2316,7 @@ namespace ExScoringMod
                 }
             }
 
-            if (localShot) return found;
-            var rects = config.mRicochetRects;
-            if (rects != null)
-            {
-                for (int i = 0; i < rects.Count; i++)
-                {
-                    RectIntersectable rect = rects[i];
-                    if (!IsAlive(rect) || !rect.gameObject.activeInHierarchy) continue;
-                    if (!rect.CheckIntersection(position, forward, out Vector3 point)) continue;
-                    float distance = Vector3.Distance(position, point);
-                    if (distance >= best.Distance) continue;
-                    best = new Ricochet { Point = point, Normal = -rect.transform.forward, Distance = distance, Surface = "menu glass" };
-                    found = true;
-                }
-            }
+            // No menu glass: other players' beams pass through it on this client.
             return found;
         }
 
