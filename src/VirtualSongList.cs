@@ -7,6 +7,8 @@ using MelonLoader;
 using TMPro;
 using UnityEngine;
 using UnityEngine.Events;
+using UnhollowerBaseLib;
+using UnhollowerRuntimeLib;
 
 namespace ExScoringMod
 {
@@ -158,15 +160,40 @@ namespace ExScoringMod
         /// The native song-row prefab (same one the header/action pools clone via StyleFolderQuad),
         /// for other systems that need to clone its shootable "Quad" child. Lazily resolves
         /// SongSelect if VirtualSongList hasn't been activated yet this session.
+        ///
+        /// Kept once found: it's a prefab asset, so it outlives the menu being switched off during a
+        /// song, where FindObjectOfType (active objects only) can't see SongSelect any more. That's
+        /// what kept the results screen's leaderboard rows from getting stats hit-boxes. If it was
+        /// never found, Resources.FindObjectsOfTypeAll (inactive objects too) is the fallback.
         /// </summary>
+        private static GameObject cachedSongItemPrefab;
+
         public static GameObject SongItemPrefab
         {
             get
             {
+                if (cachedSongItemPrefab != null) return cachedSongItemPrefab; // Unity-null if unloaded: looked up again
+
                 if (songSelect == null) songSelect = UnityEngine.Object.FindObjectOfType<SongSelect>();
-                return (songSelect != null && songSelect.songSelectItemPrefab != null)
-                    ? songSelect.songSelectItemPrefab.gameObject
-                    : null;
+                SongSelect source = songSelect;
+
+                if (source == null || source.songSelectItemPrefab == null)
+                {
+                    source = null;
+                    foreach (UnityEngine.Object o in Resources.FindObjectsOfTypeAll(Il2CppType.Of<SongSelect>()))
+                    {
+                        SongSelect candidate = o.TryCast<SongSelect>();
+                        if (candidate != null && candidate.songSelectItemPrefab != null)
+                        {
+                            source = candidate;
+                            break;
+                        }
+                    }
+                }
+
+                if (source != null && source.songSelectItemPrefab != null)
+                    cachedSongItemPrefab = source.songSelectItemPrefab.gameObject;
+                return cachedSongItemPrefab;
             }
         }
 

@@ -34,6 +34,33 @@ namespace ExScoringMod
         private static readonly Vector3 LeaderboardStatsPanelPosition = new Vector3(29f, 6.5f, -4f);
         private static readonly Vector3 LeaderboardStatsPanelRotation = new Vector3(0f, 90f, 0f);
 
+        // Results screen (song scene): the leaderboard stats panel opens next to the results
+        // leaderboard instead, placed from that LeaderboardDisplay's transform: its world position
+        // plus this offset (world units, along the display's own axes), and its rotation plus this
+        // rotation offset. TUNE IN UNITYEXPLORER: not readonly, so they can be changed live; the
+        // next shot uses the new values. Placeholder guess: to the right of the leaderboard, facing
+        // the same way. The anchor's world position/rotation/scale are logged on every open.
+        private static Vector3 ResultsLeaderboardStatsPanelOffset = new Vector3(12f, 0f, 0f);
+        private static Vector3 ResultsLeaderboardStatsPanelRotationOffset = new Vector3(0f, 0f, 0f);
+
+        // The results leaderboard the shot row belongs to (LeaderboardStatsButton.OnLeaderboardRowShot),
+        // or null for the song page's leaderboard.
+        internal static Transform leaderboardStatsAnchor;
+
+        private static void GetLeaderboardStatsPanelPlacement(out Vector3 position, out Vector3 eulerAngles)
+        {
+            Transform anchor = leaderboardStatsAnchor;
+            if (anchor != null)
+            {
+                position = anchor.position + anchor.rotation * ResultsLeaderboardStatsPanelOffset;
+                eulerAngles = (anchor.rotation * Quaternion.Euler(ResultsLeaderboardStatsPanelRotationOffset)).eulerAngles;
+                return;
+            }
+
+            position = LeaderboardStatsPanelPosition;
+            eulerAngles = LeaderboardStatsPanelRotation;
+        }
+
         /// <summary>
         /// Opens the gameplay-stats panel for a selected history row, via its own completely
         /// independent clone (OptionsMenuClone.ShowHistoryPanel) — separate from the one
@@ -65,9 +92,10 @@ namespace ExScoringMod
         {
             currentGameplayStatsRunByContext[LeaderboardStatsContext] = run;
 
+            GetLeaderboardStatsPanelPlacement(out Vector3 position, out Vector3 eulerAngles);
             Transform panel = OptionsMenuClone.ShowLeaderboardStatsPanel(
-                LeaderboardStatsPanelPosition,
-                LeaderboardStatsPanelRotation,
+                position,
+                eulerAngles,
                 $"{run.songId} ({run.difficulty})");
             if (panel == null) return;
 
@@ -93,7 +121,8 @@ namespace ExScoringMod
         /// </summary>
         public static Transform ShowLeaderboardStatsPanelShell(string title)
         {
-            return OptionsMenuClone.ShowLeaderboardStatsPanel(LeaderboardStatsPanelPosition, LeaderboardStatsPanelRotation, title);
+            GetLeaderboardStatsPanelPlacement(out Vector3 position, out Vector3 eulerAngles);
+            return OptionsMenuClone.ShowLeaderboardStatsPanel(position, eulerAngles, title);
         }
 
         /// <summary>

@@ -27,10 +27,19 @@ namespace ExScoringMod
         private static readonly Dictionary<int, Transform> leaderboardHitboxQuads = new Dictionary<int, Transform>();
         private static readonly Dictionary<int, MeshCollider> leaderboardHitboxColliders = new Dictionary<int, MeshCollider>();
 
-        // Cached lazily the first time we need it — the RectMask2D on the leaderboard scroll's
-        // Viewport. Same purpose/limitation as historyViewportMaskRect in PlayHistoryButton.cs, kept
-        // as its own field since this is a different scroll view (LeaderboardDisplay.scrollRect).
-        private static RectTransform leaderboardViewportMaskRect;
+        // The RectMask2D on each row's leaderboard scroll Viewport, keyed by row slot like the
+        // hit-boxes. Same purpose/limitation as historyViewportMaskRect in PlayHistoryButton.cs.
+        // Per row rather than one shared field: the song page and the results screen are two
+        // different LeaderboardDisplays, and checking the results rows against the song page's mask
+        // would hide (and switch off) their hit-boxes. Rows with no mask above them are in
+        // leaderboardHitboxNoMask (fail open).
+        private static readonly Dictionary<int, RectTransform> leaderboardHitboxMasks = new Dictionary<int, RectTransform>();
+        private static readonly HashSet<int> leaderboardHitboxNoMask = new HashSet<int>();
+
+        // The stats panel was opened from the results screen's leaderboard: it closes when the
+        // results screen does (LeaderboardStatsResultsClosePatch / LeaderboardStatsMenuStatePatch),
+        // so it doesn't stay floating in the menu (it's DontDestroyOnLoad).
+        private static bool leaderboardStatsOpenedOnResults;
 
         // TUNE THESE IN UNITYEXPLORER, same process as PlayHistoryButton's historyHitboxLocalPosition/
         // historyHitboxLocalScale: find a "LeaderboardStatsHitbox_N" object (child of a leaderboard
@@ -55,6 +64,10 @@ namespace ExScoringMod
         /// </summary>
         private static void EnsureLeaderboardHitbox(int slot, LeaderboardRow row)
         {
+            // Builds the stats panel's clone while the menu is around (it can't be built during a
+            // song), so the results screen's leaderboard can open it too.
+            OptionsMenuClone.EnsureLeaderboardStatsClone();
+
             if (leaderboardHitboxes.TryGetValue(slot, out GameObject existing) && existing != null)
             {
                 // Deliberately not reapplying position/scale here — same reasoning as
@@ -165,6 +178,8 @@ namespace ExScoringMod
             leaderboardHitboxQuads.Clear();
             leaderboardHitboxColliders.Clear();
             leaderboardHitboxRunIds.Clear();
+            leaderboardHitboxMasks.Clear();
+            leaderboardHitboxNoMask.Clear();
         }
 
         private static int? leaderboardSelectedRowId = null;
@@ -192,6 +207,8 @@ namespace ExScoringMod
         {
             SetLeaderboardIndicatorActive(leaderboardSelectedRowId, false);
             leaderboardSelectedRowId = null;
+            leaderboardStatsOpenedOnResults = false;
+            leaderboardStatsAnchor = null;
 
             // Invalidates any in-flight GET /api/runs/:runId fetch so a late response can't reopen
             // a panel the player (or a fresher selection) already closed.
@@ -249,7 +266,43 @@ namespace ExScoringMod
             }
 
             SelectLeaderboardRow(slot);
+
+            // Results screen's leaderboard: the panel opens next to it (GameplayStatsPanel.cs).
+            leaderboardStatsAnchor = FindResultsLeaderboardAnchor(slot);
+            leaderboardStatsOpenedOnResults = leaderboardStatsAnchor != null;
+
             FetchAndShowLeaderboardStats(runId);
+        }
+
+        /// <summary>
+        /// The LeaderboardDisplay this row's hit-box sits in when it's the results screen's (under
+        /// InGameUI, in the song scene); null for the song page's leaderboard.
+        /// </summary>
+        private static Transform FindResultsLeaderboardAnchor(int slot)
+        {
+            try
+            {
+                if (!leaderboardHitboxes.TryGetValue(slot, out GameObject hitbox) || hitbox == null) return null;
+
+                LeaderboardDisplay display = hitbox.GetComponentInParent<LeaderboardDisplay>();
+                if (display == null) return null;
+
+                bool underInGameUI = false;
+                for (Transform t = display.transform; t != null; t = t.parent)
+                {
+                    if (t.name == "InGameUI") { underInGameUI = true; break; }
+                }
+                if (!underInGameUI) return null;
+
+                Transform anchor = display.transform;
+                DebugLog.Log($"[ExScoring] Results leaderboard row shot: anchor {anchor.name} world pos={anchor.position} rot={anchor.eulerAngles} lossyScale={anchor.lossyScale}");
+                return anchor;
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Log("[ExScoring] FindResultsLeaderboardAnchor failed: " + ex.Message);
+                return null;
+            }
         }
 
         /// <summary>
@@ -307,17 +360,24 @@ namespace ExScoringMod
         /// <summary>Mimics the native Viewport's RectMask2D clipping for the leaderboard's cloned
         /// hit-box quads, same reasoning/limitation as IsHistoryRowVisible in PlayHistoryButton.cs
         /// (a mask only clips UI Graphics, not our MeshRenderer/MeshCollider quads).</summary>
-        private static bool IsLeaderboardRowVisible(Transform quad)
+        private static bool IsLeaderboardRowVisible(int slot, Transform quad)
         {
-            if (leaderboardViewportMaskRect == null)
+            if (leaderboardHitboxNoMask.Contains(slot)) return true; // fail open
+
+            if (!leaderboardHitboxMasks.TryGetValue(slot, out RectTransform maskRect) || maskRect == null)
             {
                 RectMask2D mask = quad.GetComponentInParent<RectMask2D>();
-                if (mask == null) return true; // fail open
-                leaderboardViewportMaskRect = mask.rectTransform;
+                if (mask == null)
+                {
+                    leaderboardHitboxNoMask.Add(slot);
+                    return true;
+                }
+                maskRect = mask.rectTransform;
+                leaderboardHitboxMasks[slot] = maskRect;
             }
 
-            Vector3 local = leaderboardViewportMaskRect.InverseTransformPoint(quad.position);
-            return leaderboardViewportMaskRect.rect.Contains(local);
+            Vector3 local = maskRect.InverseTransformPoint(quad.position);
+            return maskRect.rect.Contains(local);
         }
 
         private static void UpdateLeaderboardHitboxVisibility()
@@ -327,7 +387,7 @@ namespace ExScoringMod
                 Transform quad = kvp.Value;
                 if (quad == null) continue;
 
-                bool visible = IsLeaderboardRowVisible(quad);
+                bool visible = IsLeaderboardRowVisible(kvp.Key, quad);
 
                 var renderer = quad.GetComponent<MeshRenderer>();
                 if (renderer != null) renderer.enabled = visible;
@@ -343,6 +403,47 @@ namespace ExScoringMod
             private static void Postfix()
             {
                 UpdateLeaderboardHitboxVisibility();
+            }
+        }
+
+        private static void CloseResultsLeaderboardStats(string reason)
+        {
+            if (!leaderboardStatsOpenedOnResults) return;
+            DebugLog.Log($"[ExScoring] Closing the results leaderboard's stats panel ({reason}).");
+            ResetLeaderboardSelection();
+        }
+
+        /// <summary>Leaving the results page (restart, next page, back to the menu).</summary>
+        [HarmonyPatch(typeof(InGameUI), "SetState", new Type[] { typeof(InGameUI.State), typeof(bool) })]
+        private static class LeaderboardStatsResultsClosePatch
+        {
+            private static void Postfix(InGameUI.State state)
+            {
+                try
+                {
+                    if (state != InGameUI.State.ResultsPage) CloseResultsLeaderboardStats("results page left: " + state);
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Log("[ExScoring] LeaderboardStatsResultsClosePatch failed: " + ex);
+                }
+            }
+        }
+
+        /// <summary>Back in the menus without the results page changing state first.</summary>
+        [HarmonyPatch(typeof(MenuState), "SetState", new Type[] { typeof(MenuState.State) })]
+        private static class LeaderboardStatsMenuStatePatch
+        {
+            private static void Postfix(MenuState.State state)
+            {
+                try
+                {
+                    if (state != MenuState.State.Launched) CloseResultsLeaderboardStats("menu state: " + state);
+                }
+                catch (Exception ex)
+                {
+                    MelonLogger.Log("[ExScoring] LeaderboardStatsMenuStatePatch failed: " + ex);
+                }
             }
         }
     }

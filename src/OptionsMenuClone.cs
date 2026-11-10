@@ -225,11 +225,26 @@ namespace ExScoringMod
         // history/Options split was already built to avoid.
         private static GameObject leaderboardStatsCloneRoot;
 
-        private static bool EnsureLeaderboardStatsClone()
+        // The "menu" root, kept once found: GameObject.Find only sees active objects, and the menu is
+        // switched off during a song, where the results screen's leaderboard can open the stats panel.
+        private static GameObject menuRootCache;
+
+        private static GameObject FindMenuRoot()
+        {
+            if (menuRootCache == null) menuRootCache = GameObject.Find("menu"); // Unity-null if destroyed: looked up again
+            return menuRootCache;
+        }
+
+        /// <summary>
+        /// Builds the leaderboard stats panel's clone if it isn't there yet. Also called whenever a
+        /// leaderboard row gets its hit-box (LeaderboardStatsButton.EnsureLeaderboardHitbox), so the
+        /// clone already exists from the menu when the results screen needs it.
+        /// </summary>
+        internal static bool EnsureLeaderboardStatsClone()
         {
             if (leaderboardStatsCloneRoot != null) return true;
 
-            GameObject menuRoot = GameObject.Find("menu");
+            GameObject menuRoot = FindMenuRoot();
             if (menuRoot == null) { DebugLog.Log("[Options] EnsureLeaderboardStatsClone: 'menu' root not found"); return false; }
 
             Transform src = menuRoot.transform.Find(SettingsCenterPath);
@@ -255,7 +270,8 @@ namespace ExScoringMod
         {
             if (!EnsureLeaderboardStatsClone()) return null;
 
-            GameObject menuRoot = GameObject.Find("menu");
+            // Without the menu (during a song) the panel keeps the scale it last had.
+            GameObject menuRoot = FindMenuRoot();
             Transform launchCenter = menuRoot != null ? menuRoot.transform.Find(LaunchCenterPath) : null;
             if (launchCenter != null)
             {
