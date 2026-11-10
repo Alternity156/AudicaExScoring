@@ -209,6 +209,7 @@
     <Compile Include="src\AudioNormalizer.cs" />
     <Compile Include="src\AuthorableBridge.cs" />
     <Compile Include="src\AutoRestart.cs" />
+    <Compile Include="src\AvatarPreview.cs" />
     <Compile Include="src\ChainArrow.cs" />
     <Compile Include="src\AddPlaylistButton.cs" />
     <Compile Include="src\AlbumArt.cs" />

@@ -511,6 +511,7 @@ namespace ExScoringMod
             TickGradeVisualAnimation();
             MpSession.Tick();
             MpPresence.Tick();
+            AvatarPreview.Tick();
             MpGameplay.Tick();
             LobbyPanel.Tick();
             LobbyLaunchButton.Tick();
