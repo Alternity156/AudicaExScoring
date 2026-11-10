@@ -122,16 +122,17 @@ namespace ExScoringMod
 
             CheckStuckLaunch(now);
 
+            // Last line of defence against a pause path none of the patches catch (e.g. the
+            // SteamVR plugin freezing time while its dashboard is open). Applies anywhere in a
+            // lobby (menus, results, launch), not only while a match song is playing.
+            if (LobbyPauseBlocked && Time.timeScale == 0f)
+            {
+                Time.timeScale = 1f;
+                Log("Time was frozen while in an online lobby: unfrozen.");
+            }
+
             if (InMatchRun && released && !finishedSent)
             {
-                // Last line of defence against a pause path none of the patches catch (e.g. the
-                // SteamVR plugin freezing time while its dashboard is open).
-                if (Time.timeScale == 0f)
-                {
-                    Time.timeScale = 1f;
-                    Log("Time was frozen during an online match: unfrozen.");
-                }
-
                 TrackHealthAndCombo();
                 if (now - lastScoreSampleMs >= ScoreSampleIntervalMs)
                 {
@@ -749,13 +750,23 @@ namespace ExScoringMod
         private static bool PauseBlocked => InMatchRun && !finishedSent;
 
         /// <summary>
+        /// No pausing anywhere while in an online lobby (menus, results screen, launch, match run).
+        /// Safe because LobbyLaunchButton.InterceptPlay turns Play into a song suggestion while in a
+        /// lobby, so the only songs that can be played there are match runs. The match-run check
+        /// stays in so a run in progress keeps its protection if the lobby state drops first.
+        /// Not used by the AudioDriver.Pause safety net, which stays match-run only: the game and
+        /// the mod pause the audio legitimately outside gameplay (fail/stats screen, transitions).
+        /// </summary>
+        private static bool LobbyPauseBlocked => MpSession.InLobby || PauseBlocked;
+
+        /// <summary>
         /// From InGameUISetStatePatch.Prefix: some pause paths (the SteamVR dashboard opening)
         /// set InGameUI's state to PausePage directly instead of going through GoToPausePage.
         /// </summary>
         public static bool ShouldBlockPausePage()
         {
-            if (!PauseBlocked) return false;
-            Log("Pause page blocked during an online match.");
+            if (!LobbyPauseBlocked) return false;
+            Log("Pause page blocked while in an online lobby.");
             return true;
         }
 
@@ -1039,40 +1050,40 @@ namespace ExScoringMod
 
         /// <summary>
         /// Headset off, lost VR/input/app focus, and the held pause button all go through
-        /// CheckForPause (it reads PauseHandler.hardwareState). Skipped during a match run.
+        /// CheckForPause (it reads PauseHandler.hardwareState). Skipped while in an online lobby.
         /// </summary>
         [HarmonyPatch(typeof(PauseHandler), "CheckForPause", new Type[0])]
         private static class PauseHandlerCheckForPausePatch
         {
             private static bool Prefix()
             {
-                return !PauseBlocked;
+                return !LobbyPauseBlocked;
             }
         }
 
-        /// <summary>Every pause opens the pause page; refused during a match run.</summary>
+        /// <summary>Every pause opens the pause page; refused while in an online lobby.</summary>
         [HarmonyPatch(typeof(InGameUI), "GoToPausePage", new Type[] { typeof(bool) })]
         private static class InGameUIGoToPausePagePatch
         {
             private static bool Prefix()
             {
-                if (!PauseBlocked) return true;
-                Log("Pause blocked during an online match.");
+                if (!LobbyPauseBlocked) return true;
+                Log("Pause blocked while in an online lobby.");
                 return false;
             }
         }
 
         /// <summary>
         /// The game's own focus handlers (SteamVR dashboard / input focus, application pause):
-        /// skipped during a match run so they can't pause anything.
+        /// skipped while in an online lobby so they can't pause anything.
         /// </summary>
         [HarmonyPatch(typeof(KataConfig), "OnSteamVRInputFocus", new Type[] { typeof(bool) })]
         private static class KataConfigOnSteamVRInputFocusPatch
         {
             private static bool Prefix(bool hasFocus)
             {
-                if (!PauseBlocked) return true;
-                Log($"SteamVR input focus {(hasFocus ? "back" : "lost")}: ignored during an online match.");
+                if (!LobbyPauseBlocked) return true;
+                Log($"SteamVR input focus {(hasFocus ? "back" : "lost")}: ignored while in an online lobby.");
                 return false;
             }
         }
@@ -1082,8 +1093,8 @@ namespace ExScoringMod
         {
             private static bool Prefix(bool pause)
             {
-                if (!PauseBlocked) return true;
-                Log($"Application pause={pause}: ignored during an online match.");
+                if (!LobbyPauseBlocked) return true;
+                Log($"Application pause={pause}: ignored while in an online lobby.");
                 return false;
             }
         }
