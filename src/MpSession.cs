@@ -142,6 +142,8 @@ namespace ExScoringMod
         public static MpMatchScores LastMatchScores { get; private set; }
         /// <summary>The last finished match's results. Kept until the next match starts.</summary>
         public static MpMatchResults LastMatchResults { get; private set; }
+        /// <summary>The lobby the last match (and so LastMatchScores/LastMatchResults) belongs to.</summary>
+        private static string lastMatchLobbyId;
 
         /// <summary>True when this player plays the current match (false while spectating).</summary>
         public static bool IsMatchParticipant
@@ -942,6 +944,7 @@ namespace ExScoringMod
                     CurrentMatchStart = null;
                     LastMatchScores = null;
                     LastMatchResults = null;
+                    lastMatchLobbyId = Lobby?.lobbyId;
                     pendingScoreUpdate = null;
                     Log($"   match {CurrentMatch.matchId}: {CurrentMatch.song}, {CurrentMatch.participants?.Length ?? 0} participant(s), me participating={IsMatchParticipant}, load timeout {CurrentMatch.loadTimeoutMs} ms");
                     SafeInvoke(OnMatchPrepare, CurrentMatch, "OnMatchPrepare");
@@ -1042,6 +1045,7 @@ namespace ExScoringMod
             {
                 if (Lobby != null) ClearLobby(info.closeCode == 4010 ? "serverRestarted" : "disconnected");
                 ClearMatch();
+                ClearLastMatch();
             }
 
             if (!info.willReconnect)
@@ -1253,6 +1257,12 @@ namespace ExScoringMod
                 ClearMatch();
             }
 
+            if (newLobby && lobby.lobbyId != lastMatchLobbyId)
+            {
+                // Joined a different lobby: the last match's scores/results belong to the old one.
+                ClearLastMatch();
+            }
+
             if (newLobby)
             {
                 Log($"   in lobby {lobby.code} \"{lobby.name}\" as {(IsHost ? "host" : "player")}");
@@ -1291,6 +1301,13 @@ namespace ExScoringMod
             CurrentMatch = null;
             CurrentMatchStart = null;
             pendingScoreUpdate = null;
+        }
+
+        private static void ClearLastMatch()
+        {
+            LastMatchScores = null;
+            LastMatchResults = null;
+            lastMatchLobbyId = null;
         }
 
         private static void Disconnect(string reason)
