@@ -958,12 +958,14 @@ namespace ExScoringMod
 
                 case "matchStart":
                     CurrentMatchStart = message.ToObject<MpMatchStart>(MpJson.Serializer);
+                    EnsureCatchUpMatch(CurrentMatchStart);
                     Log($"   startAt(server)={CurrentMatchStart.startAt}, starts in {SecondsUntilServerTime(CurrentMatchStart.startAt):F2} s locally (offset {ClockOffsetMs} ms, synced={ClockSynced})");
                     SafeInvoke(OnMatchStart, CurrentMatchStart, "OnMatchStart");
                     break;
 
                 case "matchScores":
                     LastMatchScores = message.ToObject<MpMatchScores>(MpJson.Serializer);
+                    MergeCatchUpParticipants(LastMatchScores);
                     SafeInvoke(OnMatchScores, LastMatchScores, "OnMatchScores");
                     break;
 
@@ -1301,6 +1303,92 @@ namespace ExScoringMod
             CurrentMatch = null;
             CurrentMatchStart = null;
             pendingScoreUpdate = null;
+            catchUpMatch = false;
+        }
+
+        // ── Mid-match catch-up (19.5.1) ──
+
+        /// <summary>True while CurrentMatch was built from a catch-up matchStart, not a real matchPrepare.</summary>
+        private static bool catchUpMatch;
+
+        /// <summary>
+        /// Joining (or reconnecting) while a match is playing only brings matchStart and the latest
+        /// matchScores, never matchPrepare (19.5.1), so CurrentMatch would stay null and the lobby
+        /// panel and the spectator timer would have nothing to show. This builds a stand-in from
+        /// matchStart plus the lobby's players with matchRole "player". OnMatchPrepare is not
+        /// raised, so MpGameplay never tries to launch the song; joiners always spectate anyway.
+        /// </summary>
+        private static void EnsureCatchUpMatch(MpMatchStart start)
+        {
+            if (start == null) return;
+            if (CurrentMatch != null && (CurrentMatch.matchId == start.matchId || start.matchId == null)) return;
+
+            List<MpMatchParticipant> participants = new List<MpMatchParticipant>();
+            if (Lobby != null && Lobby.players != null)
+            {
+                foreach (MpPlayerState p in Lobby.players)
+                {
+                    if (p == null || p.userId == null || p.matchRole != "player") continue;
+                    participants.Add(new MpMatchParticipant
+                    {
+                        userId = p.userId,
+                        difficulty = !string.IsNullOrEmpty(p.difficulty) ? p.difficulty : start.song?.difficulty
+                    });
+                }
+            }
+
+            CurrentMatch = new MpMatchPrepare
+            {
+                matchId = start.matchId,
+                song = start.song ?? Lobby?.selectedSong,
+                participants = participants.ToArray(),
+                loadTimeoutMs = 0
+            };
+            catchUpMatch = true;
+
+            if (LastMatchScores != null && LastMatchScores.matchId != start.matchId) LastMatchScores = null;
+            LastMatchResults = null;
+            lastMatchLobbyId = Lobby?.lobbyId;
+            pendingScoreUpdate = null;
+
+            Log($"   catch-up match {CurrentMatch.matchId}: {CurrentMatch.song}, {participants.Count} participant(s) from lobbyState (no matchPrepare)");
+        }
+
+        /// <summary>
+        /// Adds anyone in a catch-up match's matchScores who wasn't marked "player" in lobbyState,
+        /// with the difficulty the scores report.
+        /// </summary>
+        private static void MergeCatchUpParticipants(MpMatchScores scores)
+        {
+            if (!catchUpMatch || CurrentMatch == null || scores == null || scores.scores == null) return;
+            if (scores.matchId != null && CurrentMatch.matchId != null && scores.matchId != CurrentMatch.matchId) return;
+
+            List<MpMatchParticipant> participants = CurrentMatch.participants != null
+                ? new List<MpMatchParticipant>(CurrentMatch.participants)
+                : new List<MpMatchParticipant>();
+            bool changed = false;
+
+            foreach (MpScoreEntry s in scores.scores)
+            {
+                if (s == null || s.userId == null) continue;
+                MpMatchParticipant existing = participants.Find(x => x != null && x.userId == s.userId);
+                if (existing == null)
+                {
+                    participants.Add(new MpMatchParticipant { userId = s.userId, difficulty = s.difficulty ?? CurrentMatch.song?.difficulty });
+                    changed = true;
+                }
+                else if (!string.IsNullOrEmpty(s.difficulty) && existing.difficulty != s.difficulty)
+                {
+                    existing.difficulty = s.difficulty; // the scores know the real one
+                    changed = true;
+                }
+            }
+
+            if (changed)
+            {
+                CurrentMatch.participants = participants.ToArray();
+                Log($"   catch-up match {CurrentMatch.matchId}: {participants.Count} participant(s) after matchScores");
+            }
         }
 
         private static void ClearLastMatch()

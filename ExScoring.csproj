@@ -234,6 +234,7 @@
     <Compile Include="src\LobbyPanel.cs" />
     <Compile Include="src\LobbySongList.cs" />
     <Compile Include="src\MarathonSetup.cs" />
+    <Compile Include="src\MatchTimer.cs" />
     <Compile Include="src\MaudicaCatalog.cs" />
     <Compile Include="src\MaudicaLookup.cs" />
     <Compile Include="src\MenuAimAssist.cs" />

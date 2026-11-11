@@ -686,7 +686,10 @@ namespace ExScoringMod
                     ? Safe(lobby.selectedSong.title)
                     : $"{Safe(lobby.selectedSong.title)} [{DifficultyDisplayName(lobby.selectedSong.difficulty)}]";
             string phase = lobby.phase == "loading" ? "Loading" : lobby.phase == "playing" ? "Playing" : "In lobby";
-            output.Add($"<color=#d8d8d8>{phase} - {song}</color>");
+            // Spectators get a countdown to the end of the current song (MatchTimer).
+            string timer = ExScoring.MatchTimer.GetSpectatorText(lobby);
+            string timerText = string.IsNullOrEmpty(timer) ? "" : $"  <color=#66ccff>{timer}</color>";
+            output.Add($"<color=#d8d8d8>{phase} - {song}</color>{timerText}");
             output.Add("");
 
             if (MpSession.CurrentMatch != null)
