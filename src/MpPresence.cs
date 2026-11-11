@@ -97,6 +97,23 @@ namespace ExScoringMod
     ///    the owner only, who pushes their own gun as a native shot would (HandleGunHit), with the
     ///    point put back on their gun pose; everyone sees the push through the owner's poses.
     ///
+    /// Thrown-gun hit tests (v2.51), wherever a beam is tested against a thrown gun:
+    ///  - The gun's solid box, fattened by ShotHitRadius (3.5 cm): a beam that close counts. The hit
+    ///    point is always on the beam's own line (the entry point on a real hit, else the beam's
+    ///    closest approach to the box), so a bounce is drawn as a graze, never in thin air; the push
+    ///    point is that spot of the gun (PushPoint).
+    ///  - Remote gun copies (this player's own shots, and others' beams bouncing off third players'
+    ///    guns): also tested at SweepSteps poses back toward last frame's (RememberRemoteGunPoses),
+    ///    because at 30 Hz a spinning copy jumps between frames.
+    ///  - This player's own guns under another player's shot (PlayShot): judged where the shooter
+    ///    saw them, not where they are now. Every pose this player sends is also kept (RecordOwnGunPoses,
+    ///    same time stamp, OwnGunHistoryKeepMs); the shot's sample time minus RenderDelayMs is when
+    ///    the shooter was drawing this player, give or take one pose interval, so the gun is put back
+    ///    at several times across that interval (latest first). This decides the bounce drawn here
+    ///    and, on a server without "gunHit", the push. With "gunHit" the shooter still decides the push.
+    ///  - Solo test (SoloGunHitTest, from UnityExplorer): this player's own shots on their own thrown
+    ///    gun judged both ways after a fake delay, results logged and counted in DebugDump.
+    ///
     /// Drawing: each remote player's samples are buffered and drawn RenderDelayMs behind server
     /// time, interpolating on each sample's t (lerp / slerp, holding the last pose if nothing newer
     /// came). Players missing from the latest poses message are hidden; every avatar is hidden on
@@ -275,6 +292,13 @@ namespace ExScoringMod
         private const float ShotRayLength = 100f;        // how far a shot can reach a thrown gun
         private const float NativeBeamMatchDistance = 0.3f; // native's beam starts this close to the firepoint
         private const float GunHitSendCooldown = 0.04f;  // per gun; the game fires at most every 0.05 s per hand
+
+        // v2.51 thrown-gun hits: a fattened, swept box test, and lag compensation for the owner's own judging.
+        private const float ShotHitRadius = 0.035f;      // a beam this close to a thrown gun's box counts (about the gun's thickness)
+        private const int SweepSteps = 3;                // a remote gun copy is also tested at 3 poses back toward last frame's
+        private const float SweepMaxTravel = 1f;         // m; a bigger jump (a teleport, a rebuilt avatar) isn't swept
+        private const int RewindSteps = 4;               // own gun tested at 5 times across one pose interval when rewound
+        private const long OwnGunHistoryKeepMs = 1000;   // own gun poses kept for rewinding
 
         // Hand animation (v2.42) and the gun's fire animation, the game's own numbers (Ghidra / in-game dumps, 2026-10-30).
         private const float HandBlendRate = 20f;         // KataHand.INPUT_RATE_CHANGE: a blend moves 20 per second
@@ -738,6 +762,10 @@ namespace ExScoringMod
             public float LastHeadshotSent = -100f;
             /// <summary>v2.45: when this player last reported hitting each of this player's thrown guns (0 = left, 1 = right).</summary>
             public readonly float[] LastGunHitSent = { -100f, -100f };
+            /// <summary>v2.51: each gun copy's pose at the end of last frame (LateTick), for the swept hit test.</summary>
+            public readonly Vector3[] LastGunPos = new Vector3[2];
+            public readonly Quaternion[] LastGunRot = { Quaternion.identity, Quaternion.identity };
+            public readonly bool[] HasLastGun = new bool[2];
 
             // v2.44 cosmetics: the model key each slot should show (MpCosmetics.Slot* order) and the
             // one the current avatar was built with. A difference rebuilds the avatar.
@@ -853,6 +881,41 @@ namespace ExScoringMod
         private static readonly float[] lastThrownHeadshot = { -100f, -100f };
         private static int thrownHeadshotsSent;
         private static bool thrownHeadshotFailed;
+
+        // v2.51 thrown-gun hits. Own gun poses per hand (the tricks/mesh pose, stamped with the same
+        // server time as the pose sent), oldest first, for judging other players' shots as they saw them.
+        private struct OwnGunPose
+        {
+            public long T;
+            public Vector3 Pos;
+            public Quaternion Rot;
+            public bool Thrown;
+        }
+        private static readonly List<OwnGunPose>[] ownGunHistory = { new List<OwnGunPose>(), new List<OwnGunPose>() };
+        private static long lastHistoryRecordMs;
+        private static int rewoundHits, grazeHits, sweptHits, liveFallbackTests;
+
+        /// <summary>
+        /// v2.51 solo test (set from UnityExplorer, off by default, never saved): each of this player's
+        /// shots while one of their own guns is thrown is judged again RenderDelayMs + 2 x
+        /// SoloFakeLatencyMs later, as another player's shot would be on this screen: once the old way
+        /// (thin ray on the live gun) and once the new way (rewound, fattened). Both results are logged.
+        /// Works offline too. SoloGunHitPush also pushes the gun on a new-way hit (off by default: the
+        /// native shot already pushed it, so the second push would be on top of it).
+        /// </summary>
+        public static bool SoloGunHitTest = false;
+        public static long SoloFakeLatencyMs = 50;
+        public static bool SoloGunHitPush = false;
+        private struct SoloShot
+        {
+            public Vector3 Position;
+            public Vector3 Forward;
+            public long ShotT;      // as if it were the shooter's pose sample time (so the rewind lands on the fire time)
+            public long DueLocalMs; // when it would be drawn on this screen
+        }
+        private static readonly List<SoloShot> soloShots = new List<SoloShot>();
+        private static readonly int[] pendingSoloFrame = { -1, -1 };
+        private static int soloTested, soloOldHits, soloNewHits, soloNewExact;
 
         // Cosmetics (v2.44): templates per slot and model key (under templateHolder), and the custom
         // models waiting to be loaded (one per frame).
@@ -974,9 +1037,12 @@ namespace ExScoringMod
             long interval = Math.Max(1, (long)Math.Round(1000.0 / Math.Max(1, MpSession.PoseRateHz)));
             nextPoseAtMs = nextPoseAtMs <= 0 || now - nextPoseAtMs >= interval ? now + interval : nextPoseAtMs + interval;
 
+            long t = MpSession.ServerNowMs;
+            RecordOwnGunPoses(t); // v2.51: exactly what the others will interpolate, for rewinding their shots
+
             JObject pose = new JObject
             {
-                ["t"] = MpSession.ServerNowMs,
+                ["t"] = t,
                 ["head"] = PartJson(localHead),
                 ["lHand"] = PartJson(localKataL != null ? localKataL.transform : null),
                 ["rHand"] = PartJson(localKataR != null ? localKataR.transform : null),
@@ -1952,14 +2018,14 @@ namespace ExScoringMod
 
                 long rise = count - state.Baseline;
                 state.Baseline = count;
-                if (rise > 0) FireShots(remote, hand, (int)Math.Min(rise, MaxShotsPerJump), rise, fire);
+                if (rise > 0) FireShots(remote, hand, (int)Math.Min(rise, MaxShotsPerJump), rise, fire, sample.T);
                 return;
             }
 
             // No count: one shot per false -> true trigger change.
             state.HasBaseline = false;
             bool trigger = sample.Trigger(hand);
-            if (!baselineOnly && state.HasLastTrigger && !state.LastTrigger && trigger) FireShots(remote, hand, 1, 1, fire);
+            if (!baselineOnly && state.HasLastTrigger && !state.LastTrigger && trigger) FireShots(remote, hand, 1, 1, fire, sample.T);
             state.LastTrigger = trigger;
             state.HasLastTrigger = true;
         }
@@ -1968,7 +2034,7 @@ namespace ExScoringMod
         /// count shots on one hand (rise = what the count went up by, before the cap): logged, and
         /// shown on the avatar's gun the way the game shows its own (PlayShot).
         /// </summary>
-        private static void FireShots(Remote remote, int hand, int count, long rise, bool fire)
+        private static void FireShots(Remote remote, int hand, int count, long rise, bool fire, long sampleT)
         {
             if (!fire || count <= 0) return;
             ShotState state = remote.Shot[hand];
@@ -1980,7 +2046,7 @@ namespace ExScoringMod
 
             try
             {
-                PlayShot(remote, hand, count);
+                PlayShot(remote, hand, count, sampleT);
             }
             catch (Exception ex)
             {
@@ -2002,7 +2068,7 @@ namespace ExScoringMod
         /// muzzle flash and dust take the game's per-hand colour slot, so they show this player's
         /// own colours for that hand. One muzzle flash and one dust burst however many shots came at once.
         /// </summary>
-        private static void PlayShot(Remote remote, int hand, int count)
+        private static void PlayShot(Remote remote, int hand, int count, long sampleT)
         {
             if (remote.Root == null || !remote.Root.activeSelf) return;
             Transform gunPart = hand == 0 ? remote.LGun : remote.RGun;
@@ -2023,7 +2089,14 @@ namespace ExScoringMod
 
             // What the shot meets (Gun.Fire's miss branch): this player's thrown guns get pushed, and
             // the nearest thrown gun or platform bounces the beam (menu glass doesn't, see FindRicochet).
-            ThrownGunHit gunHit = FindThrownGunHit(position, forward);
+            // v2.51: this player's own guns are judged where the shooter saw them (rewound by the
+            // shot's sample time), not where they are now; the live thin test only without a history.
+            ThrownGunHit gunHit = FindThrownGunHitRewound(position, forward, sampleT, out bool judged);
+            if (!judged)
+            {
+                gunHit = FindThrownGunHit(position, forward);
+                liveFallbackTests++;
+            }
             bool bounces = FindRicochet(position, forward, gunPart.position, gunHit, false, out Ricochet ricochet);
 
             int beams = Math.Min(count, BeamPoolSize);
@@ -2035,7 +2108,7 @@ namespace ExScoringMod
                 if (bounces) FireRicochetBeam(fx, beam, ricochet, position, forward);
                 // With "gunHit" the shooter decides and tells us (HandleGunHit); without it (an older
                 // server) the shot as drawn here decides, so the push still happens, never twice.
-                if (gunHit.Gun != null && !MpSession.GunHitEnabled) PushThrownGun(gunHit.Gun, gunHit.Toy, gunHit.Point, forward);
+                if (gunHit.Gun != null && !MpSession.GunHitEnabled) PushThrownGun(gunHit.Gun, gunHit.Toy, gunHit.PushPoint, forward);
             }
             if (bounces)
             {
@@ -2079,8 +2152,13 @@ namespace ExScoringMod
         {
             public Gun Gun;
             public ShootableToy Toy;
+            /// <summary>Where the beam meets the gun, on the beam's own line (bounces are drawn here).</summary>
             public Vector3 Point;
+            /// <summary>The same spot of the gun where the gun is now (pushes land here; = Point unless rewound).</summary>
+            public Vector3 PushPoint;
             public float Distance;
+            /// <summary>The thin beam hit the gun's box itself (false: only within ShotHitRadius of it).</summary>
+            public bool Exact;
         }
 
         /// <summary>
@@ -2104,9 +2182,209 @@ namespace ExScoringMod
                 best.Gun = gun;
                 best.Toy = toy;
                 best.Point = hit.point;
+                best.PushPoint = hit.point;
                 best.Distance = hit.distance;
+                best.Exact = true;
             }
             return best;
+        }
+
+        // ── v2.51: own gun pose history and rewound hits ──
+
+        /// <summary>
+        /// Stores both guns' tricks/mesh poses with time t (the same server time as the pose being
+        /// sent), dropping anything older than OwnGunHistoryKeepMs.
+        /// </summary>
+        private static void RecordOwnGunPoses(long t)
+        {
+            lastHistoryRecordMs = MpSession.LocalNowMs;
+            for (int h = 0; h < 2; h++)
+            {
+                List<OwnGunPose> history = ownGunHistory[h];
+                Gun gun = h == 0 ? localGunL : localGunR;
+                if (!IsAlive(gun))
+                {
+                    history.Clear();
+                    continue;
+                }
+                Transform pose = h == 0 ? GunPoseTransform(gun, ref localGunPoseL) : GunPoseTransform(gun, ref localGunPoseR);
+                if (pose == null) continue;
+                if (history.Count > 0)
+                {
+                    long last = history[history.Count - 1].T;
+                    if (t < last) history.Clear();                                     // the clock stepped back
+                    else if (t == last) history.RemoveAt(history.Count - 1);           // recorded twice this ms: keep the newer
+                }
+                history.Add(new OwnGunPose { T = t, Pos = pose.position, Rot = pose.rotation, Thrown = IsThrown(gun) });
+                int drop = 0;
+                while (drop < history.Count - 1 && history[drop].T < t - OwnGunHistoryKeepMs) drop++;
+                if (drop > 0) history.RemoveRange(0, drop);
+            }
+        }
+
+        /// <summary>
+        /// The own gun's pose at time t, interpolated as the other players do (lerp / slerp between
+        /// samples, the newest held past the end). False before the oldest sample or without one.
+        /// </summary>
+        private static bool OwnGunPoseAt(int hand, long t, out Vector3 pos, out Quaternion rot, out bool thrown)
+        {
+            pos = Vector3.zero;
+            rot = Quaternion.identity;
+            thrown = false;
+            List<OwnGunPose> history = ownGunHistory[hand];
+            if (history.Count == 0 || t < history[0].T) return false;
+            for (int i = history.Count - 1; i >= 0; i--)
+            {
+                OwnGunPose a = history[i];
+                if (a.T > t) continue;
+                if (i == history.Count - 1)
+                {
+                    pos = a.Pos;
+                    rot = a.Rot;
+                    thrown = a.Thrown;
+                    return true;
+                }
+                OwnGunPose b = history[i + 1];
+                float f = b.T > a.T ? (float)(t - a.T) / (b.T - a.T) : 1f;
+                pos = Vector3.Lerp(a.Pos, b.Pos, f);
+                rot = Quaternion.Slerp(a.Rot, b.Rot, f);
+                thrown = a.Thrown && b.Thrown;
+                return true;
+            }
+            return false;
+        }
+
+        /// <summary>
+        /// Another player's shot on this player's own thrown guns, judged where that shooter saw them.
+        /// The shot's sample time is the shooter's server time when they sent it (at most one pose
+        /// interval after the press); they were drawing this player's poses RenderDelayMs behind
+        /// that. So the gun is put back where it was at every step from (sampleT - RenderDelayMs -
+        /// one interval) to (sampleT - RenderDelayMs), latest first, and the beam tested against its
+        /// box there (fattened by ShotHitRadius). The gun must have been thrown then and still be now.
+        /// judged = false when there's nothing to rewind with (no history covering that time, no box):
+        /// the caller then falls back to the live test.
+        /// </summary>
+        private static ThrownGunHit FindThrownGunHitRewound(Vector3 position, Vector3 forward, long sampleT, out bool judged)
+        {
+            ThrownGunHit best = default;
+            best.Distance = float.MaxValue;
+            judged = false;
+
+            long interval = Math.Max(1, (long)Math.Round(1000.0 / Math.Max(1, MpSession.PoseRateHz)));
+            long newest = sampleT - RenderDelayMs;
+            long oldest = newest - interval;
+
+            for (int h = 0; h < 2; h++)
+            {
+                Gun gun = h == 0 ? localGunL : localGunR;
+                if (!IsAlive(gun)) continue;
+                BoxCollider box = ThrownHeadBox(gun, h);
+                Transform poseNow = h == 0 ? GunPoseTransform(gun, ref localGunPoseL) : GunPoseTransform(gun, ref localGunPoseR);
+                if (box == null || poseNow == null) continue;
+                if (!BoxInPoseFrame(box, poseNow, out Vector3 boxCenter, out Quaternion boxRot, out Vector3 half)) continue;
+                if (!OwnGunPoseAt(h, oldest, out _, out _, out _) && !OwnGunPoseAt(h, newest, out _, out _, out _)) continue;
+                judged = true;
+                if (!IsThrown(gun)) continue;
+
+                for (int s = 0; s <= RewindSteps; s++)
+                {
+                    long t = newest - (newest - oldest) * s / RewindSteps;
+                    if (!OwnGunPoseAt(h, t, out Vector3 p, out Quaternion q, out bool thrownThen) || !thrownThen) continue;
+                    Vector3 center = p + q * boxCenter;
+                    Quaternion rot = q * boxRot;
+                    if (!BeamMeetsBox(position, forward, center, rot, half, best.Distance, out float distance, out bool exact)) continue;
+
+                    Vector3 point = position + forward * distance;
+                    ShootableToy toy = null;
+                    try { toy = gun.thrownShootable; } catch { }
+                    best.Gun = gun;
+                    best.Toy = toy;
+                    best.Point = point;
+                    best.PushPoint = poseNow.position + poseNow.rotation * (Quaternion.Inverse(q) * (point - p));
+                    best.Distance = distance;
+                    best.Exact = exact;
+                    break; // the latest time that hits
+                }
+            }
+            if (best.Gun != null)
+            {
+                rewoundHits++;
+                if (!best.Exact) grazeHits++;
+            }
+            return best;
+        }
+
+        /// <summary>
+        /// A BoxCollider in the frame of a pose transform (its position and rotation only, no scale,
+        /// matching what poses carry): centre, rotation and world-size half extents.
+        /// </summary>
+        private static bool BoxInPoseFrame(BoxCollider box, Transform pose, out Vector3 center, out Quaternion rot, out Vector3 half)
+        {
+            center = Vector3.zero;
+            rot = Quaternion.identity;
+            half = Vector3.zero;
+            if (box == null || pose == null) return false;
+            Transform t = box.transform;
+            Quaternion inverse = Quaternion.Inverse(pose.rotation);
+            center = inverse * (t.TransformPoint(box.center) - pose.position);
+            rot = inverse * t.rotation;
+            Vector3 scale = t.lossyScale;
+            half = new Vector3(
+                Mathf.Abs(box.size.x * scale.x) * 0.5f,
+                Mathf.Abs(box.size.y * scale.y) * 0.5f,
+                Mathf.Abs(box.size.z * scale.z) * 0.5f);
+            return half.x > 0f || half.y > 0f || half.z > 0f;
+        }
+
+        /// <summary>
+        /// Whether a beam (unit direction) meets a box, or passes within ShotHitRadius of it, before
+        /// maxDistance. distance is where along the beam: the entry point on a real hit, otherwise the
+        /// beam's closest approach to the box centre (kept inside the fattened box), so the point
+        /// stays on the beam's own line either way.
+        /// </summary>
+        private static bool BeamMeetsBox(Vector3 origin, Vector3 dir, Vector3 center, Quaternion rot, Vector3 half, float maxDistance, out float distance, out bool exact)
+        {
+            distance = 0f;
+            exact = false;
+            float limit = Math.Min(maxDistance, ShotRayLength);
+            Quaternion inverse = Quaternion.Inverse(rot);
+            Vector3 o = inverse * (origin - center);
+            Vector3 d = inverse * dir;
+
+            if (Slab(o, d, half, out float enter, out float exit) && exit >= 0f && enter <= limit)
+            {
+                distance = Math.Max(enter, 0f);
+                exact = true;
+                return true;
+            }
+
+            Vector3 fat = half + new Vector3(ShotHitRadius, ShotHitRadius, ShotHitRadius);
+            if (!Slab(o, d, fat, out enter, out exit) || exit < 0f || enter > limit) return false;
+            float closest = Vector3.Dot(center - origin, dir);
+            distance = Mathf.Clamp(closest, Math.Max(enter, 0f), exit);
+            return distance <= limit;
+        }
+
+        /// <summary>Ray against an axis-aligned box at the origin (slab test): the entry and exit distances.</summary>
+        private static bool Slab(Vector3 o, Vector3 d, Vector3 half, out float enter, out float exit)
+        {
+            enter = float.MinValue;
+            exit = float.MaxValue;
+            // Per axis, not the Vector3 indexer (not reliably there on the unhollowed struct).
+            return SlabAxis(o.x, d.x, half.x, ref enter, ref exit)
+                && SlabAxis(o.y, d.y, half.y, ref enter, ref exit)
+                && SlabAxis(o.z, d.z, half.z, ref enter, ref exit);
+        }
+
+        private static bool SlabAxis(float o, float d, float half, ref float enter, ref float exit)
+        {
+            if (Math.Abs(d) < 1e-8f) return Math.Abs(o) <= half;
+            float t1 = (-half - o) / d;
+            float t2 = (half - o) / d;
+            if (t1 > t2) { float swap = t1; t1 = t2; t2 = swap; }
+            if (t1 > enter) enter = t1;
+            if (t2 < exit) exit = t2;
+            return enter <= exit;
         }
 
         /// <summary>The gun is out of the hand in a throw trick (Gun.GetCurrentTrick).</summary>
@@ -2214,6 +2492,11 @@ namespace ExScoringMod
         /// </summary>
         private static void QueueLocalShot(Gun gun)
         {
+            if (SoloGunHitTest && !InSong())
+            {
+                int soloHand = HandOf(gun);
+                if (soloHand >= 0) pendingSoloFrame[soloHand] = Time.frameCount;
+            }
             if (!LocalShotsInteract()) return;
             int hand = HandOf(gun);
             if (hand < 0) return;
@@ -2223,6 +2506,15 @@ namespace ExScoringMod
         /// <summary>From Main.OnLateUpdate: this frame's queued shots, after every Gun.Update.</summary>
         public static void LateTick()
         {
+            try
+            {
+                TickSoloTest();
+            }
+            catch (Exception ex)
+            {
+                Log($"solo gun hit test failed: {ex.Message}");
+            }
+
             for (int h = 0; h < 2; h++)
             {
                 int frame = pendingShotFrame[h];
@@ -2242,6 +2534,71 @@ namespace ExScoringMod
             }
 
             CheckThrownGunHeadshots();
+            RememberRemoteGunPoses();
+        }
+
+        /// <summary>
+        /// v2.51 solo test (SoloGunHitTest): records this player's own gun poses when no pose is being
+        /// sent (offline, or outside a lobby), queues this frame's shots taken while a gun of theirs is
+        /// thrown, and judges the ones that are due both ways (old: thin ray on the live gun; new:
+        /// rewound and fattened, exactly as another player's shot is judged in PlayShot).
+        /// </summary>
+        private static void TickSoloTest()
+        {
+            if (!SoloGunHitTest)
+            {
+                if (soloShots.Count > 0) soloShots.Clear();
+                return;
+            }
+            if (InSong()) return;
+            FindLocalRig();
+
+            long nowLocal = MpSession.LocalNowMs;
+            long interval = Math.Max(1, (long)Math.Round(1000.0 / Math.Max(1, MpSession.PoseRateHz)));
+            if (nowLocal - lastHistoryRecordMs >= interval) RecordOwnGunPoses(MpSession.ServerNowMs); // sends aren't recording
+
+            for (int h = 0; h < 2; h++)
+            {
+                int frame = pendingSoloFrame[h];
+                if (frame < 0) continue;
+                pendingSoloFrame[h] = -1;
+                if (frame != Time.frameCount) continue;
+                if (!IsThrown(localGunL) && !IsThrown(localGunR)) continue;
+                Gun gun = h == 0 ? localGunL : localGunR;
+                if (!IsAlive(gun) || gun.firepoint == null) continue;
+                soloShots.Add(new SoloShot
+                {
+                    Position = gun.firepoint.position,
+                    Forward = gun.firepoint.forward,
+                    // The shooter (this player) saw the gun live at the fire time; as a pose sample
+                    // time that is fire time + RenderDelayMs, so the rewind lands back on it.
+                    ShotT = MpSession.ServerNowMs + RenderDelayMs,
+                    DueLocalMs = nowLocal + RenderDelayMs + 2 * Math.Max(0, SoloFakeLatencyMs)
+                });
+            }
+
+            for (int i = 0; i < soloShots.Count; i++)
+            {
+                SoloShot shot = soloShots[i];
+                if (shot.DueLocalMs > nowLocal) continue;
+                soloShots.RemoveAt(i);
+                i--;
+
+                ThrownGunHit oldWay = FindThrownGunHit(shot.Position, shot.Forward);
+                ThrownGunHit newWay = FindThrownGunHitRewound(shot.Position, shot.Forward, shot.ShotT, out bool judged);
+                soloTested++;
+                if (oldWay.Gun != null) soloOldHits++;
+                if (newWay.Gun != null)
+                {
+                    soloNewHits++;
+                    if (newWay.Exact) soloNewExact++;
+                }
+                string newText = !judged ? "no history" : (newWay.Gun != null ? $"hit{(newWay.Exact ? "" : " (within " + ShotHitRadius * 100f + " cm)")} at {newWay.Distance:F2} m" : "miss");
+                Log($"solo gun hit test (+{RenderDelayMs + 2 * Math.Max(0, SoloFakeLatencyMs)} ms): old={(oldWay.Gun != null ? $"hit at {oldWay.Distance:F2} m" : "miss")} new={newText} [{soloTested} shots: old {soloOldHits}, new {soloNewHits}]");
+
+                if (SoloGunHitPush && newWay.Gun != null && IsThrown(newWay.Gun))
+                    PushThrownGun(newWay.Gun, newWay.Toy, newWay.PushPoint, shot.Forward);
+            }
         }
 
         /// <summary>
@@ -2374,7 +2731,7 @@ namespace ExScoringMod
             float now = Time.unscaledTime;
             if (now - hit.Remote.LastGunHitSent[hit.Hand] < GunHitSendCooldown) return;
             hit.Remote.LastGunHitSent[hit.Hand] = now;
-            Vector3 local = hit.GunPart.InverseTransformPoint(hit.Point);
+            Vector3 local = hit.GunPart.InverseTransformPoint(hit.PushPoint); // v2.51: the spot on the gun, not on the beam
             MpSession.SendGunHit(hit.Remote.UserId, hit.Hand == 0 ? "l" : "r", local, forward.normalized);
             gunHitsSent++;
             Log($"gunHit: shot {hit.Remote.UserId}'s {(hit.Hand == 0 ? "left" : "right")} gun at {hit.Distance:F2} m");
@@ -2473,7 +2830,10 @@ namespace ExScoringMod
             public Remote Remote;
             public int Hand;
             public Transform GunPart;
+            /// <summary>Where the beam meets the gun copy, on the beam's own line (bounces are drawn here).</summary>
             public Vector3 Point;
+            /// <summary>The same spot of the gun copy at its pose this frame (what gunHit is made from).</summary>
+            public Vector3 PushPoint;
             public float Distance;
         }
 
@@ -2491,8 +2851,12 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// The nearest shown remote thrown gun copy on the line, closer than maxDistance, tested
-        /// against the copy's own colliders (the GunX/tricks box copy).
+        /// The nearest shown remote thrown gun copy on the line, closer than maxDistance. v2.51: tested
+        /// against the copy's box (the GunX/tricks box copy) fattened by ShotHitRadius, at this frame's
+        /// pose and SweepSteps poses back toward last frame's (poses come at 30 Hz, so a spinning copy
+        /// jumps between frames), this frame's pose first. A copy without a BoxCollider falls back to
+        /// its colliders' thin raycast. The point is on the beam's line; PushPoint is that spot of the
+        /// gun at this frame's pose.
         /// </summary>
         private static RemoteGunHit FindRemoteGunHit(Vector3 position, Vector3 forward, float maxDistance)
         {
@@ -2506,12 +2870,44 @@ namespace ExScoringMod
                 for (int h = 0; h < 2; h++)
                 {
                     if (!RemoteGunThrown(remote, h)) continue;
+                    Transform gun = h == 0 ? remote.LGun : remote.RGun;
+
+                    BoxCollider box = RemoteGunBox(gun);
+                    if (box != null && BoxInPoseFrame(box, gun, out Vector3 boxCenter, out Quaternion boxRot, out Vector3 half))
+                    {
+                        Vector3 posNow = gun.position;
+                        Quaternion rotNow = gun.rotation;
+                        bool sweep = remote.HasLastGun[h] && (remote.LastGunPos[h] - posNow).sqrMagnitude <= SweepMaxTravel * SweepMaxTravel;
+                        int steps = sweep ? SweepSteps : 0;
+                        for (int s = 0; s <= steps; s++)
+                        {
+                            float f = steps > 0 ? (float)s / steps : 0f; // 0 = this frame, 1 = last frame
+                            Vector3 p = s == 0 ? posNow : Vector3.Lerp(posNow, remote.LastGunPos[h], f);
+                            Quaternion q = s == 0 ? rotNow : Quaternion.Slerp(rotNow, remote.LastGunRot[h], f);
+                            if (!BeamMeetsBox(position, forward, p + q * boxCenter, q * boxRot, half, nearest, out float distance, out bool exact)) continue;
+                            Vector3 point = position + forward * distance;
+                            nearest = distance;
+                            best = new RemoteGunHit
+                            {
+                                Remote = remote,
+                                Hand = h,
+                                GunPart = gun,
+                                Point = point,
+                                PushPoint = posNow + rotNow * (Quaternion.Inverse(q) * (point - p)),
+                                Distance = distance
+                            };
+                            if (s > 0) sweptHits++;
+                            if (!exact) grazeHits++;
+                            break; // the pose nearest this frame that hits
+                        }
+                        continue;
+                    }
+
                     if (!synced)
                     {
                         Physics.SyncTransforms(); // the copies are moved by their transforms
                         synced = true;
                     }
-                    Transform gun = h == 0 ? remote.LGun : remote.RGun;
                     var colliders = gun.GetComponentsInChildren<Collider>(false);
                     if (colliders == null) continue;
                     for (int i = 0; i < colliders.Length; i++)
@@ -2520,11 +2916,42 @@ namespace ExScoringMod
                         if (collider == null || !collider.enabled) continue;
                         if (!collider.Raycast(ray, out RaycastHit hit, nearest)) continue;
                         nearest = hit.distance;
-                        best = new RemoteGunHit { Remote = remote, Hand = h, GunPart = gun, Point = hit.point, Distance = hit.distance };
+                        best = new RemoteGunHit { Remote = remote, Hand = h, GunPart = gun, Point = hit.point, PushPoint = hit.point, Distance = hit.distance };
                     }
                 }
             }
             return best;
+        }
+
+        /// <summary>The gun copy's solid box (the GunX/tricks box copy), or null.</summary>
+        private static BoxCollider RemoteGunBox(Transform gun)
+        {
+            if (gun == null) return null;
+            var boxes = gun.GetComponentsInChildren<BoxCollider>(false);
+            if (boxes == null) return null;
+            for (int i = 0; i < boxes.Length; i++)
+            {
+                BoxCollider box = boxes[i];
+                if (box != null && box.enabled && !box.isTrigger) return box;
+            }
+            return null;
+        }
+
+        /// <summary>From LateTick, after everything this frame: each gun copy's pose, for next frame's sweep.</summary>
+        private static void RememberRemoteGunPoses()
+        {
+            foreach (Remote remote in remotes.Values)
+            {
+                for (int h = 0; h < 2; h++)
+                {
+                    Transform gun = h == 0 ? remote.LGun : remote.RGun;
+                    bool shown = remote.Root != null && remote.Root.activeSelf && gun != null && gun.gameObject.activeSelf;
+                    remote.HasLastGun[h] = shown;
+                    if (!shown) continue;
+                    remote.LastGunPos[h] = gun.position;
+                    remote.LastGunRot[h] = gun.rotation;
+                }
+            }
         }
 
         /// <summary>The native disc test on a copy shifted by offset: the line is moved back by it, the hit forward again.</summary>
@@ -5213,6 +5640,8 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] headshots: connection={MpSession.HeadshotEnabled} effects={Config.HeadshotEffects} sounds={Config.HeadshotSounds} sent={headshotsSent} (own head {selfHeadshotsSent}, thrown gun {thrownHeadshotsSent}{(thrownHeadshotFailed ? " FAILED" : "")}) received={headshotsReceived} postproc={(IsAlive(postprocController) ? "found" : "not looked up / none")}");
             sb.AppendLine($"[MpPresence] my shots on others: rebounds={localRebounds} nativeBeamNotFound={localBeamsNotFound} gunHit connection={MpSession.GunHitEnabled} sent={gunHitsSent} received={gunHitsReceived}");
             sb.AppendLine($"[MpPresence] remote shots: rebounds={ricochetsShown} thrownGunHits={thrownGunHits} particle={(particleCallFailed ? "failed" : (particleCreateAndPlay != null ? "found" : "not looked up"))} thrown L={IsThrown(localGunL)} R={IsThrown(localGunR)}");
+            sb.AppendLine($"[MpPresence] gun hit tests (v2.51): radius={ShotHitRadius * 100f} cm rewoundHits={rewoundHits} graze={grazeHits} swept={sweptHits} liveFallback={liveFallbackTests} history L={ownGunHistory[0].Count} R={ownGunHistory[1].Count}");
+            sb.AppendLine($"[MpPresence] solo gun hit test: {(SoloGunHitTest ? "ON" : "off")} fakeLatency={SoloFakeLatencyMs} ms push={SoloGunHitPush} shots={soloTested} oldHits={soloOldHits} newHits={soloNewHits} (exact {soloNewExact}) pending={soloShots.Count}");
             sb.AppendLine($"[MpPresence] sending: {MpSession.PoseRateHz} Hz ({(MpSession.PoseRateEnabled ? "server" : "default")}), my shots L={localShots[0]} R={localShots[1]}, pull L={PullJson(localGunL)} R={PullJson(localGunR)}");
             bool knuckles = UsingKnuckles();
             sb.AppendLine($"[MpPresence] hands: knuckles={knuckles} handAnim L={JsonDump(HandAnimJson(localKataL, 0, knuckles))} R={JsonDump(HandAnimJson(localKataR, 1, knuckles))} fingers L={JsonDump(FingersJson(localKataL, knuckles))} R={JsonDump(FingersJson(localKataR, knuckles))}");
