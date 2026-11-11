@@ -462,6 +462,12 @@ namespace ExScoringMod
             /// <summary>Coloured with the other hand's colour: otherGunMetalMeshes, otherGunGlowMeshes.</summary>
             public readonly List<int[]> Other = new List<int[]>();
             public int[] Muzzle, Trigger, Form;
+            /// <summary>
+            /// The trigger's travel in its parent's units per unit of Gun.Update's -0.7: 1 on native
+            /// models (exact copies); a custom model's parts hang under a frame at world scale 1 here,
+            /// not under the gun's customModel, so the travel is scaled by that transform's scale (v2.50).
+            /// </summary>
+            public float TriggerScale = 1f;
             /// <summary>Transforms the gun's fire clip moves, with their sampled local poses.</summary>
             public readonly List<int[]> Fire = new List<int[]>();
             public readonly List<Vector3[]> FirePos = new List<Vector3[]>();
@@ -471,6 +477,8 @@ namespace ExScoringMod
             /// <summary>For the dump: what the copy kept beyond meshes, and what Strip removed.</summary>
             public int Animators, Particles, Sprites, Trails, Lines;
             public string Removed = "";
+            /// <summary>v2.50, custom guns: how MpCustomModels sorted the parts.</summary>
+            public string Sorted = "";
         }
 
         /// <summary>v2.49: one remote gun copy's native model parts, resolved from its template's GunParts.</summary>
@@ -1640,7 +1648,7 @@ namespace ExScoringMod
 
             if (rig.Trigger != null)
             {
-                float z = RemoteGunThrown(remote, h) ? 0f : TriggerTravel * Mathf.Clamp01(remote.Pull[h]);
+                float z = RemoteGunThrown(remote, h) ? 0f : TriggerTravel * Mathf.Clamp01(remote.Pull[h]) * rig.Parts.TriggerScale;
                 rig.Trigger.localPosition = new Vector3(0f, 0f, z);
             }
 
@@ -4402,7 +4410,7 @@ namespace ExScoringMod
         {
             return $"{p.Name}: own {p.Own.Count} other {p.Other.Count} muzzle={p.Muzzle != null} trigger={p.Trigger != null} form={p.Form != null} " +
                    $"fire {p.Fire.Count} ({p.FireNote}) kept animators {p.Animators} particles {p.Particles} sprites {p.Sprites} trails {p.Trails} lines {p.Lines} " +
-                   $"removed [{(p.Removed.Length > 0 ? p.Removed : "-")}]";
+                   (p.Sorted.Length > 0 ? $"sorted [{p.Sorted}]" : $"removed [{(p.Removed.Length > 0 ? p.Removed : "-")}]");
         }
 
         /// <summary>
@@ -5067,7 +5075,7 @@ namespace ExScoringMod
             frame.transform.localRotation = Quaternion.Inverse(anchor.rotation) * frameSource.rotation;
             frame.transform.localScale = Divide(worldScale, anchor.lossyScale);
 
-            if (!MpCustomModels.Load(s, objPath, load.Config, frame.transform, gun, owned, out error))
+            if (!MpCustomModels.Load(s, objPath, load.Config, frame.transform, gun, owned, out MpCustomModels.CustomGunParts customParts, out error))
             {
                 UnityEngine.Object.Destroy(root);
                 return null;
@@ -5082,8 +5090,35 @@ namespace ExScoringMod
             {
                 AddFirepointMarker(root, gun, gun.firepointDefaultPosition, anchor);
                 AddGunCollider(root, gun, anchor);
+                RegisterCustomGunParts(root, customParts, gun, load.Name);
             }
             return root;
+        }
+
+        /// <summary>
+        /// v2.50: a custom gun template's parts (MpCustomModels.CustomGunParts, sorted as
+        /// Gun.UpdateGunModel does) as GunParts paths from the template root, so its avatars are
+        /// coloured, their trigger moved and their muzzle kept at rest like a native gun's
+        /// (MakeGunRig, UpdateGun, ApplyGunRigColors). No fire animation: the gun's clips only
+        /// animate the native models' parts. The trigger's travel is scaled by the gun's customModel
+        /// scale (the parts sit under a world-scale-1 frame here).
+        /// </summary>
+        private static void RegisterCustomGunParts(GameObject root, MpCustomModels.CustomGunParts custom, Gun gun, string modelName)
+        {
+            if (root == null || custom == null) return;
+            GunParts parts = new GunParts { Name = root.name + " (\"" + modelName + "\")", FireNote = "custom: none" };
+            Transform rootT = root.transform;
+            foreach (Renderer r in custom.Own) if (r != null) AddPath(parts.Own, rootT, r.transform);
+            foreach (Renderer r in custom.Other) if (r != null) AddPath(parts.Other, rootT, r.transform);
+            if (custom.Muzzle != null) parts.Muzzle = PathFrom(rootT, custom.Muzzle);
+            if (custom.Form != null) parts.Form = PathFrom(rootT, custom.Form);
+            if (custom.Trigger != null) parts.Trigger = PathFrom(rootT, custom.Trigger);
+            Transform customModel = gun != null && gun.customModel != null ? gun.customModel.transform : null;
+            if (customModel != null) parts.TriggerScale = Mathf.Abs(customModel.lossyScale.z);
+            if (parts.Muzzle != null) parts.Animators = 1;
+            parts.Sorted = custom.Summary;
+            gunParts[root.Pointer] = parts;
+            Log($"gun template {GunPartsDump(parts)}");
         }
 
         /// <summary>Every TemplateSweepSeconds: destroys custom templates no avatar has worn for CustomTemplateKeepSeconds.</summary>
@@ -5118,7 +5153,11 @@ namespace ExScoringMod
             {
                 SlotTemplate entry = slotTemplates[key];
                 slotTemplates.Remove(key);
-                if (entry.Template != null) UnityEngine.Object.Destroy(entry.Template);
+                if (entry.Template != null)
+                {
+                    gunParts.Remove(entry.Template.Pointer); // v2.50: a custom gun's parts
+                    UnityEngine.Object.Destroy(entry.Template);
+                }
                 MpCustomModels.DestroyOwned(entry.Owned);
                 Log($"custom template {key} unused, destroyed");
             }

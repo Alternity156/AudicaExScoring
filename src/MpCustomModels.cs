@@ -29,13 +29,16 @@ namespace ExScoringMod
     ///    the world pose), so the frame MpPresence passes has world scale 1 (mirrored for the left
     ///    gun, as UpdateCustomGun's (-1, 1, 1)).
     ///  - Colours, by object name, as AvatarSelector.SetCustomMaterials (heads, bodies) and
-    ///    Gun.UpdateGunModel (guns) do, in-game dumps 2026-11-03:
-    ///      heads/bodies: blades -> bladesMat; glowleft/glowright -> gunGlowMat; colorleft/colorright -> gunMetalMat
-    ///      guns: blades -> Gun.customGunBladesMat; gunmesh -> customModel.metalMat; glow -> customModel.glowMat;
-    ///            muzzle, form, multiplier: markers the game hides or replaces, hidden here
-    ///    The coloured ones get this template's own copies, named TintMetalName / TintGlowName (and
-    ///    the gun's base copy TintBaseName), so MpPresence can give every avatar its own copies and
-    ///    colour them with that player's colours. Nothing shared is ever modified.
+    ///    Gun.UpdateGunModel (guns) do:
+    ///      heads/bodies (in-game dumps 2026-11-03): blades -> bladesMat; glowleft/glowright -> gunGlowMat;
+    ///            colorleft/colorright -> gunMetalMat
+    ///      guns (v2.50, Ghidra and the metadata strings 2026-11-10, ApplyGunMaterials): blades, color,
+    ///            glow, othercolor, otherglow, the fallback rule, muzzle, form, multiplier and trigger;
+    ///            the colour lists, muzzle, form and trigger go back in a CustomGunParts for MpPresence
+    ///    Head and body tints get this template's own copies, named TintMetalName / TintGlowName, so
+    ///    MpPresence can give every avatar its own copies and colour them with that player's colours.
+    ///    Guns are coloured by MpPresence through property blocks on the CustomGunParts lists, as the
+    ///    game does. Nothing shared is ever modified.
     ///  - Mod-only limits: the finished model must fit MaxAvatarSize / MaxGunSize metres and sit within
     ///    the same distance of its anchor; a config offset beyond MaxOffset is clamped.
     /// </summary>
@@ -45,7 +48,29 @@ namespace ExScoringMod
         public const string ReflectionProperty = "_Smoothness"; // LoadMesh: string literal 8478 <- config.reflection
         public const string TintMetalName = "MpTintMetal";
         public const string TintGlowName = "MpTintGlow";
-        public const string TintBaseName = "MpTintBase";
+        /// <summary>v2.50: the gun's base copy. Not an MpTint name: the game leaves base parts untinted unless a colour list holds them.</summary>
+        public const string GunBaseName = "MpGunBase";
+
+        // Gun.UpdateGunModel's object-name prefixes for a custom gun (Ghidra 2026-11-10; the values
+        // read from global-metadata.dat, literals 3895-3903 there, in this order).
+        private const string PrefixMuzzle = "muzzle", MuzzleParentName = "muzzleparent", PrefixForm = "form", PrefixMultiplier = "multiplier";
+        private const string PrefixBlades = "blades", PrefixColor = "color", PrefixGlow = "glow", PrefixOtherColor = "othercolor", PrefixOtherGlow = "otherglow";
+        private const string PrefixTrigger = "trigger";
+
+        /// <summary>
+        /// v2.50: what Gun.UpdateGunModel records on a custom gun model, from this template's parts:
+        /// the renderers coloured with this gun's colour and with the other hand's (GunModel's
+        /// gunMetal/GlowMeshes and otherGunMetal/GlowMeshes), the muzzle, the form indicator and the
+        /// trigger. MpPresence turns it into its GunParts.
+        /// </summary>
+        public class CustomGunParts
+        {
+            public readonly List<Renderer> Own = new List<Renderer>();
+            public readonly List<Renderer> Other = new List<Renderer>();
+            public Transform Muzzle, Form, Trigger;
+            /// <summary>For the log: how the parts were sorted.</summary>
+            public string Summary = "";
+        }
 
         public const float MaxAvatarSize = 3f;   // metres, largest side of a head or body
         public const float MaxGunSize = 1.5f;    // metres, largest side of a gun
@@ -60,9 +85,10 @@ namespace ExScoringMod
         /// material, mesh and texture made for it, to destroy with the template. False with a reason
         /// when it can't be shown; whatever was made is then already destroyed.
         /// </summary>
-        public static bool Load(int slot, string objPath, MpModelConfig config, Transform frame, Gun localGun, List<UnityEngine.Object> owned, out string error)
+        public static bool Load(int slot, string objPath, MpModelConfig config, Transform frame, Gun localGun, List<UnityEngine.Object> owned, out CustomGunParts gunParts, out string error)
         {
             error = null;
+            gunParts = null;
             bool gun = slot == MpCosmetics.SlotLGun || slot == MpCosmetics.SlotRGun;
 
             CustomModelLoader loader = CustomModelLoader.I;
@@ -80,7 +106,7 @@ namespace ExScoringMod
                 return false;
             }
 
-            Material baseMat = new Material(source) { name = gun ? TintBaseName : source.name + " (Mp)" };
+            Material baseMat = new Material(source) { name = gun ? GunBaseName : source.name + " (Mp)" };
             owned.Add(baseMat);
             float shading = Finite(config != null ? config.shading : null, DefaultShading);
             float reflection = Finite(config != null ? config.reflection : null, DefaultReflection);
@@ -136,7 +162,7 @@ namespace ExScoringMod
             {
                 try
                 {
-                    if (gun) ApplyGunMaterials(frame, localGun, owned);
+                    if (gun) gunParts = ApplyGunMaterials(frame, localGun, owned);
                     else ApplyAvatarMaterials(frame, owned);
                     error = CheckSize(frame, gun ? MaxGunSize : MaxAvatarSize);
                 }
@@ -150,6 +176,7 @@ namespace ExScoringMod
             {
                 for (int i = frame.childCount - 1; i >= 0; i--) UnityEngine.Object.Destroy(frame.GetChild(i).gameObject);
                 DestroyOwned(owned);
+                gunParts = null;
                 return false;
             }
             return true;
@@ -256,40 +283,147 @@ namespace ExScoringMod
             }
         }
 
-        /// <summary>Gun.UpdateGunModel's custom-model parts on this template, with copies for the coloured parts.</summary>
-        private static void ApplyGunMaterials(Transform frame, Gun localGun, List<UnityEngine.Object> owned)
+        /// <summary>
+        /// Gun.UpdateGunModel's custom-model branch (Ghidra 2026-11-10) on this template, every
+        /// transform under the frame in hierarchy order, each name checked by StartsWith (ordinal):
+        ///  - muzzle: wrapped in a new "muzzleparent" that takes its scale (the muzzle's own goes to
+        ///    one), given an Animator with gunModels[0].muzzle.animator's controller and
+        ///    gunModels[0].muzzle's material: the game's own muzzle setup. MpPresence leaves it at rest
+        ///    (its Animator's default state, colour x 0.5)
+        ///  - form: gunModels[0].formIndicator's material, shown static (its script only reacts to aim)
+        ///  - multiplier: its renderer off (the game puts a MultiplierDisplay there instead)
+        ///  - then one of: blades -> customGunBladesMat; color -> metalMat (own colour); glow -> glowMat
+        ///    (own); othercolor -> metalMat (other hand's colour); otherglow -> glowMat (other); anything
+        ///    else with a renderer -> the fallback list, keeping its own material
+        ///  - trigger: the fingerTrigger
+        /// When nothing matched the four colour prefixes, the fallback list becomes the own-colour list
+        /// (so a model without colour names is tinted all over, its textures kept). The form indicator
+        /// is left out of it here, since its script would recolour it every frame natively. metalMat
+        /// and glowMat are template copies (TintMetalName / TintGlowName); the colours themselves are
+        /// MpPresence's property blocks.
+        /// </summary>
+        private static CustomGunParts ApplyGunMaterials(Transform frame, Gun localGun, List<UnityEngine.Object> owned)
         {
+            CustomGunParts parts = new CustomGunParts();
             GunModel model = localGun != null ? localGun.customModel : null;
+            GunModel first = localGun != null && localGun.gunModels != null && localGun.gunModels.Length > 0 ? localGun.gunModels[0] : null;
             Material blades = localGun != null ? localGun.customGunBladesMat : null;
             if (blades == null && AvatarSelector.I != null) blades = AvatarSelector.I.bladesMat;
             Material metal = null, glow = null;
+            List<Renderer> fallback = new List<Renderer>();
+            int colored = 0, muzzles = 0, forms = 0, multipliers = 0, bladeParts = 0;
 
-            var renderers = frame.GetComponentsInChildren<Renderer>(true);
-            for (int i = 0; i < renderers.Length; i++)
+            var transforms = frame.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < transforms.Length; i++)
             {
-                Renderer r = renderers[i];
-                if (r == null) continue;
-                string name = r.gameObject.name ?? "";
-                if (name.StartsWith("muzzle", StringComparison.Ordinal) || name.StartsWith("form", StringComparison.Ordinal) || name.StartsWith("multiplier", StringComparison.Ordinal))
+                Transform t = transforms[i];
+                if (t == null || t.Pointer == frame.Pointer) continue;
+                string name = t.gameObject.name ?? "";
+                Renderer r = t.GetComponent<Renderer>();
+
+                if (name.StartsWith(PrefixMuzzle, StringComparison.Ordinal) && name != MuzzleParentName)
                 {
-                    r.enabled = false;
-                    continue;
+                    SetUpMuzzle(t, r, first);
+                    parts.Muzzle = t;
+                    muzzles++;
                 }
-                if (name.StartsWith("blades", StringComparison.Ordinal))
+                if (name.StartsWith(PrefixForm, StringComparison.Ordinal))
                 {
-                    if (blades != null) r.sharedMaterial = blades;
+                    Renderer source = first != null && first.formIndicator != null ? first.formIndicator.GetComponent<Renderer>() : null;
+                    if (r != null && source != null && source.sharedMaterial != null) r.sharedMaterial = source.sharedMaterial;
+                    parts.Form = t;
+                    forms++;
                 }
-                else if (name.StartsWith("gunmesh", StringComparison.Ordinal))
+                if (name.StartsWith(PrefixMultiplier, StringComparison.Ordinal))
                 {
-                    if (metal == null) metal = Copy(model != null ? model.metalMat : null, TintMetalName, owned);
-                    if (metal != null) r.sharedMaterial = metal;
+                    if (r != null) r.enabled = false;
+                    multipliers++;
                 }
-                else if (name.StartsWith("glow", StringComparison.Ordinal))
+
+                if (r != null)
                 {
-                    if (glow == null) glow = Copy(model != null ? model.glowMat : null, TintGlowName, owned);
-                    if (glow != null) r.sharedMaterial = glow;
+                    if (name.StartsWith(PrefixBlades, StringComparison.Ordinal))
+                    {
+                        if (blades != null) r.sharedMaterial = blades;
+                        bladeParts++;
+                    }
+                    else if (name.StartsWith(PrefixColor, StringComparison.Ordinal))
+                    {
+                        if (metal == null) metal = Copy(model != null ? model.metalMat : null, TintMetalName, owned);
+                        if (metal != null) r.sharedMaterial = metal;
+                        parts.Own.Add(r);
+                        colored++;
+                    }
+                    else if (name.StartsWith(PrefixGlow, StringComparison.Ordinal))
+                    {
+                        if (glow == null) glow = Copy(model != null ? model.glowMat : null, TintGlowName, owned);
+                        if (glow != null) r.sharedMaterial = glow;
+                        parts.Own.Add(r);
+                        colored++;
+                    }
+                    else if (name.StartsWith(PrefixOtherColor, StringComparison.Ordinal))
+                    {
+                        if (metal == null) metal = Copy(model != null ? model.metalMat : null, TintMetalName, owned);
+                        if (metal != null) r.sharedMaterial = metal;
+                        parts.Other.Add(r);
+                        colored++;
+                    }
+                    else if (name.StartsWith(PrefixOtherGlow, StringComparison.Ordinal))
+                    {
+                        if (glow == null) glow = Copy(model != null ? model.glowMat : null, TintGlowName, owned);
+                        if (glow != null) r.sharedMaterial = glow;
+                        parts.Other.Add(r);
+                        colored++;
+                    }
+                    else if (!name.StartsWith(PrefixForm, StringComparison.Ordinal))
+                    {
+                        fallback.Add(r);
+                    }
                 }
+
+                if (name.StartsWith(PrefixTrigger, StringComparison.Ordinal)) parts.Trigger = t;
             }
+
+            bool usedFallback = colored == 0;
+            if (usedFallback) parts.Own.AddRange(fallback);
+            parts.Summary = $"own {parts.Own.Count}{(usedFallback ? " (fallback: no color/glow names)" : "")} other {parts.Other.Count} blades {bladeParts} " +
+                            $"muzzle {muzzles} form {forms} multiplier {multipliers} trigger={(parts.Trigger != null ? parts.Trigger.name : "-")}";
+            return parts;
+        }
+
+        /// <summary>
+        /// The game's custom muzzle (Gun.UpdateGunModel): a new "muzzleparent" under the muzzle's
+        /// parent takes the muzzle's scale and the muzzle goes under it at scale one, so the muzzle
+        /// Animator's curves work around it as on the default model. The wrapper also takes the
+        /// muzzle's local position and rotation (the muzzle's own become identity), keeping it where
+        /// it was. Then the Animator with the default muzzle's controller, and that muzzle's material.
+        /// </summary>
+        private static void SetUpMuzzle(Transform muzzle, Renderer r, GunModel first)
+        {
+            Transform parent = muzzle.parent;
+            GameObject wrapper = new GameObject(MuzzleParentName);
+            wrapper.layer = muzzle.gameObject.layer;
+            Transform w = wrapper.transform;
+            w.SetParent(parent, false);
+            w.localPosition = muzzle.localPosition;
+            w.localRotation = muzzle.localRotation;
+            w.localScale = muzzle.localScale;
+            w.SetSiblingIndex(muzzle.GetSiblingIndex());
+            muzzle.SetParent(w, false);
+            muzzle.localPosition = Vector3.zero;
+            muzzle.localRotation = Quaternion.identity;
+            muzzle.localScale = Vector3.one;
+
+            Muzzle source = first != null ? first.muzzle : null;
+            RuntimeAnimatorController controller = source != null && source.animator != null ? source.animator.runtimeAnimatorController : null;
+            if (controller != null)
+            {
+                Animator animator = muzzle.gameObject.GetComponent<Animator>();
+                if (animator == null) animator = muzzle.gameObject.AddComponent<Animator>();
+                animator.runtimeAnimatorController = controller;
+            }
+            Renderer sourceRenderer = source != null ? source.GetComponent<Renderer>() : null;
+            if (r != null && sourceRenderer != null && sourceRenderer.sharedMaterial != null) r.sharedMaterial = sourceRenderer.sharedMaterial;
         }
 
         /// <summary>Null when the model fits within limit metres (largest side, and its centre from the anchor).</summary>
