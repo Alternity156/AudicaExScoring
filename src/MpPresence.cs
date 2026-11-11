@@ -51,8 +51,9 @@ namespace ExScoringMod
     /// gun's state between poses captured in game from the glove itself (GlovePoses: open, closed
     /// on the gun, closed with the gun thrown, fist with the gun thrown, and the index finger while
     /// spinning). Otherwise the normal hand shows and its Animator gets KataHand.UpdateAnimStates'
-    /// values from HandAnim and the pull. Neither: the rest pose. After each remote shot the gun
-    /// copy's gun_slide replays the game's gun_fire clip movement (sampled once from the local gun).
+    /// values from HandAnim and the pull. Neither: the rest pose. After each remote shot a native gun
+    /// copy replays what the game's gun_fire clip moves on that model (the slide on Gun1; sampled per
+    /// template from the local gun, v2.49), and its trigger follows the pull (UpdateGun).
     ///
     /// Each shot is shown the way the game shows its own (Gun.Fire, PlayShot): the success beam
     /// from the gun copy's firepoint (a marker placed from the local gun's firepoint), the muzzle
@@ -120,11 +121,17 @@ namespace ExScoringMod
     /// The copies are made under an inactive holder (so no Awake runs and the game's singletons
     /// stay untouched) and stripped of every component but Transform / MeshFilter / MeshRenderer /
     /// SkinnedMeshRenderer (plus the hands' Animator); muzzle, form indicator and multiplier display objects are removed.
+    /// v2.49: native gun models (Gun1 and the built-ins) are built by MakeGunTemplate instead, which also
+    /// keeps the model's muzzle (at rest), form indicator (static), Animators, particles, sprites,
+    /// trails and lines, and records its colour lists, trigger and fire-clip transforms (GunParts).
     /// Head and body go to layer 0 (the local ones sit on ThirdPersonAvatar, which the headset
     /// never renders); hands and guns keep their layers. All are visible to the spectator camera.
     ///
     /// Gun colours: the remote gun copies get their own materials; the ones the game tints
     /// (GunRight/GunLeft metal, GunGlowRight/GunGlowLeft glow) get _Color = that player's colour.
+    /// v2.49: on native models, GunModel.UpdateColor's lists on top, through a property block on _Color:
+    /// own colour (metal, glow, tinted particles), the other hand's colour (otherGun*), and the muzzle
+    /// at rest (colour x 0.5).
     ///
     /// Body: TorsoTrack.Update's math on the remote head and hands (Ghidra):
     ///   dir = (lHand - head) + (rHand - head) + head.forward, flattened, normalised
@@ -269,12 +276,17 @@ namespace ExScoringMod
         private const float NativeBeamMatchDistance = 0.3f; // native's beam starts this close to the firepoint
         private const float GunHitSendCooldown = 0.04f;  // per gun; the game fires at most every 0.05 s per hand
 
-        // Hand animation (v2.42) and the gun slide, the game's own numbers (Ghidra / in-game dumps, 2026-10-30).
+        // Hand animation (v2.42) and the gun's fire animation, the game's own numbers (Ghidra / in-game dumps, 2026-10-30).
         private const float HandBlendRate = 20f;         // KataHand.INPUT_RATE_CHANGE: a blend moves 20 per second
         private const int KnucklesHardware = 4;          // VRHardwareSetup hardware 4 = Knuckles
         private const string GunFireClipName = "gun_fire";
-        private const string SlideName = "gun_slide";    // under the default model (tricks/mesh/Gun1/gun_slide)
-        private const int SlideSamplesPerSecond = 90;
+        private const int FireSamplesPerSecond = 90;
+
+        // v2.49 native gun models (Gun1 and the built-ins), Ghidra 2026-11-10.
+        private const float TriggerTravel = -0.7f;       // Gun.Update: fingerTrigger.localPosition = (0, 0, -0.7 x pull)
+        private const float MuzzleOffFactor = 0.5f;      // GunModel.UpdateColor: muzzle.offColor = colour x 0.5 (alpha kept)
+        private const float FireMoveEpsilon = 0.00001f;  // a transform the fire clip moves less than this (local units) is left alone
+        private const float FireTurnEpsilon = 0.01f;     // degrees
 
         // Knuckles glove on remote hands (v2.42): the gun counts as thrown once its pose is this far
         // from the hand (at rest it sits a few cm away, spins included), eased at this rate per second.
@@ -380,6 +392,14 @@ namespace ExScoringMod
             "Transform", "RectTransform", "MeshFilter", "MeshRenderer", "SkinnedMeshRenderer"
         };
 
+        // v2.49: what a native gun model's copy also keeps (its own animation and effects, which run on
+        // their own natively). Objects carrying these are no longer removed whole there; the muzzle
+        // and form indicator objects are kept too (StripRules.KeepObjects), only their scripts go.
+        private static readonly HashSet<string> GunModelKeepTypes = new HashSet<string>
+        {
+            "Animator", "Animation", "ParticleSystem", "ParticleSystemRenderer", "SpriteRenderer", "TrailRenderer", "LineRenderer"
+        };
+
         private const int PartHead = 0, PartLHand = 1, PartRHand = 2, PartLGun = 3, PartRGun = 4, PartCount = 5;
 
         private class Sample
@@ -427,6 +447,61 @@ namespace ExScoringMod
             /// <summary>For the debug dump: "anim", "glove" or "-".</summary>
             public string Mode = "-";
             public float LastSpin;
+        }
+
+        /// <summary>
+        /// v2.49: the parts of a native gun model's template (Gun1 or a built-in), read from its
+        /// GunModel before stripping, as sibling-index paths from the template root (Instantiate keeps
+        /// the order, so they resolve on every avatar copy). Built once per template (MakeGunTemplate).
+        /// </summary>
+        private class GunParts
+        {
+            public string Name;
+            /// <summary>Coloured with this gun's colour: gunMetalMeshes, gunGlowMeshes and tintedParticles' renderers.</summary>
+            public readonly List<int[]> Own = new List<int[]>();
+            /// <summary>Coloured with the other hand's colour: otherGunMetalMeshes, otherGunGlowMeshes.</summary>
+            public readonly List<int[]> Other = new List<int[]>();
+            public int[] Muzzle, Trigger, Form;
+            /// <summary>Transforms the gun's fire clip moves, with their sampled local poses.</summary>
+            public readonly List<int[]> Fire = new List<int[]>();
+            public readonly List<Vector3[]> FirePos = new List<Vector3[]>();
+            public readonly List<Quaternion[]> FireRot = new List<Quaternion[]>();
+            public float FireLength;
+            public string FireNote = "-";
+            /// <summary>For the dump: what the copy kept beyond meshes, and what Strip removed.</summary>
+            public int Animators, Particles, Sprites, Trails, Lines;
+            public string Removed = "";
+        }
+
+        /// <summary>v2.49: one remote gun copy's native model parts, resolved from its template's GunParts.</summary>
+        private class GunRig
+        {
+            public GunParts Parts;
+            public readonly List<Renderer> Own = new List<Renderer>();
+            public readonly List<Renderer> Other = new List<Renderer>();
+            public readonly List<Renderer> Muzzle = new List<Renderer>();
+            public Transform Trigger;
+            public Transform[] Fire;
+            public Vector3[] FireRestPos;
+            public Quaternion[] FireRestRot;
+            /// <summary>Time.time of the last shot, or -1 while the fire animation is at rest.</summary>
+            public float FireStart = -1f;
+        }
+
+        /// <summary>Extra keeps for Strip: objects never removed whole, and component types kept anywhere. Counts what it removes.</summary>
+        private class StripRules
+        {
+            public readonly HashSet<IntPtr> KeepObjects = new HashSet<IntPtr>();
+            public HashSet<string> KeepTypes;
+            public readonly Dictionary<string, int> Removed = new Dictionary<string, int>();
+        }
+
+        /// <summary>A transform the fire clip moves, while sampling (on the local gun).</summary>
+        private class FireSample
+        {
+            public Transform Source;
+            public Vector3[] Pos;
+            public Quaternion[] Rot;
         }
 
         // ── Knuckles glove poses (v2.42) ──
@@ -642,13 +717,11 @@ namespace ExScoringMod
             /// <summary>Interpolated trigger pull per hand, 0..1 (for the finger animation).</summary>
             public readonly float[] Pull = new float[2];
 
-            // v2.42 hand animation, and the gun slide replayed on each shot (0 = left, 1 = right).
+            // v2.42 hand animation (0 = left, 1 = right).
             public readonly HandRig[] Hands = new HandRig[2];
-            public readonly Transform[] Slide = new Transform[2];
-            public readonly Vector3[] SlideRestPos = new Vector3[2];
-            public readonly Quaternion[] SlideRestRot = new Quaternion[2];
-            /// <summary>Time.time of the last shot per hand, or -1 while the slide is at rest.</summary>
-            public readonly float[] SlideStart = { -1f, -1f };
+            // v2.49: the native gun model parts per hand (null for custom guns): colours, trigger and
+            // the fire animation replayed on each shot.
+            public readonly GunRig[] Guns = new GunRig[2];
 
             // v2.41 headshots: Time.time the effect started (-1 = none), the renderers it colours
             // (collected on the first one), and when this player last reported hitting this one.
@@ -741,10 +814,10 @@ namespace ExScoringMod
         private static readonly int[] gloveBonesFound = new int[2];
         // Reused per finger while posing a glove.
         private static readonly float[] gloveHeld = new float[5], gloveSeg1 = new float[5], gloveSeg2 = new float[5];
-        // The gun slide's movement in the game's gun_fire clip, sampled once (null when unavailable).
-        private static Vector3[] slidePos;
-        private static Quaternion[] slideRot;
-        private static float slideLength;
+        // v2.49: each native gun model template's parts, by the template root's pointer, and the
+        // property block that colours them.
+        private static readonly Dictionary<IntPtr, GunParts> gunParts = new Dictionary<IntPtr, GunParts>();
+        private static MaterialPropertyBlock gunBlock;
         // Knuckles: this player's own eased "spin" per hand, since the game doesn't compute one there.
         private static readonly float[] localSpin = new float[2];
         // The hand Animator's parameter and layer names, read once from KataHand's statics.
@@ -1403,12 +1476,12 @@ namespace ExScoringMod
                 for (int h = 0; h < 2; h++)
                 {
                     UpdateHand(remote, h);
-                    UpdateSlide(remote, h);
+                    UpdateGun(remote, h);
                 }
             }
         }
 
-        // ── Hand animation (v2.42) and gun slide ──
+        // ── Hand animation (v2.42) and native gun parts (v2.49) ──
 
         /// <summary>
         /// Poses one remote hand copy from this frame's interpolated values (19.15.4):
@@ -1550,30 +1623,56 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Replays the game's gun_fire slide movement (sampled once, SampleGunSlide) on a remote gun
-        /// copy's gun_slide after each of its shots, then puts it back at rest. The recoil kick
-        /// itself (tricks/mesh) already arrives with the sender's gun pose.
+        /// v2.49, a remote native gun model each frame:
+        ///  - the trigger as Gun.Update moves it: fingerTrigger.localPosition = (0, 0, -0.7 x pull),
+        ///    0 while the gun is thrown (the game skips the pull while using physics)
+        ///  - after each shot, the transforms the gun's fire clip moves (sampled per template,
+        ///    MakeGunTemplate) replay their sampled poses, then go back to rest. Applied after the
+        ///    trigger, so the clip wins where both touch the same transform (the Animator runs after
+        ///    Gun.Update natively). The recoil kick itself (tricks/mesh) arrives with the sender's pose.
+        /// The muzzle stays at rest (its Animator in its default state, offColor from ApplyColors).
         /// </summary>
-        private static void UpdateSlide(Remote remote, int h)
+        private static void UpdateGun(Remote remote, int h)
         {
-            Transform slide = remote.Slide[h];
-            float start = remote.SlideStart[h];
-            if (slide == null || start < 0f) return;
+            GunRig rig = remote.Guns[h];
+            Transform part = h == 0 ? remote.LGun : remote.RGun;
+            if (rig == null || part == null || !part.gameObject.activeInHierarchy) return;
 
-            float t = Time.time - start;
-            if (slidePos == null || slidePos.Length < 2 || t >= slideLength)
+            if (rig.Trigger != null)
             {
-                slide.localPosition = remote.SlideRestPos[h];
-                slide.localRotation = remote.SlideRestRot[h];
-                remote.SlideStart[h] = -1f;
+                float z = RemoteGunThrown(remote, h) ? 0f : TriggerTravel * Mathf.Clamp01(remote.Pull[h]);
+                rig.Trigger.localPosition = new Vector3(0f, 0f, z);
+            }
+
+            float start = rig.FireStart;
+            if (rig.Fire == null || rig.Fire.Length == 0 || start < 0f) return;
+            GunParts parts = rig.Parts;
+            float length = parts.FireLength;
+            float t = Time.time - start;
+            if (t >= length || length <= 0f)
+            {
+                for (int i = 0; i < rig.Fire.Length; i++)
+                {
+                    if (rig.Fire[i] == null) continue;
+                    rig.Fire[i].localPosition = rig.FireRestPos[i];
+                    rig.Fire[i].localRotation = rig.FireRestRot[i];
+                }
+                rig.FireStart = -1f;
                 return;
             }
 
-            float at = Mathf.Clamp01(t / slideLength) * (slidePos.Length - 1);
-            int i0 = Mathf.Min((int)at, slidePos.Length - 2);
-            float f = at - i0;
-            slide.localPosition = Vector3.Lerp(slidePos[i0], slidePos[i0 + 1], f);
-            slide.localRotation = Quaternion.Slerp(slideRot[i0], slideRot[i0 + 1], f);
+            for (int i = 0; i < rig.Fire.Length; i++)
+            {
+                Transform target = rig.Fire[i];
+                Vector3[] pos = parts.FirePos[i];
+                Quaternion[] rot = parts.FireRot[i];
+                if (target == null || pos.Length < 2) continue;
+                float at = Mathf.Clamp01(t / length) * (pos.Length - 1);
+                int i0 = Mathf.Min((int)at, pos.Length - 2);
+                float f = at - i0;
+                target.localPosition = Vector3.Lerp(pos[i0], pos[i0 + 1], f);
+                target.localRotation = Quaternion.Slerp(rot[i0], rot[i0 + 1], f);
+            }
         }
 
         // ── Name labels ──
@@ -1939,7 +2038,7 @@ namespace ExScoringMod
 
             if (IsAlive(fx.Muzzle)) fx.Muzzle.Play(position, forward, roll);
             PlayBeamDust(local, hand, position, forward);
-            remote.SlideStart[hand] = Time.time; // the gun slide's fire movement (UpdateSlide)
+            if (remote.Guns[hand] != null) remote.Guns[hand].FireStart = Time.time; // the model's fire animation (UpdateGun)
         }
 
         /// <summary>Gun.Fire's placement of a pooled beam, then GunBeam.Fire.</summary>
@@ -2833,6 +2932,39 @@ namespace ExScoringMod
 
             foreach (Material mat in remote.TintLeft) if (mat != null) mat.SetColor("_Color", left);
             foreach (Material mat in remote.TintRight) if (mat != null) mat.SetColor("_Color", right);
+
+            // v2.49: native gun models, as GunModel.UpdateColor does it (a property block on _Color,
+            // which wins over the material tints above).
+            ApplyGunRigColors(remote.Guns[0], left, right);
+            ApplyGunRigColors(remote.Guns[1], right, left);
+        }
+
+        /// <summary>
+        /// GunModel.UpdateColor (Ghidra 2026-11-10) on a remote native gun: gunMetalMeshes,
+        /// gunGlowMeshes and tintedParticles' renderers get this gun's colour, otherGunMetalMeshes and
+        /// otherGunGlowMeshes the other hand's, through a MaterialPropertyBlock on _Color (string
+        /// literal 5740, as SetMaterialColor). Then the muzzle at rest, as Muzzle.UpdateMuzzle with
+        /// mMuzzle = 0: offColor = colour x 0.5 (alpha kept) on every renderer under it; set last, since
+        /// the game sets it every frame after the colour change.
+        /// </summary>
+        private static void ApplyGunRigColors(GunRig rig, Color own, Color other)
+        {
+            if (rig == null) return;
+            if (gunBlock == null) gunBlock = new MaterialPropertyBlock();
+            SetRendererColor(rig.Own, own);
+            SetRendererColor(rig.Other, other);
+            SetRendererColor(rig.Muzzle, new Color(own.r * MuzzleOffFactor, own.g * MuzzleOffFactor, own.b * MuzzleOffFactor, own.a));
+        }
+
+        private static void SetRendererColor(List<Renderer> renderers, Color color)
+        {
+            if (renderers.Count == 0) return;
+            gunBlock.Clear();
+            gunBlock.SetColor(ColorProperty, color);
+            for (int i = 0; i < renderers.Count; i++)
+            {
+                if (renderers[i] != null) renderers[i].SetPropertyBlock(gunBlock);
+            }
         }
 
         private static Color ToColor(float[] c, Color fallback)
@@ -2869,21 +3001,16 @@ namespace ExScoringMod
                 remote.Body = CopyPart(TemplateFor(remote, MpCosmetics.SlotBody, tplBody), root, "Body");
                 remote.LHand = CopyPart(tplHandL, root, "HandL");
                 remote.RHand = CopyPart(tplHandR, root, "HandR");
-                remote.LGun = CopyPart(TemplateFor(remote, MpCosmetics.SlotLGun, tplGunL), root, "GunL");
-                remote.RGun = CopyPart(TemplateFor(remote, MpCosmetics.SlotRGun, tplGunR), root, "GunR");
+                GameObject gunTplL = TemplateFor(remote, MpCosmetics.SlotLGun, tplGunL);
+                GameObject gunTplR = TemplateFor(remote, MpCosmetics.SlotRGun, tplGunR);
+                remote.LGun = CopyPart(gunTplL, root, "GunL");
+                remote.RGun = CopyPart(gunTplR, root, "GunR");
                 remote.LFire = remote.LGun.Find(FirepointName);
                 remote.RFire = remote.RGun.Find(FirepointName);
                 remote.Hands[0] = MakeHandRig(remote.LHand);
                 remote.Hands[1] = MakeHandRig(remote.RHand);
-                for (int h = 0; h < 2; h++)
-                {
-                    Transform slide = FindChildNamed(h == 0 ? remote.LGun : remote.RGun, SlideName);
-                    remote.Slide[h] = slide;
-                    remote.SlideStart[h] = -1f;
-                    if (slide == null) continue;
-                    remote.SlideRestPos[h] = slide.localPosition;
-                    remote.SlideRestRot[h] = slide.localRotation;
-                }
+                remote.Guns[0] = MakeGunRig(remote.LGun, gunTplL);
+                remote.Guns[1] = MakeGunRig(remote.RGun, gunTplR);
                 remote.Disc = CopyDisc(root);
                 remote.NameHeadset = CreateNameLabel(root, "NameHeadset", remote.OwnedMaterials);
                 remote.NameSpectator = CreateNameLabel(root, "NameSpectator", remote.OwnedMaterials);
@@ -2991,8 +3118,7 @@ namespace ExScoringMod
             for (int hand = 0; hand < 2; hand++)
             {
                 remote.Hands[hand] = null;
-                remote.Slide[hand] = null;
-                remote.SlideStart[hand] = -1f;
+                remote.Guns[hand] = null; // its renderers and transforms go with the root
             }
 
             foreach (Material mat in remote.OwnedMaterials)
@@ -3742,8 +3868,10 @@ namespace ExScoringMod
             // Keeps its 0.021 scale; template-owned material copies so nothing points at the local
             // gun's instances.
             // (FindGunModel finds nothing mid-throw, so a build then fails above and is retried.)
-            tplGunL = MakeTemplate("TplGunL", GunPoseTransform(localGunL, ref localGunPoseL), gunModelL);
-            tplGunR = MakeTemplate("TplGunR", GunPoseTransform(localGunR, ref localGunPoseR), gunModelR);
+            // v2.49: as a native model (MakeGunTemplate): muzzle, trigger, colours, effects and the
+            // fire animation, which also replays the slide.
+            tplGunL = MakeGunTemplate("TplGunL", GunPoseTransform(localGunL, ref localGunPoseL), gunModelL, localGunL);
+            tplGunR = MakeGunTemplate("TplGunR", GunPoseTransform(localGunR, ref localGunPoseR), gunModelR, localGunR);
             OwnMaterials(tplGunL);
             OwnMaterials(tplGunR);
 
@@ -3751,9 +3879,6 @@ namespace ExScoringMod
             // relative to the same anchor as the model.
             AddFirepointMarker(tplGunL, localGunL, ModelFirepoint(gunModelL.GetComponent<GunModel>(), localGunL), localGunPoseL);
             AddFirepointMarker(tplGunR, localGunR, ModelFirepoint(gunModelR.GetComponent<GunModel>(), localGunR), localGunPoseR);
-
-            // The slide's movement in the game's fire animation, replayed on remote shots.
-            SampleGunSlide(localGunR);
 
             // Gun collisions: the solid collider on tricks, and a kinematic Rigidbody so the copy can
             // be moved every frame. A missing collider only costs the collisions, not the avatar.
@@ -3861,17 +3986,170 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// Records the slide's movement in the game's gun_fire clip (0.62 s), at SlideSamplesPerSecond,
-        /// by sampling the clip on the local gun itself. Every transform under the gun is put back
-        /// afterwards (and the gun's Animator rewrites them this frame anyway), so nothing shows.
-        /// Without the clip or the slide, remote slides just stay at rest.
+        /// v2.49: a gun template from a native GunModel (Gun1 or a built-in), placed like MakeTemplate,
+        /// that keeps what the model shows natively (Ghidra 2026-11-10):
+        ///  - muzzle (GunModel.muzzle): its object, renderers and Animator stay, only the Muzzle script
+        ///    goes. Natively Muzzle.UpdateMuzzle lerps offColor..color by how long the gun has been
+        ///    aimed at a target and sets one Animator bool at 0.9; neither is known for a remote player,
+        ///    so it stays at rest: the bool never set, offColor from ApplyGunRigColors. Switched on, as
+        ///    GunModel.Update does once outside its start scene.
+        ///  - form indicator: its object stays as the prefab has it, without its script (it only reacts
+        ///    to what the player aims at)
+        ///  - fingerTrigger: moved from the pull (UpdateGun)
+        ///  - the colour lists (GunModel.UpdateColor): own colour, other hand's colour
+        ///  - the model's own Animators, legacy Animations, particle systems, sprites, trails and lines
+        ///    (GunModelKeepTypes), which run by themselves natively; tintedParticles get the colour
+        ///  - onlyOnQuest objects switched off (GunModel.Awake on PC)
+        ///  - the transforms the gun's fire animation moves (SampleFireClip: every clip on the gun-level
+        ///    controller tried against this model), replayed on remote shots
+        /// Everything else is stripped as in MakeTemplate. The parts are recorded in gunParts under the
+        /// template root's pointer.
         /// </summary>
-        private static void SampleGunSlide(Gun gun)
+        private static GameObject MakeGunTemplate(string name, Transform anchor, Transform source, Gun gun)
         {
-            slidePos = null;
-            slideRot = null;
-            slideLength = 0f;
-            if (gun == null) return;
+            GunModel model = source != null ? source.GetComponent<GunModel>() : null;
+            if (model == null)
+            {
+                Log($"{name}: no GunModel on {(source != null ? source.name : "null")}, copied without its native parts");
+                return MakeTemplate(name, anchor, source);
+            }
+
+            GameObject root = new GameObject(name);
+            root.transform.SetParent(templateHolder.transform, false);
+            root.transform.localScale = anchor.lossyScale;
+
+            GameObject copy = GameObject.Instantiate(source.gameObject, root.transform);
+            copy.name = source.name;
+            copy.SetActive(true); // the source may be inactive (another model selected locally)
+            copy.transform.localPosition = anchor.InverseTransformPoint(source.position);
+            copy.transform.localRotation = Quaternion.Inverse(anchor.rotation) * source.rotation;
+            copy.transform.localScale = Divide(source.lossyScale, anchor.lossyScale);
+
+            GunParts parts = new GunParts { Name = name + " (" + source.name + ")" };
+            Transform src = source, dst = copy.transform;
+
+            // Right after Instantiate the copy has the source's exact hierarchy, so each part maps by
+            // its sibling-index path. Stripping changes the indices, so the template paths come after.
+            List<Transform> own = new List<Transform>();
+            List<Transform> other = new List<Transform>();
+            AddMappedRenderers(model.gunMetalMeshes, src, dst, own);
+            AddMappedRenderers(model.gunGlowMeshes, src, dst, own);
+            AddMappedRenderers(model.otherGunMetalMeshes, src, dst, other);
+            AddMappedRenderers(model.otherGunGlowMeshes, src, dst, other);
+            // tintedParticles: every particle renderer under each (GunModel.UpdateColor). Read as plain
+            // Components, since this mod never touches the ParticleSystem types (EitherHandFix.cs).
+            Il2CppReferenceArray<Component> tinted = TintedParticles(model);
+            for (int i = 0; tinted != null && i < tinted.Length; i++)
+            {
+                Component ps = tinted[i];
+                if (ps == null) continue;
+                var psRenderers = ps.GetComponentsInChildren<Renderer>(true);
+                for (int j = 0; j < psRenderers.Length; j++)
+                {
+                    if (psRenderers[j] == null || TypeName(psRenderers[j]) != "ParticleSystemRenderer") continue;
+                    Transform mapped = MapToCopy(psRenderers[j].transform, src, dst);
+                    if (mapped != null) own.Add(mapped);
+                }
+            }
+
+            Muzzle muzzle = model.muzzle;
+            FormIndicator form = model.formIndicator;
+            Transform muzzleCopy = muzzle != null ? MapToCopy(muzzle.transform, src, dst) : null;
+            Transform formCopy = form != null ? MapToCopy(form.transform, src, dst) : null;
+            Transform triggerCopy = model.fingerTrigger != null ? MapToCopy(model.fingerTrigger, src, dst) : null;
+
+            if (!model.isQuest)
+            {
+                var questOnly = model.onlyOnQuest;
+                for (int i = 0; questOnly != null && i < questOnly.Length; i++)
+                {
+                    Transform mapped = questOnly[i] != null ? MapToCopy(questOnly[i].transform, src, dst) : null;
+                    if (mapped != null) mapped.gameObject.SetActive(false);
+                }
+            }
+
+            List<FireSample> moving = new List<FireSample>();
+            parts.FireNote = SampleFireClip(gun, source, moving, out parts.FireLength);
+            List<Transform> fireCopies = new List<Transform>();
+            List<FireSample> fireKept = new List<FireSample>();
+            foreach (FireSample sample in moving)
+            {
+                Transform mapped = MapToCopy(sample.Source, src, dst);
+                if (mapped == null) continue;
+                fireCopies.Add(mapped);
+                fireKept.Add(sample);
+            }
+
+            StripRules rules = new StripRules { KeepTypes = GunModelKeepTypes };
+            if (muzzleCopy != null) rules.KeepObjects.Add(muzzleCopy.gameObject.Pointer);
+            if (formCopy != null) rules.KeepObjects.Add(formCopy.gameObject.Pointer);
+            Strip(copy, false, rules);
+
+            // Paths from the template root, now that the hierarchy is final (the firepoint marker and
+            // collider added afterwards go after the model, so they don't shift these).
+            Transform rootT = root.transform;
+            foreach (Transform t in own) AddPath(parts.Own, rootT, t);
+            foreach (Transform t in other) AddPath(parts.Other, rootT, t);
+            if (muzzleCopy != null)
+            {
+                muzzleCopy.gameObject.SetActive(true);
+                parts.Muzzle = PathFrom(rootT, muzzleCopy);
+            }
+            if (formCopy != null) parts.Form = PathFrom(rootT, formCopy);
+            if (triggerCopy != null) parts.Trigger = PathFrom(rootT, triggerCopy);
+            for (int i = 0; i < fireCopies.Count; i++)
+            {
+                int[] path = fireCopies[i] != null ? PathFrom(rootT, fireCopies[i]) : null;
+                if (path == null) continue;
+                parts.Fire.Add(path);
+                parts.FirePos.Add(fireKept[i].Pos);
+                parts.FireRot.Add(fireKept[i].Rot);
+            }
+
+            var kept = copy.GetComponentsInChildren<Component>(true);
+            for (int i = 0; i < kept.Length; i++)
+            {
+                if (kept[i] == null) continue;
+                switch (TypeName(kept[i]))
+                {
+                    case "Animator": case "Animation": parts.Animators++; break;
+                    case "ParticleSystem": parts.Particles++; break;
+                    case "SpriteRenderer": parts.Sprites++; break;
+                    case "TrailRenderer": parts.Trails++; break;
+                    case "LineRenderer": parts.Lines++; break;
+                }
+            }
+            StringBuilder removed = new StringBuilder();
+            foreach (KeyValuePair<string, int> entry in rules.Removed)
+            {
+                if (removed.Length > 0) removed.Append(", ");
+                removed.Append(entry.Key).Append(" x").Append(entry.Value);
+            }
+            parts.Removed = removed.ToString();
+
+            gunParts[root.Pointer] = parts;
+            Log($"gun template {GunPartsDump(parts)}");
+            return root;
+        }
+
+        /// <summary>
+        /// The transforms under model that the gun's fire animation moves, with their local poses at
+        /// FireSamplesPerSecond. The gun-level Animator (Gun.mAnimator, which Gun.Fire triggers) has
+        /// one controller for every model (Gun.UpdateGunModel never swaps it), so each of its clips is
+        /// sampled against this model, on the local gun itself (the model may be inactive there). Every
+        /// transform under the Animator is put back before each clip and at the end (and the gun's
+        /// Animator rewrites them this frame anyway), so nothing shows. The clip used:
+        ///  - gun_fire, when it moves anything on this model
+        ///  - otherwise the clip with "fire" or "shoot" in its name that moves the most
+        ///  - otherwise none (a clip that only moves the model for a spin or an idle mustn't replay on shots)
+        /// Every clip's name, length and moving count is logged, so a model with its own fire clip shows
+        /// up. The clip's paths are relative to the Animator, so the model must be under it (not mid-throw).
+        /// Returns a note for the dump.
+        /// </summary>
+        private static string SampleFireClip(Gun gun, Transform model, List<FireSample> moving, out float length)
+        {
+            length = 0f;
+            if (gun == null || model == null) return "no gun";
 
             Transform[] all = null;
             Vector3[] savedPos = null;
@@ -3881,27 +4159,14 @@ namespace ExScoringMod
                 Animator animator = gun.GetComponent<Animator>();
                 if (animator == null) animator = gun.gameObject.GetComponentInChildren<Animator>(true);
                 RuntimeAnimatorController controller = animator != null ? animator.runtimeAnimatorController : null;
-                Transform model = FindGunModel(gun.transform);
-                Transform slide = model != null ? FindChildNamed(model, SlideName) : null;
-                if (controller == null || slide == null)
-                {
-                    Log($"gun slide: {(controller == null ? "no gun Animator controller" : "no " + SlideName)}, remote slides stay at rest");
-                    return;
-                }
+                if (controller == null) return "no gun Animator controller";
 
-                AnimationClip clip = null;
+                GameObject animated = animator.gameObject; // the clips' paths are relative to the Animator
+                if (!model.IsChildOf(animated.transform)) return "model not under the gun's Animator (thrown?)";
+
                 var clips = controller.animationClips;
-                for (int i = 0; clips != null && i < clips.Length; i++)
-                {
-                    if (clips[i] != null && clips[i].name == GunFireClipName) clip = clips[i];
-                }
-                if (clip == null || clip.length <= 0f)
-                {
-                    Log($"gun slide: no {GunFireClipName} clip, remote slides stay at rest");
-                    return;
-                }
+                if (clips == null || clips.Length == 0) return "no clips";
 
-                GameObject animated = animator.gameObject; // the clip's paths are relative to the Animator
                 var transforms = animated.GetComponentsInChildren<Transform>(true);
                 all = new Transform[transforms.Length];
                 savedPos = new Vector3[all.Length];
@@ -3912,42 +4177,232 @@ namespace ExScoringMod
                     savedPos[i] = all[i].localPosition;
                     savedRot[i] = all[i].localRotation;
                 }
+                var modelTransforms = model.GetComponentsInChildren<Transform>(true);
 
-                int count = Mathf.Max(2, Mathf.CeilToInt(clip.length * SlideSamplesPerSecond) + 1);
-                Vector3[] positions = new Vector3[count];
-                Quaternion[] rotations = new Quaternion[count];
-                for (int i = 0; i < count; i++)
+                // A controller lists a clip once per state using it.
+                HashSet<IntPtr> seen = new HashSet<IntPtr>();
+                StringBuilder report = new StringBuilder();
+                List<FireSample> best = null;
+                string bestName = null;
+                int bestRank = 0; // 2 = gun_fire, 1 = a "fire"/"shoot" clip
+                float bestLength = 0f;
+                for (int c = 0; c < clips.Length; c++)
                 {
-                    clip.SampleAnimation(animated, clip.length * i / (count - 1));
-                    positions[i] = slide.localPosition;
-                    rotations[i] = slide.localRotation;
-                }
+                    AnimationClip clip = clips[c];
+                    if (clip == null || !seen.Add(clip.Pointer)) continue;
+                    if (clip.length <= 0f)
+                    {
+                        report.Append(report.Length > 0 ? ", " : "").Append(clip.name).Append(" (empty)");
+                        continue;
+                    }
 
-                float travel = 0f;
-                for (int i = 0; i < count; i++) travel = Mathf.Max(travel, (positions[i] - positions[0]).magnitude);
-                slidePos = positions;
-                slideRot = rotations;
-                slideLength = clip.length;
-                Log($"gun slide: {count} samples over {clip.length:F3} s, travel {travel:F3} (local units)");
+                    RestorePoses(all, savedPos, savedRot);
+                    List<FireSample> found = SampleClip(clip, animated, modelTransforms);
+                    report.Append(report.Length > 0 ? ", " : "").Append($"{clip.name} {clip.length:F2}s moves {found.Count}");
+
+                    string lower = clip.name.ToLowerInvariant();
+                    int rank = clip.name == GunFireClipName ? 2 : (lower.Contains("fire") || lower.Contains("shoot") ? 1 : 0);
+                    if (rank == 0 || found.Count == 0) continue;
+                    if (best == null || rank > bestRank || (rank == bestRank && found.Count > best.Count))
+                    {
+                        best = found;
+                        bestName = clip.name;
+                        bestRank = rank;
+                        bestLength = clip.length;
+                    }
+                }
+                Log($"fire clips on {model.name}: {report}");
+
+                if (best == null) return "no fire clip moves this model";
+                moving.AddRange(best);
+                length = bestLength;
+                return $"{bestName}: {best.Count} moving over {bestLength:F3} s";
             }
             catch (Exception ex)
             {
-                MelonLogger.Log($"[MpPresence] sampling the gun slide failed: {ex}");
-                slidePos = null;
-                slideRot = null;
+                MelonLogger.Log($"[MpPresence] sampling the fire clips on {model.name} failed: {ex}");
+                moving.Clear();
+                length = 0f;
+                return "failed";
             }
             finally
             {
-                if (all != null)
+                if (all != null) RestorePoses(all, savedPos, savedRot);
+            }
+        }
+
+        /// <summary>One clip sampled at FireSamplesPerSecond: the model's transforms it moves, with their poses.</summary>
+        private static List<FireSample> SampleClip(AnimationClip clip, GameObject animated, Il2CppArrayBase<Transform> modelTransforms)
+        {
+            int count = Mathf.Max(2, Mathf.CeilToInt(clip.length * FireSamplesPerSecond) + 1);
+            Vector3[][] pos = new Vector3[modelTransforms.Length][];
+            Quaternion[][] rot = new Quaternion[modelTransforms.Length][];
+            for (int j = 0; j < modelTransforms.Length; j++)
+            {
+                pos[j] = new Vector3[count];
+                rot[j] = new Quaternion[count];
+            }
+            for (int i = 0; i < count; i++)
+            {
+                clip.SampleAnimation(animated, clip.length * i / (count - 1));
+                for (int j = 0; j < modelTransforms.Length; j++)
                 {
-                    for (int i = 0; i < all.Length; i++)
-                    {
-                        if (all[i] == null) continue;
-                        all[i].localPosition = savedPos[i];
-                        all[i].localRotation = savedRot[i];
-                    }
+                    if (modelTransforms[j] == null) continue;
+                    pos[j][i] = modelTransforms[j].localPosition;
+                    rot[j][i] = modelTransforms[j].localRotation;
                 }
             }
+
+            List<FireSample> found = new List<FireSample>();
+            for (int j = 0; j < modelTransforms.Length; j++)
+            {
+                if (modelTransforms[j] == null) continue;
+                bool moves = false;
+                for (int i = 1; i < count && !moves; i++)
+                {
+                    moves = (pos[j][i] - pos[j][0]).sqrMagnitude > FireMoveEpsilon * FireMoveEpsilon
+                            || Quaternion.Angle(rot[j][i], rot[j][0]) > FireTurnEpsilon;
+                }
+                if (moves) found.Add(new FireSample { Source = modelTransforms[j], Pos = pos[j], Rot = rot[j] });
+            }
+            return found;
+        }
+
+        private static void RestorePoses(Transform[] all, Vector3[] savedPos, Quaternion[] savedRot)
+        {
+            for (int i = 0; i < all.Length; i++)
+            {
+                if (all[i] == null) continue;
+                all[i].localPosition = savedPos[i];
+                all[i].localRotation = savedRot[i];
+            }
+        }
+
+        /// <summary>
+        /// v2.49: a remote gun copy's native parts, from its template's GunParts (null for a template
+        /// without, such as a custom model). Its Animators get root motion off and always animate,
+        /// like the hands.
+        /// </summary>
+        private static GunRig MakeGunRig(Transform part, GameObject template)
+        {
+            if (part == null || template == null || !gunParts.TryGetValue(template.Pointer, out GunParts parts)) return null;
+
+            GunRig rig = new GunRig { Parts = parts };
+            foreach (int[] path in parts.Own) AddResolvedRenderer(part, path, rig.Own);
+            foreach (int[] path in parts.Other) AddResolvedRenderer(part, path, rig.Other);
+            Transform muzzle = ResolvePath(part, parts.Muzzle);
+            if (muzzle != null)
+            {
+                // Muzzle.Init: every renderer under it.
+                var renderers = muzzle.GetComponentsInChildren<Renderer>(true);
+                for (int i = 0; i < renderers.Length; i++) if (renderers[i] != null) rig.Muzzle.Add(renderers[i]);
+            }
+            rig.Trigger = ResolvePath(part, parts.Trigger);
+
+            rig.Fire = new Transform[parts.Fire.Count];
+            rig.FireRestPos = new Vector3[parts.Fire.Count];
+            rig.FireRestRot = new Quaternion[parts.Fire.Count];
+            for (int i = 0; i < parts.Fire.Count; i++)
+            {
+                Transform t = ResolvePath(part, parts.Fire[i]);
+                rig.Fire[i] = t;
+                if (t == null) continue;
+                rig.FireRestPos[i] = t.localPosition;
+                rig.FireRestRot[i] = t.localRotation;
+            }
+
+            var animators = part.GetComponentsInChildren<Animator>(true);
+            for (int i = 0; i < animators.Length; i++)
+            {
+                if (animators[i] == null) continue;
+                animators[i].applyRootMotion = false;
+                animators[i].cullingMode = AnimatorCullingMode.AlwaysAnimate;
+            }
+            return rig;
+        }
+
+        /// <summary>
+        /// GunModel.tintedParticles as plain Components, through Il2Cpp reflection, so the
+        /// ParticleSystem type is never touched. Null when there are none or the field can't be read.
+        /// </summary>
+        private static Il2CppReferenceArray<Component> TintedParticles(GunModel model)
+        {
+            try
+            {
+                var field = model.GetIl2CppType().GetField("tintedParticles",
+                    Il2CppSystem.Reflection.BindingFlags.Public | Il2CppSystem.Reflection.BindingFlags.NonPublic | Il2CppSystem.Reflection.BindingFlags.Instance);
+                Il2CppSystem.Object value = field != null ? field.GetValue(model) : null;
+                return value != null ? new Il2CppReferenceArray<Component>(value.Pointer) : null;
+            }
+            catch (Exception ex)
+            {
+                Log($"tintedParticles unreadable on {model.name}: {ex.Message}");
+                return null;
+            }
+        }
+
+        private static void AddMappedRenderers(Il2CppReferenceArray<Renderer> renderers, Transform src, Transform dst, List<Transform> into)
+        {
+            for (int i = 0; renderers != null && i < renderers.Length; i++)
+            {
+                Transform mapped = renderers[i] != null ? MapToCopy(renderers[i].transform, src, dst) : null;
+                if (mapped != null) into.Add(mapped);
+            }
+        }
+
+        private static void AddResolvedRenderer(Transform part, int[] path, List<Renderer> into)
+        {
+            Transform t = ResolvePath(part, path);
+            Renderer renderer = t != null ? t.GetComponent<Renderer>() : null;
+            if (renderer != null) into.Add(renderer);
+        }
+
+        private static void AddPath(List<int[]> into, Transform root, Transform t)
+        {
+            if (t == null) return; // stripped
+            int[] path = PathFrom(root, t);
+            if (path != null) into.Add(path);
+        }
+
+        /// <summary>The transform at the same place under dst as t is under src (an untouched copy), or null.</summary>
+        private static Transform MapToCopy(Transform t, Transform src, Transform dst)
+        {
+            return ResolvePath(dst, PathFrom(src, t));
+        }
+
+        /// <summary>Sibling indices from root down to t (empty for root itself), or null when t isn't under root.</summary>
+        private static int[] PathFrom(Transform root, Transform t)
+        {
+            if (root == null || t == null) return null;
+            List<int> path = new List<int>();
+            Transform at = t;
+            while (at != null && at.Pointer != root.Pointer)
+            {
+                path.Add(at.GetSiblingIndex());
+                at = at.parent;
+            }
+            if (at == null) return null;
+            path.Reverse();
+            return path.ToArray();
+        }
+
+        private static Transform ResolvePath(Transform root, int[] path)
+        {
+            if (root == null || path == null) return null;
+            Transform at = root;
+            for (int i = 0; i < path.Length; i++)
+            {
+                if (path[i] < 0 || path[i] >= at.childCount) return null;
+                at = at.GetChild(path[i]);
+            }
+            return at;
+        }
+
+        private static string GunPartsDump(GunParts p)
+        {
+            return $"{p.Name}: own {p.Own.Count} other {p.Other.Count} muzzle={p.Muzzle != null} trigger={p.Trigger != null} form={p.Form != null} " +
+                   $"fire {p.Fire.Count} ({p.FireNote}) kept animators {p.Animators} particles {p.Particles} sprites {p.Sprites} trails {p.Trails} lines {p.Lines} " +
+                   $"removed [{(p.Removed.Length > 0 ? p.Removed : "-")}]";
         }
 
         /// <summary>
@@ -4204,8 +4659,12 @@ namespace ExScoringMod
             return null;
         }
 
-        /// <summary>Removes gameplay-only objects, then every component but the visual ones.</summary>
-        private static void Strip(GameObject root, bool keepAnimator = false)
+        /// <summary>
+        /// Removes gameplay-only objects, then every component but the visual ones. rules (v2.49,
+        /// native gun models) keeps some objects whole and some component types anywhere, and counts
+        /// what goes.
+        /// </summary>
+        private static void Strip(GameObject root, bool keepAnimator = false, StripRules rules = null)
         {
             var transforms = root.GetComponentsInChildren<Transform>(true);
             List<GameObject> doomed = new List<GameObject>();
@@ -4213,13 +4672,18 @@ namespace ExScoringMod
             {
                 Transform t = transforms[i];
                 if (t == null || t.Pointer == root.transform.Pointer) continue;
+                if (rules != null && rules.KeepObjects.Contains(t.gameObject.Pointer)) continue;
                 var components = t.GetComponents<Component>();
                 for (int j = 0; j < components.Length; j++)
                 {
                     Component c = components[j];
-                    if (c != null && RemoveObjectTypes.Contains(TypeName(c)))
+                    if (c == null) continue;
+                    string type = TypeName(c);
+                    if (rules != null && rules.KeepTypes != null && rules.KeepTypes.Contains(type)) continue;
+                    if (RemoveObjectTypes.Contains(type))
                     {
                         doomed.Add(t.gameObject);
+                        if (rules != null) CountRemoved(rules, "object with " + type);
                         break;
                     }
                 }
@@ -4240,11 +4704,26 @@ namespace ExScoringMod
                     if (c == null) continue;
                     string type = TypeName(c);
                     if (KeepComponentTypes.Contains(type) || (keepAnimator && type == "Animator")) continue;
+                    if (rules != null && rules.KeepTypes != null && rules.KeepTypes.Contains(type)) continue;
                     UnityEngine.Object.DestroyImmediate(c);
                     removedAny = true;
+                    if (rules != null) CountRemoved(rules, type);
                 }
                 if (!removedAny) break;
             }
+        }
+
+        private static void CountRemoved(StripRules rules, string what)
+        {
+            rules.Removed.TryGetValue(what, out int n);
+            rules.Removed[what] = n + 1;
+        }
+
+        /// <summary>v2.49 debug: a remote gun copy's resolved native parts.</summary>
+        private static string GunRigDump(GunRig rig)
+        {
+            if (rig == null) return "-";
+            return $"own {rig.Own.Count} other {rig.Other.Count} muzzle {rig.Muzzle.Count} trigger={rig.Trigger != null} fire {rig.Fire?.Length ?? 0}{(rig.FireStart >= 0f ? " playing" : "")}";
         }
 
         private static void OwnMaterials(GameObject root)
@@ -4276,6 +4755,7 @@ namespace ExScoringMod
             if (templateHolder != null) UnityEngine.Object.Destroy(templateHolder);
             templateHolder = null;
             tplHead = tplBody = tplHandL = tplHandR = tplGunL = tplGunR = null;
+            gunParts.Clear(); // v2.49: their templates went with the holder
             gloveTemplate[0] = gloveTemplate[1] = false;
             gloveBonesFound[0] = gloveBonesFound[1] = 0;
             gunCollidersL = gunCollidersR = false;
@@ -4468,7 +4948,7 @@ namespace ExScoringMod
 
             Transform anchor = hand == 0 ? GunPoseTransform(gun, ref localGunPoseL) : GunPoseTransform(gun, ref localGunPoseR);
             if (anchor == null) return null;
-            GameObject gunTemplate = MakeTemplate($"TplGun{HandName(hand)} b{index}", anchor, model.transform);
+            GameObject gunTemplate = MakeGunTemplate($"TplGun{HandName(hand)} b{index}", anchor, model.transform, gun); // v2.49: with its native parts
             OwnMaterials(gunTemplate);
             AddFirepointMarker(gunTemplate, gun, ModelFirepoint(model, gun), anchor);
             AddGunCollider(gunTemplate, gun, anchor);
@@ -4697,7 +5177,8 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] sending: {MpSession.PoseRateHz} Hz ({(MpSession.PoseRateEnabled ? "server" : "default")}), my shots L={localShots[0]} R={localShots[1]}, pull L={PullJson(localGunL)} R={PullJson(localGunR)}");
             bool knuckles = UsingKnuckles();
             sb.AppendLine($"[MpPresence] hands: knuckles={knuckles} handAnim L={JsonDump(HandAnimJson(localKataL, 0, knuckles))} R={JsonDump(HandAnimJson(localKataR, 1, knuckles))} fingers L={JsonDump(FingersJson(localKataL, knuckles))} R={JsonDump(FingersJson(localKataR, knuckles))}");
-            sb.AppendLine($"[MpPresence] gloves: L={GloveTemplateDump(0)} R={GloveTemplateDump(1)}, slide: {(slidePos != null ? slidePos.Length + " samples over " + slideLength.ToString("F3") + " s" : "none")}");
+            sb.AppendLine($"[MpPresence] gloves: L={GloveTemplateDump(0)} R={GloveTemplateDump(1)}");
+            foreach (GunParts parts in gunParts.Values) sb.AppendLine($"[MpPresence] gun model {GunPartsDump(parts)}");
             long renderTime = MpSession.ServerNowMs - RenderDelayMs;
             foreach (Remote remote in remotes.Values)
             {
@@ -4705,7 +5186,7 @@ namespace ExScoringMod
                 long newest = remote.Samples.Count > 0 ? remote.Samples[remote.Samples.Count - 1].T : 0;
                 sb.AppendLine($"[MpPresence]   {remote.UserId} \"{player?.nickname}\" seat={player?.seat} present={remote.Present} samples={remote.Samples.Count} " +
                               $"newest={(newest > 0 ? (newest - renderTime) + " ms ahead of render" : "-")} " +
-                              $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} hand L={HandDump(remote, 0)} R={HandDump(remote, 1)} slide L={remote.Slide[0] != null} R={remote.Slide[1] != null} headshotFx={(remote.HeadshotStart >= 0f ? "on" : "off")} discFade={DiscFadeDump(remote)} ready={player?.ready} connected={player?.connected} discShade={DiscShadeDump(remote)} models={KeysDump(remote.BuiltKeys)} wanted={KeysDump(remote.WantedKeys)} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
+                              $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} hand L={HandDump(remote, 0)} R={HandDump(remote, 1)} gun L={GunRigDump(remote.Guns[0])} R={GunRigDump(remote.Guns[1])} headshotFx={(remote.HeadshotStart >= 0f ? "on" : "off")} discFade={DiscFadeDump(remote)} ready={player?.ready} connected={player?.connected} discShade={DiscShadeDump(remote)} models={KeysDump(remote.BuiltKeys)} wanted={KeysDump(remote.WantedKeys)} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
             }
             foreach (string line in sb.ToString().TrimEnd().Split('\n')) MelonLogger.Log(line.TrimEnd('\r'));
         }
