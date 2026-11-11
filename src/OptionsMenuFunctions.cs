@@ -45,6 +45,9 @@ namespace ExScoringMod
         public static readonly string[] ChainLineColorOptions = { "Default (Black)", "Hand Color" };
         public static int arrowColorMode;
         public static int chainLineColorMode;
+        public static readonly string[] ChainSustainLookOptions = { "Sustain Target", "Chain Node + Ring" };
+        public static int chainSustainLook;
+        public static bool chainSustainTestMode;
         public static float arrowWidth;
         public static float arrowLength;
         public static float chainArrowMinPitchDistance;
@@ -401,6 +404,17 @@ namespace ExScoringMod
             Config.UpdateDebugLogs(value);
         }
 
+        public static void GetChainSustainTestMode()
+        {
+            chainSustainTestMode = Config.ChainSustainTestMode;
+        }
+
+        public static void SetChainSustainTestMode(bool value)
+        {
+            chainSustainTestMode = value;
+            Config.UpdateChainSustainTestMode(value);
+        }
+
         public static void GetShowNativeTimingGraph()
         {
             showNativeTimingGraph = Config.ShowNativeTimingGraph;
@@ -755,6 +769,17 @@ namespace ExScoringMod
         {
             chainLineColorMode = value;
             Config.UpdateChainLineColorMode(value);
+        }
+
+        public static void GetChainSustainLook()
+        {
+            chainSustainLook = Config.ChainSustainLook;
+        }
+
+        public static void SetChainSustainLook(int value)
+        {
+            chainSustainLook = value;
+            Config.UpdateChainSustainLook(value);
         }
 
         public static void GetArrowWidth()

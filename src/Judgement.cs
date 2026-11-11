@@ -193,6 +193,13 @@ namespace ExScoringMod
         {
             float score = 0f;
 
+            // Chain sustain: chain tail judgement + sustain judgement. Checked first, since its live
+            // behavior is Chain until it's hit and Hold after.
+            if (ChainSustain.IsChainSustain(cue))
+            {
+                return judgementImpeccableWeight + 1;
+            }
+
             if (cue.behavior == Target.TargetBehavior.Vertical ||
                 cue.behavior == Target.TargetBehavior.Horizontal ||
                 cue.behavior == Target.TargetBehavior.ChainStart ||

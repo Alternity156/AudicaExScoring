@@ -64,9 +64,12 @@ namespace ExScoringMod
                 case Target.TargetBehavior.Melee:
                     text = $"V: {GetPercentFromRaw(exCue.velocity)}%";
                     break;
+                case ChainSustain.Behavior:
+                    text = $"A: {GetPercentFromRaw(exCue.aim)}%";
+                    break;
             }
 
-            if (exCue.behavior == Target.TargetBehavior.Hold)
+            if (exCue.behavior == Target.TargetBehavior.Hold || exCue.behavior == ChainSustain.Behavior)
             {
                 text += $"\nS: {GetPercentFromRaw(exCue.sustainPercent)}%";
             }

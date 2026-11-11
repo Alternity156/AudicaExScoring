@@ -389,10 +389,10 @@ namespace ExScoringMod
             public QuaternionData contactRotation;
             public float? aimAssist;
 
-            // Hold only
+            // Hold and ChainSustain (behavior 8, see ChainSustain.cs)
             public float? sustainPercent;
 
-            // Chain only
+            // Chain and ChainSustain
             public float? aim;
             public bool? isChainTail;
             public float? chainAverage;

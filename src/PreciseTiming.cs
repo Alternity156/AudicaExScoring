@@ -233,6 +233,7 @@ namespace ExScoringMod
         public static float GetExTimingScore(Cue cue, float nativeTiming)
         {
             if (!Config.PreciseShotTiming || cue == null) return nativeTiming;
+            if (ChainSustain.IsChainSustain(cue)) return nativeTiming; // traced, never pressed
 
             if (cue.behavior != Target.TargetBehavior.Standard &&
                 cue.behavior != Target.TargetBehavior.Horizontal &&
@@ -301,6 +302,7 @@ namespace ExScoringMod
             {
                 Cue cue = target.mCue;
                 if (cue == null || !IsPressScoredBehavior(cue.behavior)) return;
+                if (ChainSustain.IsChainSustain(cue)) return; // traced like a chain node, never pressed
 
                 int hand = (int)gun.controller;
                 if (hand != 1 && hand != 2) return;
@@ -341,6 +343,7 @@ namespace ExScoringMod
             if (!Config.PreciseShotTiming || cue == null || !clockValid) return;
             if (pressScoringMsByCueIndex.ContainsKey(cue.index)) return;
             if (!IsPressScoredBehavior(cue.behavior)) return;
+            if (ChainSustain.IsChainSustain(cue)) return; // a Hold once hit, but traced, never pressed
 
             try
             {

@@ -42,7 +42,12 @@ namespace ExScoringMod
 
         public static float GetMaxExScoreForCue(SongCues.Cue cue)
         {
-            if (cue.behavior == Target.TargetBehavior.Standard ||
+            // Checked first: a chain sustain's live behavior is Chain until it's hit, then Hold.
+            if (ChainSustain.IsChainSustain(cue))
+            {
+                return exScoringChainWeight + exScoringSustainWeight;
+            }
+            else if (cue.behavior == Target.TargetBehavior.Standard ||
                     cue.behavior == Target.TargetBehavior.Horizontal ||
                     cue.behavior == Target.TargetBehavior.Vertical ||
                     cue.behavior == Target.TargetBehavior.ChainStart)
@@ -87,6 +92,11 @@ namespace ExScoringMod
             else if (exCue.behavior == Target.TargetBehavior.Melee)
             {
                 return exCue.velocity;
+            }
+            else if (exCue.behavior == ChainSustain.Behavior)
+            {
+                // Chain node aim (like any chain node) + its own sustain.
+                return exCue.aim * exScoringChainWeight + exCue.sustainPercent * exScoringSustainWeight;
             }
             else return 0;
         }

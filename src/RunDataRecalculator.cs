@@ -401,9 +401,10 @@ namespace ExScoringMod
             {
                 ExCueSaveData saved = cues[i];
                 bool isChain = saved.behavior == Target.TargetBehavior.Chain;
+                bool isChainSustain = saved.behavior == ChainSustain.Behavior;
                 bool isAim = aimBehaviors.Contains(saved.behavior);
 
-                bool isChainTail = false;
+                bool isChainTail = isChainSustain; // a chain sustain is always its chain's tail
                 if (isChain)
                 {
                     isChainTail = saved.miss
@@ -415,7 +416,8 @@ namespace ExScoringMod
 
                 if (saved.miss)
                 {
-                    if (isAim || saved.behavior == Target.TargetBehavior.Melee) summary.missCount++;
+                    // A missed or dropped chain sustain counts, like a missed or dropped sustain.
+                    if (isAim || isChainSustain || saved.behavior == Target.TargetBehavior.Melee) summary.missCount++;
                     continue;
                 }
 
@@ -440,13 +442,13 @@ namespace ExScoringMod
 
                     cueScore += GetJudgementScore(timingJudgement) + GetJudgementScore(aimJudgement);
                 }
-                if (isChain && isChainTail)
+                if ((isChain || isChainSustain) && isChainTail)
                 {
                     Judgement chainJudgement = default(Judgement);
                     if (saved.chainAverage.HasValue) chainJudgement = GetChainJudgement(saved.chainAverage.Value);
                     cueScore += GetJudgementScore(chainJudgement);
                 }
-                if (saved.behavior == Target.TargetBehavior.Hold && saved.sustainPercent.HasValue && saved.sustainPercent.Value >= 1f)
+                if ((saved.behavior == Target.TargetBehavior.Hold || isChainSustain) && saved.sustainPercent.HasValue && saved.sustainPercent.Value >= 1f)
                 {
                     cueScore += 1f;
                 }
@@ -483,6 +485,12 @@ namespace ExScoringMod
         private static float GetMaxJudgementScoreForSavedCue(Target.TargetBehavior behavior, bool isChainTail)
         {
             float score = 0f;
+
+            // Chain sustain (ChainSustain.cs): chain tail judgement + sustain judgement.
+            if (behavior == ChainSustain.Behavior)
+            {
+                return judgementImpeccableWeight + 1;
+            }
 
             if (behavior == Target.TargetBehavior.Vertical ||
                 behavior == Target.TargetBehavior.Horizontal ||
@@ -682,6 +690,10 @@ namespace ExScoringMod
                     {
                         cue.isChainTail = saved.isChainTail ?? ResolveIsChainTail(chainTailLookup, saved.tick);
                     }
+                    else if (saved.behavior == ChainSustain.Behavior)
+                    {
+                        cue.isChainTail = true;
+                    }
 
                     // A miss can still carry a real recorded aim attempt (player aimed near the
                     // target but failed for other reasons — wrong hand, bad timing, etc.) — this is
@@ -725,7 +737,18 @@ namespace ExScoringMod
                     }
                 }
 
-                if (saved.behavior == Target.TargetBehavior.Hold && saved.sustainPercent.HasValue)
+                if (saved.behavior == ChainSustain.Behavior)
+                {
+                    cue.isChainTail = true;
+                    if (saved.aim.HasValue) cue.aim = saved.aim.Value;
+                    if (saved.chainAverage.HasValue)
+                    {
+                        cue.chainAverage = saved.chainAverage.Value;
+                        cue.chainJudgement = GetChainJudgement(cue.chainAverage);
+                    }
+                }
+
+                if ((saved.behavior == Target.TargetBehavior.Hold || saved.behavior == ChainSustain.Behavior) && saved.sustainPercent.HasValue)
                 {
                     cue.sustainPercent = saved.sustainPercent.Value;
                 }
@@ -756,7 +779,8 @@ namespace ExScoringMod
             {
                 maxJudgementScore += GetMaxJudgementScoreForSavedCue(cue.behavior, cue.isChainTail);
 
-                bool countsTowardMiss = aimBehaviors.Contains(cue.behavior) || cue.behavior == Target.TargetBehavior.Melee;
+                bool countsTowardMiss = aimBehaviors.Contains(cue.behavior) || cue.behavior == ChainSustain.Behavior ||
+                                        cue.behavior == Target.TargetBehavior.Melee;
 
                 if (cue.miss)
                 {
@@ -770,11 +794,11 @@ namespace ExScoringMod
                 {
                     cueScore += GetJudgementScore(cue.timingJudgement) + GetJudgementScore(cue.aimJudgement);
                 }
-                if (cue.behavior == Target.TargetBehavior.Chain && cue.isChainTail)
+                if ((cue.behavior == Target.TargetBehavior.Chain || cue.behavior == ChainSustain.Behavior) && cue.isChainTail)
                 {
                     cueScore += GetJudgementScore(cue.chainJudgement);
                 }
-                if (cue.behavior == Target.TargetBehavior.Hold && cue.sustainPercent >= 1f)
+                if ((cue.behavior == Target.TargetBehavior.Hold || cue.behavior == ChainSustain.Behavior) && cue.sustainPercent >= 1f)
                 {
                     cueScore += 1f;
                 }

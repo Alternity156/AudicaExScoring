@@ -946,6 +946,7 @@ namespace ExScoringMod
                     case Target.TargetBehavior.Vertical:
                     case Target.TargetBehavior.ChainStart:
                     case Target.TargetBehavior.Hold:
+                    case ChainSustain.Behavior:
                     case Target.TargetBehavior.Melee:
                         misses++;
                         break;

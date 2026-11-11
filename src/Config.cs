@@ -39,6 +39,7 @@ namespace ExScoringMod
         public static bool EnableChainArrow;
         public static float ChainArrowMinPitchDistance;
         public static int ChainArrowMaxSimultaneous;
+        public static int ChainSustainLook;    // 0 = Sustain Target, 1 = Chain Node + Ring (see ChainSustain.cs)
 
         public static string particleKillerHeader = "[Header]Particle Killer";
         public static bool ParticleKillerEnabled;
@@ -148,6 +149,10 @@ namespace ExScoringMod
         public static bool DebugLogs;
         public static bool ShowNativeTimingGraph;
 
+        // Session only, deliberately never saved: every chain tail becomes a one-measure chain
+        // sustain at load, no fail, and runs are neither saved nor uploaded (ChainSustain.cs).
+        public static bool ChainSustainTestMode = false;
+
         public static void RegisterConfig()
         {
             MelonPrefs.RegisterString(Category, nameof(typeHeader), "", "[Header]Scoring Type");
@@ -184,6 +189,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterFloat(Category, nameof(ArrowLength), 0.25f, "Sets the chain arrow length [0.05,1,0.05,0.25] {P}");
             MelonPrefs.RegisterFloat(Category, nameof(ChainArrowMinPitchDistance), 0.2f, "Minimum pitch-grid distance between chain nodes for an arrow to be drawn [0,2,0.05,0.2] {G}");
             MelonPrefs.RegisterInt(Category, nameof(ChainArrowMaxSimultaneous), 50, "Max chain arrows shown at once before thinning kicks in [10,300,5,50] {G}");
+            MelonPrefs.RegisterInt(Category, nameof(ChainSustainLook), 0, "Chain sustain look: 0 = Sustain Target, 1 = Chain Node + Ring");
 
             MelonPrefs.RegisterString(Category, nameof(particleKillerHeader), "", "[Header]Particle Killer");
             MelonPrefs.RegisterBool(Category, nameof(ParticleKillerEnabled), true, "Enables the mod.");
@@ -308,6 +314,7 @@ namespace ExScoringMod
             EnableChainArrow = MelonPrefs.GetBool(Category, nameof(EnableChainArrow));
             ChainArrowMinPitchDistance = MelonPrefs.GetFloat(Category, nameof(ChainArrowMinPitchDistance));
             ChainArrowMaxSimultaneous = MelonPrefs.GetInt(Category, nameof(ChainArrowMaxSimultaneous));
+            ChainSustainLook = MelonPrefs.GetInt(Category, nameof(ChainSustainLook));
             ParticleKillerEnabled = MelonPrefs.GetBool(Category, nameof(ParticleKillerEnabled));
             ParticleKillerKillCPUParticles = MelonPrefs.GetBool(Category, nameof(ParticleKillerKillCPUParticles));
             ParticleKillerParticleCount = MelonPrefs.GetInt(Category, nameof(ParticleKillerParticleCount));
@@ -896,6 +903,19 @@ namespace ExScoringMod
             MelonPrefs.SetInt(Category, nameof(ChainLineColorMode), value);
             ChainLineColorMode = value;
             MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateChainSustainLook(int value)
+        {
+            MelonPrefs.SetInt(Category, nameof(ChainSustainLook), value);
+            ChainSustainLook = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        /// <summary>Session only (not saved). Takes effect on the next chart load.</summary>
+        public static void UpdateChainSustainTestMode(bool value)
+        {
+            ChainSustainTestMode = value;
         }
 
         public static void UpdateArrowWidth(float value)

@@ -21,6 +21,7 @@ namespace ExScoringMod
         {
             var relevant = exCues.Where(c =>
                 c.behavior != Target.TargetBehavior.Chain &&
+                c.behavior != ChainSustain.Behavior &&
                 c.behavior != Target.TargetBehavior.Melee).ToList();
 
             int total = relevant.Count;
@@ -42,6 +43,7 @@ namespace ExScoringMod
         {
             var relevant = exCues.Where(c =>
                 c.behavior != Target.TargetBehavior.Chain &&
+                c.behavior != ChainSustain.Behavior &&
                 c.behavior != Target.TargetBehavior.Melee).ToList();
 
             int total = relevant.Count;
@@ -62,7 +64,7 @@ namespace ExScoringMod
         public static string GetChainJudgementString(List<ExCue> exCues)
         {
             var relevant = exCues.Where(c =>
-                c.behavior == Target.TargetBehavior.Chain &&
+                (c.behavior == Target.TargetBehavior.Chain || c.behavior == ChainSustain.Behavior) &&
                 c.isChainTail &&
                 !c.miss).ToList();
 
@@ -83,7 +85,10 @@ namespace ExScoringMod
 
         public static string GetMiscString(List<ExCue> exCues)
         {
-            var holds = exCues.Where(c => c.behavior == Target.TargetBehavior.Hold).ToList();
+            // Chain sustains count as holds here: their sustain is its own judgement.
+            var holds = exCues.Where(c =>
+                c.behavior == Target.TargetBehavior.Hold ||
+                c.behavior == ChainSustain.Behavior).ToList();
             int totalHolds = holds.Count;
             int fullHolds = holds.Count(c => !c.miss && c.sustainPercent >= 1f);
 
@@ -97,6 +102,7 @@ namespace ExScoringMod
                 c.behavior == Target.TargetBehavior.Standard ||
                 c.behavior == Target.TargetBehavior.Hold ||
                 c.behavior == Target.TargetBehavior.ChainStart ||
+                c.behavior == ChainSustain.Behavior ||
                 c.behavior == Target.TargetBehavior.Melee).ToList();
             int miss = relevant.Count(c => c.miss == true);
             int total = relevant.Count;

@@ -589,6 +589,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetArrowLength();
                 OptionsMenuFunctions.GetChainArrowMinPitchDistance();
                 OptionsMenuFunctions.GetChainArrowMaxSimultaneous();
+                OptionsMenuFunctions.GetChainSustainLook();
 
                 var header = OptionsMenuClone.CreateHeader(0, "Chain Arrow");
                 OptionsMenuClone.AddRow(header);
@@ -629,6 +630,14 @@ namespace ExScoringMod
                     10f, 300f, 5f, 50f, "N0",
                     "Above this many arrows at once, arrows start thinning out evenly");
                 OptionsMenuClone.AddRow(minPitchDistSlider, maxSimultaneousSlider);
+
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Chain Sustain"));
+                var chainSustainLookCycle = OptionsMenuClone.CreateCycle(0, "Chain Sustain Look", OptionsMenuFunctions.ChainSustainLookOptions,
+                    () => OptionsMenuFunctions.chainSustainLook,
+                    v => { OptionsMenuFunctions.chainSustainLook = v; OptionsMenuFunctions.SetChainSustainLook(v); },
+                    0,
+                    "How a chain's sustain end looks: a full-size sustain target, or a small chain node with a sustain ring");
+                OptionsMenuClone.AddRow(chainSustainLookCycle);
             }),
 
             new OptionsCategory("opt_menu", "Menu", () =>
@@ -922,6 +931,7 @@ namespace ExScoringMod
             {
                 OptionsMenuFunctions.GetDebugLogs();
                 OptionsMenuFunctions.GetShowNativeTimingGraph();
+                OptionsMenuFunctions.GetChainSustainTestMode();
 
                 var header = OptionsMenuClone.CreateHeader(0, "Debug");
                 OptionsMenuClone.AddRow(header);
@@ -937,6 +947,12 @@ namespace ExScoringMod
                     v => { OptionsMenuFunctions.showNativeTimingGraph = v; OptionsMenuFunctions.SetShowNativeTimingGraph(v); },
                     "Results screen only: adds a second timing graph below the others using the game's native frame-based timing, for comparison with Precise Shot Timing");
                 OptionsMenuClone.AddRow(nativeTimingGraphToggle);
+
+                var chainSustainTestToggle = OptionsMenuClone.CreateToggle(0, "Chain Sustain Test Mode",
+                    () => OptionsMenuFunctions.chainSustainTestMode,
+                    v => { OptionsMenuFunctions.chainSustainTestMode = v; OptionsMenuFunctions.SetChainSustainTestMode(v); },
+                    "For testing only, resets when the game closes: every chain tail becomes a 1-measure chain sustain, you can't fail, and runs aren't saved or uploaded. Applies to the next song you start");
+                OptionsMenuClone.AddRow(chainSustainTestToggle);
 
                 // Online play state dumps, written to the MelonLoader log (shown even with Enable Logs off).
                 OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Online Play Dumps"));

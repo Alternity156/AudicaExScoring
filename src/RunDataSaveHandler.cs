@@ -243,7 +243,7 @@ namespace ExScoringMod
 
             if (cue.miss)
             {
-                if (cue.behavior == Target.TargetBehavior.Chain)
+                if (cue.behavior == Target.TargetBehavior.Chain || cue.behavior == ChainSustain.Behavior)
                 {
                     // Chart-structural, not performance-derived — needs to be saved even on a
                     // miss so recalculation can still tell a missed chain tail apart from a
@@ -285,6 +285,15 @@ namespace ExScoringMod
             if (cue.behavior == Target.TargetBehavior.Melee)
             {
                 data.velocity = cue.velocity;
+            }
+
+            // Chain sustain: a chain tail's data plus its sustain. No timing / shot aim point.
+            if (cue.behavior == ChainSustain.Behavior)
+            {
+                data.aim = cue.aim;
+                data.isChainTail = true;
+                data.chainAverage = cue.chainAverage;
+                data.sustainPercent = cue.sustainPercent;
             }
 
             return data;

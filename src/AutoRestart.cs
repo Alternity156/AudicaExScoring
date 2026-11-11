@@ -32,6 +32,7 @@ namespace ExScoringMod
             private const int AudicaTargetPoints = 2000;
             private const int AudicaChainNodePoints = 125;
             private const int AudicaSustainPoints = 3000;
+            private const int AudicaChainSustainBonusPoints = 1000;
             private const int AudicaMaxMultiplier = 4;
 
             // Small tolerance so a run that can exactly tie the best (float noise) isn't restarted.
@@ -226,6 +227,13 @@ namespace ExScoringMod
                     if (streak % 10 == 0 && multiplier < AudicaMaxMultiplier) multiplier++;
 
                     int points;
+                    if (ChainSustain.IsChainSustain(cue))
+                    {
+                        // Chain node + sustain bonus (its live behavior is Chain, then Hold once hit).
+                        total += (long)(AudicaChainNodePoints + AudicaChainSustainBonusPoints) * multiplier;
+                        continue;
+                    }
+
                     switch (cue.behavior)
                     {
                         case Target.TargetBehavior.Chain:

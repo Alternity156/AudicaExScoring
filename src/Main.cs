@@ -104,6 +104,7 @@ namespace ExScoringMod
             Config.RegisterConfig();
             PlaylistConfig.RegisterConfig();
             MpGameplay.Init();
+            ChainSustain.Init();
             OnlinePlayMenu.Init();
             LobbySongList.Init();
 

@@ -142,12 +142,12 @@ namespace ExScoringMod
 
             float total = 0;
 
+            // Every node's aim counts (the walk back from the last node includes the ChainStart, as
+            // before). Used to test the LAST node's behavior instead of each node's, which zeroed the
+            // whole average when the last node isn't a Chain (a chain sustain is a Hold once hit).
             foreach (Cue chainCue in fullChain)
             {
-                if (cue.behavior == Target.TargetBehavior.Chain)
-                {
-                    total += chainCue.aim;
-                }
+                total += chainCue.aim;
             }
 
             float chainAverage = total / fullChain.Count;

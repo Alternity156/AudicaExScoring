@@ -1025,7 +1025,7 @@ namespace ExScoringMod
             ExCue exCue = new ExCue();
 
             exCue.index = cue.index;
-            exCue.behavior = cue.behavior;
+            exCue.behavior = ChainSustain.GetExBehavior(cue);
             exCue.handType = cue.handType;
             exCue.tick = cue.tick;
             exCue.miss = true;
@@ -1038,7 +1038,12 @@ namespace ExScoringMod
             exCue.timingJudgement = Judgement.Miss;
             exCue.aimJudgement = Judgement.Miss;
             exCue.chainJudgement = Judgement.Miss;
-            if (cue.behavior == Target.TargetBehavior.Chain)
+            if (exCue.behavior == ChainSustain.Behavior)
+            {
+                // Always its chain's last node (validated at load), so always a tail.
+                exCue.isChainTail = true;
+            }
+            else if (cue.behavior == Target.TargetBehavior.Chain)
             {
                 exCue.isChainTail = cue.chainNext == null;
             }
@@ -1047,6 +1052,62 @@ namespace ExScoringMod
             try { exCue.health = ScoreKeeper.I.GetHealth(); } catch { }
 
             return exCue;
+        }
+
+        /// <summary>
+        /// Scores a chain sustain (ChainSustain.cs) when native completes it — at the end of the
+        /// sustain, like a Hold (a broken sustain was already recorded as a miss by OnFailure, same
+        /// as a Hold). Scored as its chain's tail (its own aim is part of the chain average and it
+        /// carries the chain judgement) plus a separate sustain judgement. No timing or shot aim.
+        /// </summary>
+        private static void ScoreChainSustainCue(SongCues.Cue cue)
+        {
+            ExCue exCue;
+            float exCueScore;
+            float judgementCueScore;
+            string popupText;
+
+            try
+            {
+                exCue = new ExCue();
+                exCue.behavior = ChainSustain.Behavior;
+                exCue.handType = cue.handType;
+                exCue.tick = cue.tick;
+                exCue.successTick = cue.successTick;
+                exCue.index = cue.index;
+                exCue.aim = cue.aim;
+                exCue.sustainPercent = cue.sustainPercent;
+                exCue.velocity = 0f; // meleeVelocityAmount holds the chain sustain marker, not a velocity
+                exCue.health = ScoreKeeper.I.GetHealth();
+                exCue.aimAssist = PlayerPreferences.I.AimAssistAmount.mVal;
+                exCue.scoringCalculation = Config.LinearCalculation
+                    ? ExCue.ScoringCalculation.Linear
+                    : ExCue.ScoringCalculation.Audica;
+
+                exCue.isChainTail = true;
+                exCue.chainAverage = GetChainAverageFromLastNodeCue(cue);
+                exCue.chainJudgement = GetChainJudgement(exCue.chainAverage);
+
+                exCueScore = GetExScoreForExCue(exCue);
+
+                judgementCueScore = GetJudgementScore(exCue.chainJudgement);
+                if (exCue.sustainPercent >= 1f) judgementCueScore += 1;
+
+                popupText = GetChainJudgementText(exCue.chainJudgement);
+            }
+            catch (Exception e)
+            {
+                LogCueScoringErrorOnce("GetScoreForCue (chain sustain)", cue, e);
+
+                exCue = BuildMissExCue(cue);
+                exCueScore = 0f;
+                judgementCueScore = 0f;
+                popupText = null;
+            }
+
+            exTypePurple = true;
+            CommitExCue(cue, exCue, exCueScore, judgementCueScore);
+            if (popupText != null) nextPopupText = popupText;
         }
 
         [HarmonyPatch(typeof(Gun), "CalculateAim", new Type[]
@@ -1162,6 +1223,12 @@ namespace ExScoringMod
                 if (menuState != MenuState.State.Launched) return;
                 if (cue == null) return;
                 if (processedCuesIndexes.Contains(cue.index)) return;
+
+                if (ChainSustain.IsChainSustain(cue))
+                {
+                    ScoreChainSustainCue(cue);
+                    return;
+                }
 
                 // Everything that can throw happens BEFORE CommitExCue, which is the only place the
                 // max-possible scores and processedCuesIndexes change. If anything below fails, the cue
@@ -1716,6 +1783,14 @@ namespace ExScoringMod
             public static void Postfix(SongEnd __instance, bool failed)
             {
                 currentRunFailed = failed;
+
+                // Debug "Chain Sustain Test Mode": the chart was modified at load, so the run is
+                // never saved or uploaded (see ChainSustain.cs).
+                if (ChainSustain.TestModeActive)
+                {
+                    DebugLog.Log("[ChainSustain] Test mode: run not saved or uploaded.");
+                    return;
+                }
 
                 if (!failed || Config.SaveFailedRunData)
                 {

@@ -675,6 +675,8 @@ namespace ExScoringMod
                 {
                     bool isChainTail = (cue.behavior == Target.TargetBehavior.Chain || cue.behavior == Target.TargetBehavior.ChainStart)
                         && cue.chainNext == null;
+                    // Chain sustains load as Chain (ChainSustain.cs); always a tail.
+                    if (ChainSustain.IsChainSustain(cue)) isChainTail = true;
 
                     mapCues.Add(new MapCueData
                     {
@@ -686,7 +688,7 @@ namespace ExScoringMod
                         gridOffset = new Vector2Data(cue.gridOffset),
                         zOffset = cue.zOffset,
                         handType = cue.handType.ToString(),
-                        behavior = cue.behavior.ToString(),
+                        behavior = ChainSustain.GetChartBehaviorName(cue),
                         overdriveSectionIndex = cue.overdriveSectionIndex,
                         tickLookahead = cue.tickLookahead,
                         slopBeforeTicks = cue.slopBeforeTicks,
