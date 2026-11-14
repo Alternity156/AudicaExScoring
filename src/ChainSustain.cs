@@ -23,11 +23,13 @@ namespace ExScoringMod
     ///     only (never in the chart JSON), only ever written by Target.OnHit for melee attacks and
     ///     only read natively for behavior 6, and it survives the behavior switch below and every
     ///     cold GetCues() call, so no side registry is needed.
-    ///  2. Hit: Target.Update's chain branch calls Gun.Fire(useChainBeam: true). Its prefix switches
-    ///     the cue to Hold (3) so Fire and Target.OnHit run their sustain paths (gun "fire_sustain"
+    ///  2. Hit: native's chain branch of Target.Update calls Gun.Fire(useChainBeam: true). Gun.Fire
+    ///     and Target.OnHit can't be patched (wrong-colour hits register as correct), so a
+    ///     Target.Update prefix runs that same check itself for chain sustains, switches the cue to
+    ///     Hold (3) and calls Fire, so Fire and OnHit run their sustain paths (gun "fire_sustain"
     ///     trigger, SustainBeam, sustain animation, sustain flare). Fire then measures aim like a
-    ///     shot, so the OnHit prefix puts the chain aim back (Gun.CalculateChainAimScore — it never
-    ///     reads the behavior). If the hit fails, Fire's postfix switches the cue back to Chain.
+    ///     shot, so a CalculateAim postfix returns the chain aim (Gun.CalculateChainAimScore) during
+    ///     that call. If the hit fails, the prefix switches the cue back to Chain.
     ///  3. Sustain: Target.Update's Hold branch runs as for any sustain (trigger check, 0.1 s grace,
     ///     sustainPercent, OnFailure on break, CompleteTarget at the end).
     ///  4. Score: Audica = native chain node score + native Hold sustain bonus (ScoreData postfix).
@@ -214,95 +216,131 @@ namespace ExScoringMod
             (all[i].behavior == Target.TargetBehavior.Chain || all[i].behavior == Target.TargetBehavior.ChainStart);
 
         // ══════════════════════════════════════════════════════════════════
-        //  2. Hit: Gun.Fire switches to Hold, OnHit restores the chain aim
+        //  2. Hit: Target.Update prefix fires the chain hit itself, as a Hold
         // ══════════════════════════════════════════════════════════════════
 
-        [HarmonyPatch(typeof(Gun), "Fire", new Type[]
+        // Gun.Fire and Target.OnHit are NOT patched. Fire passes its forceSuccessful bool straight
+        // to OnHit, which is where the hand/colour check is; with a Harmony patch on either of them
+        // under MelonLoader 0.5.7, wrong-colour hits registered as correct (and no-target shots
+        // broke, see PreciseTiming.cs), even with empty patches. Calling Fire from here is fine.
+
+        /// <summary>cue.index of the chain sustain whose hit is being fired by the prefix below, or -1.</summary>
+        private static int firingCueIndex = -1;
+
+        /// <summary>
+        /// Runs the native chain branch's hit (Target.Update, Ghidra 2026-11-11) one step early for
+        /// chain sustains, with the cue switched to Hold first so Gun.Fire and Target.OnHit take their
+        /// sustain paths (gun "fire_sustain" trigger, sustain setup, sustain flare). Same condition as
+        /// native: cue.tick &lt;= GetTick(1) + deltaTick / 2, chainPrevious hit, the hand's gun (guns[0]
+        /// for Either) holding its trigger and IsValidTarget(gun, 0, false); then
+        /// Fire(target, target position, -1, false, useChainBeam: true, null). On success the
+        /// original Update then runs its Hold branch this same frame and skips the chain branch (the
+        /// behavior is 3 now); on failure the cue goes back to Chain and native carries on as usual.
+        /// </summary>
+        [HarmonyPatch(typeof(Target), "Update", new Type[0])]
+        public static class TargetUpdatePatch
         {
-            typeof(Target), typeof(Vector3), typeof(int), typeof(bool), typeof(bool), typeof(ShootableToy)
-        })]
-        public static class GunFirePatch
-        {
-            public static void Prefix(Target target, bool useChainBeam, out bool __state)
+            public static void Prefix(Target __instance)
             {
-                __state = false;
+                SongCues.Cue cue = null;
+                bool switched = false;
                 try
                 {
-                    if (!useChainBeam || target == null) return;
-                    SongCues.Cue cue = target.mCue;
-                    if (cue == null || cue.success || cue.behavior != Target.TargetBehavior.Chain) return;
-                    if (!IsChainSustain(cue)) return;
+                    if (__instance == null) return;
+                    cue = __instance.mCue;
+                    if (cue == null || cue.meleeVelocityAmount != Marker) return; // cheap IsChainSustain
+                    if (cue.behavior != Target.TargetBehavior.Chain || cue.success || cue.passed) return;
+
+                    SongCues.Cue prev = cue.chainPrevious;
+                    if (prev == null || !prev.success) return;
+
+                    AudioDriver audio = AudioDriver.I;
+                    ScoreKeeper keeper = ScoreKeeper.I;
+                    if (audio == null || keeper == null) return;
+                    float tick = audio.GetTick((AudioDriver.TickContext)1);
+                    if (cue.tick > keeper.GetDeltaTick() * 0.5f + tick) return;
+
+                    Gun gun = GetGunFor(cue.handType);
+                    if (gun == null || !gun.IsTriggerHeld()) return;
+                    if (!__instance.IsValidTarget(gun, 0, false)) return;
+
+                    // Chain nodes get their Animation disabled once the chain head is hit (chain
+                    // branch of Target.Update); OnHit's Hold branch plays the sustain clip on it.
+                    Animation anim = __instance.mAnimation;
+                    if (anim != null) anim.enabled = true;
 
                     cue.behavior = Target.TargetBehavior.Hold;
-                    __state = true;
-                }
-                catch (Exception e)
-                {
-                    DebugLog.Log(Tag + "Gun.Fire prefix failed: " + e);
-                }
-            }
+                    switched = true;
+                    firingCueIndex = cue.index;
+                    try
+                    {
+                        gun.Fire(__instance, __instance.transform.position, -1, false, true, null);
+                    }
+                    finally
+                    {
+                        firingCueIndex = -1;
+                    }
 
-            public static void Postfix(Target target, bool __state)
-            {
-                if (!__state) return;
-                try
-                {
-                    SongCues.Cue cue = target != null ? target.mCue : null;
-                    if (cue != null && !cue.success) cue.behavior = Target.TargetBehavior.Chain;
+                    if (cue.success)
+                    {
+                        // The chain branch no longer runs for this target (it's a Hold now), so the
+                        // chain line would stay frozen where it was: hide it and its arrow.
+                        LineRenderer line = __instance.chainLine;
+                        if (line != null) line.gameObject.SetActive(false);
+                        ChainArrow.Hide(__instance);
+                    }
+                    else
+                    {
+                        cue.behavior = Target.TargetBehavior.Chain;
+                    }
                 }
                 catch (Exception e)
                 {
-                    DebugLog.Log(Tag + "Gun.Fire postfix failed: " + e);
+                    try { if (switched && cue != null && !cue.success) cue.behavior = Target.TargetBehavior.Chain; }
+                    catch { }
+                    DebugLog.Log(Tag + "chain sustain hit failed: " + e);
                 }
             }
         }
 
-        [HarmonyPatch(typeof(Target), "OnHit", new Type[]
+        /// <summary>The gun native's chain branch picks: guns[0] for Either, else the one of that hand.</summary>
+        private static Gun GetGunFor(Target.TargetHandType hand)
         {
-            typeof(Gun), typeof(Gun.AttackType), typeof(float), typeof(Vector2), typeof(Vector3), typeof(float), typeof(bool)
-        })]
-        public static class TargetOnHitPatch
-        {
-            public static void Prefix(Target __instance, Gun gun, Gun.AttackType attackType, ref float aim, out bool __state)
+            KataConfig kc = KataConfig.I;
+            if (kc == null || kc.guns == null || kc.guns.Length == 0) return null;
+            if ((int)hand == 0) return kc.guns[0];
+            for (int i = 0; i < kc.guns.Length; i++)
             {
-                __state = false;
-                try
-                {
-                    if (__instance == null || gun == null || (int)attackType != 0) return;
-                    SongCues.Cue cue = __instance.mCue;
-                    if (cue == null || cue.success || cue.behavior != Target.TargetBehavior.Hold) return;
-                    if (!IsChainSustain(cue)) return;
-
-                    // Fire measured this like a shot (behavior was already Hold); score it as the chain
-                    // node it is. CalculateChainAimScore only reads chainPrevious/chainHitPoint/positions.
-                    aim = gun.CalculateChainAimScore(__instance);
-                    __state = true;
-                }
-                catch (Exception e)
-                {
-                    DebugLog.Log(Tag + "Target.OnHit prefix failed: " + e);
-                }
+                Gun g = kc.guns[i];
+                if (g != null && g.hand == hand) return g;
             }
+            return null;
+        }
 
-            public static void Postfix(Target __instance, bool __result, bool __state)
+        /// <summary>
+        /// Fire takes a Hold cue's aim from CalculateAim (Fire, Ghidra 2026-11-11: only behavior 5
+        /// uses CalculateChainAimScore). During the prefix's own Fire call, score this cue as the
+        /// chain node it is. CalculateChainAimScore only reads chainPrevious/chainHitPoint/positions.
+        /// Last priority so it runs after Hooks.CalculateAimPatch (which records the measured shot
+        /// aim and may replace it with the linear score).
+        /// </summary>
+        [HarmonyPatch(typeof(Gun), "CalculateAim", new Type[] { typeof(Target), typeof(Vector3) })]
+        [HarmonyPriority(Priority.Last)]
+        public static class GunCalculateAimPatch
+        {
+            public static void Postfix(Gun __instance, Target target, ref float __result)
             {
-                if (!__state || !__result) return;
+                if (firingCueIndex < 0) return;
                 try
                 {
-                    // The chain branch of Target.Update no longer runs for this target (it's a Hold
-                    // now), so the chain line would stay frozen where it was: hide it and its arrow.
-                    LineRenderer line = __instance.chainLine;
-                    if (line != null) line.gameObject.SetActive(false);
-                    ChainArrow.Hide(__instance);
-
-                    // Chain nodes get their Animation disabled once the chain head is hit (Target.Update);
-                    // OnHit's Hold branch plays the sustain clip on it, which needs it enabled.
-                    Animation anim = __instance.mAnimation;
-                    if (anim != null) anim.enabled = true;
+                    if (__instance == null || target == null) return;
+                    SongCues.Cue cue = target.mCue;
+                    if (cue == null || cue.index != firingCueIndex) return;
+                    __result = __instance.CalculateChainAimScore(target);
                 }
                 catch (Exception e)
                 {
-                    DebugLog.Log(Tag + "Target.OnHit postfix failed: " + e);
+                    DebugLog.Log(Tag + "chain aim override failed: " + e);
                 }
             }
         }
