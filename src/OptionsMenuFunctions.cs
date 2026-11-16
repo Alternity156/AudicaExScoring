@@ -1414,6 +1414,7 @@ namespace ExScoringMod
             {
                 if (Config.DisableMenuGrab) return false;
                 if (__instance.isArrow) return false; // arrow buttons never grab-scroll
+                if (SpectatorWindow.BlocksGrabScroll(gun)) return false; // this grab moves the spectator window instead
                 return true;
             }
         }

@@ -42,14 +42,21 @@ namespace ExScoringMod
     ///   field of view = SpectatorCamFOV
     /// It snaps on the first frame, on a new target, and when the head is more than SnapDistance away.
     ///
-    /// Window: a frame and a picture quad (Sprites/Default, the RenderTexture as mainTexture, like
-    /// AvatarPreview), a title above and the Next Player button below, on layer 0. A thin BoxCollider
-    /// (layer 0) covers it so a shot at the window doesn't press a menu button behind it.
+    /// Window: a frame and a picture quad, a title above and the Next Player button below, on layer 0.
+    /// The frame (Unlit/Color) and picture (Unlit/Texture, the RenderTexture as mainTexture) are
+    /// opaque and drawn in the geometry queue, so they write depth: menu text behind the window (the
+    /// difficulty buttons' labels, drawn later in the transparent queue without writing depth) fails
+    /// the depth test instead of being drawn over the picture. Falls back to Sprites/Default (no depth)
+    /// if those shaders are missing. A thin BoxCollider (layer 0) covers it so a shot at the window
+    /// doesn't press a menu button behind it.
     ///
-    /// Dragging: pull a gun's trigger while it points at the window (ray from Gun.firepoint against
-    /// the window's rectangle, our own math) and the window follows that gun, keeping its pose
-    /// relative to it, until the trigger is released. The pose is then saved (MelonPrefs category
-    /// PrefsCategory, one string) and restored next time.
+    /// Dragging: hold a gun's grip button (KataInput.GripButtonHeld, or the Grip axis past half)
+    /// while it points at the window (ray from Gun.firepoint against the
+    /// window's rectangle, our own math) and the window follows that gun, keeping its pose relative
+    /// to it, until the grip is released. The pose is then saved (MelonPrefs category
+    /// PrefsCategory, one string) and restored next time. The trigger doesn't move the window, and a
+    /// trigger grab aimed at the window doesn't grab-scroll a list behind it (BlocksGrabScroll, used by
+    /// OptionsMenuFunctions' GrabScroll.OnGrab patch).
     ///
     /// Watching during a song (v2.53, "spectate"): the window tells the server who it shows
     /// (MpSession.SetWatch, re-sent by MpSession when needed; nobody while the window is closed or
@@ -88,8 +95,12 @@ namespace ExScoringMod
         private static readonly Vector3 DefaultRotation = new Vector3(0f, 32f, 0f); // facing a player at the origin
 
         private static readonly Color FrameColor = new Color(0.16f, 0.16f, 0.22f, 0.85f);
-        private const int FrameRenderQueue = 2990;
-        private const int PictureRenderQueue = 3000;
+        // Opaque, depth-writing: before every transparent menu text, so text behind the window is hidden.
+        private const int FrameRenderQueue = 2000;
+        private const int PictureRenderQueue = 2001;
+        // Fallback (Sprites/Default, no depth write), as before.
+        private const int FallbackFrameRenderQueue = 2990;
+        private const int FallbackPictureRenderQueue = 3000;
         private const int TextRenderQueue = 3010;
         private const int WindowLayer = 0;                           // Default: headset + spectator camera
 
@@ -125,6 +136,7 @@ namespace ExScoringMod
         private const string AvatarHeadName = "Head";
 
         private const float GunLookupSeconds = 2f;
+        private const float GripAxisThreshold = 0.5f;                // Grip axis fallback (0..1)
         private const float StateRefreshSeconds = 0.25f;
 
         private const string PrefsCategory = "ExScoringSpectatorWindow";
@@ -162,7 +174,7 @@ namespace ExScoringMod
 
         private static Gun gunL, gunR;
         private static float nextGunLookup;
-        private static readonly bool[] triggerWasDown = new bool[2];
+        private static readonly bool[] grabWasDown = new bool[2];
         private static int grabHand = -1;
         private static Vector3 grabLocalPos;
         private static Quaternion grabLocalRot = Quaternion.identity;
@@ -387,15 +399,26 @@ namespace ExScoringMod
                 cameraConfigured = false;
                 hasCameraPose = false;
 
+                // Opaque shaders write depth, so menu text behind the window is hidden by it (see the summary).
+                Shader frameShader = Shader.Find("Unlit/Color");
+                Shader pictureShader = Shader.Find("Unlit/Texture");
+                bool opaque = frameShader != null && pictureShader != null;
+                if (!opaque)
+                {
+                    MelonLogger.Log("[SpectatorWindow] Unlit/Color or Unlit/Texture shader missing; using Sprites/Default (menu text may show over the window)");
+                    frameShader = shader;
+                    pictureShader = shader;
+                }
+
                 // Frame behind, picture in front (toward the viewer, local -Z).
-                frameMaterial = new Material(shader) { name = "ExScoring_SpectatorWindowFrame", color = FrameColor };
-                frameMaterial.renderQueue = FrameRenderQueue;
+                frameMaterial = new Material(frameShader) { name = "ExScoring_SpectatorWindowFrame", color = FrameColor };
+                frameMaterial.renderQueue = opaque ? FrameRenderQueue : FallbackFrameRenderQueue;
                 frameMaterial.hideFlags = HideFlags.DontUnloadUnusedAsset;
                 CreateQuad("Frame", root.transform, WindowWidth + FrameBorder * 2f, WindowHeight + FrameBorder * 2f, 0.002f, frameMaterial);
 
-                pictureMaterial = new Material(shader) { name = "ExScoring_SpectatorWindowPicture", color = Color.white };
+                pictureMaterial = new Material(pictureShader) { name = "ExScoring_SpectatorWindowPicture", color = Color.white };
                 pictureMaterial.mainTexture = texture;
-                pictureMaterial.renderQueue = PictureRenderQueue;
+                pictureMaterial.renderQueue = opaque ? PictureRenderQueue : FallbackPictureRenderQueue;
                 pictureMaterial.hideFlags = HideFlags.DontUnloadUnusedAsset;
                 CreateQuad("Picture", root.transform, WindowWidth, WindowHeight, 0f, pictureMaterial);
 
@@ -728,11 +751,18 @@ namespace ExScoringMod
             }
         }
 
-        private static bool TriggerDown(Gun gun)
+        /// <summary>
+        /// The grip button of this gun's controller. Not HoldAction.GrabScroll: that is the trigger
+        /// (the song list is dragged with the trigger; found in game 2026-11-15). KataInput.GripButtonHeld
+        /// is the game's own grip check; the Grip axis is a fallback in case it reads false on a runtime.
+        /// </summary>
+        private static bool GrabDown(Gun gun)
         {
             try
             {
-                return gun.GetTriggerPullAmount() >= gun.GetTriggerThreshold();
+                OVRInput.Controller controller = gun.GetOVRInputControllerType();
+                if (KataInput.GripButtonHeld(controller)) return true;
+                return KataInput.GetAxis(KataInput.Axis.Grip, controller) >= GripAxisThreshold;
             }
             catch
             {
@@ -741,8 +771,26 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// A trigger pressed while that gun points at the window grabs it; it then keeps its pose
-        /// relative to the gun until the trigger is released, and the new pose is saved.
+        /// For OptionsMenuFunctions' GrabScroll.OnGrab prefix: true while the window is shown and this
+        /// gun is dragging it or points at it, so a trigger grab on the window doesn't scroll a list behind it.
+        /// </summary>
+        internal static bool BlocksGrabScroll(Gun gun)
+        {
+            try
+            {
+                if (gun == null || root == null || !root.activeSelf) return false;
+                if (grabHand >= 0 && (grabHand == 0 ? gunL : gunR) == gun) return true;
+                return PointsAtWindow(gun);
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// The grip pressed while that gun points at the window grabs it; it then keeps its pose
+        /// relative to the gun until the grip is released, and the new pose is saved.
         /// </summary>
         private static void UpdateGrab()
         {
@@ -753,14 +801,14 @@ namespace ExScoringMod
                 Gun gun = h == 0 ? gunL : gunR;
                 if (gun == null)
                 {
-                    triggerWasDown[h] = false;
+                    grabWasDown[h] = false;
                     if (grabHand == h) EndGrab(true);
                     continue;
                 }
 
-                bool down = TriggerDown(gun);
-                bool pressed = down && !triggerWasDown[h];
-                triggerWasDown[h] = down;
+                bool down = GrabDown(gun);
+                bool pressed = down && !grabWasDown[h];
+                grabWasDown[h] = down;
 
                 if (grabHand == h)
                 {
