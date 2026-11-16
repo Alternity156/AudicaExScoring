@@ -243,6 +243,7 @@
     <Compile Include="src\ModeButtons.cs" />
     <Compile Include="src\ModifiersPage.cs" />
     <Compile Include="src\ModSettingsBlocker.cs" />
+    <Compile Include="src\MOTDButton.cs" />
     <Compile Include="src\MpAssets.cs" />
     <Compile Include="src\MpClient.cs" />
     <Compile Include="src\MpCosmetics.cs" />

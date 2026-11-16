@@ -433,6 +433,37 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// Response shape for GET /api/motd (ApiContract Section 20.2, v2.47). `motd` is null when there
+        /// is nothing to show (no message saved yet, or the admin turned it off).
+        /// </summary>
+        public class MotdApiResponse
+        {
+            public MotdData motd;
+        }
+
+        /// <summary>
+        /// The message of the day shown on the Main page's release-notes panel under the connection
+        /// line (AudicaExStatus.cs). `text` is TMP rich text written by an admin.
+        /// </summary>
+        public class MotdData
+        {
+            public string text;
+
+            /// <summary>Optional link button (MotdButton.cs). Null when the message has no button.</summary>
+            public MotdButtonData button;
+
+            /// <summary>Unix seconds of the last change. Only used to log when the message changes.</summary>
+            public long updatedAt;
+        }
+
+        /// <summary>A MOTD button: a plain-text label and an absolute https:// URL.</summary>
+        public class MotdButtonData
+        {
+            public string label;
+            public string url;
+        }
+
+        /// <summary>
         /// Request body and response shape for PATCH /api/users/me/settings (ApiContract.md Section 14.1).
         /// gunColors is the only setting so far; add further per-player settings here as new nullable
         /// fields — null fields are omitted from the request (see ApiClient.UpdateUserSettings), so each

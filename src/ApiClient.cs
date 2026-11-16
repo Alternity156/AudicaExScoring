@@ -844,6 +844,92 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// Outcome of FetchMotd (ApiContract Section 20.6). Success covers both "there is a message" and
+        /// "there is none" (result.motd is null for the latter).
+        /// </summary>
+        public enum MotdFetchStatus
+        {
+            /// <summary>The server answered; result.motd is the message, or null when there is nothing to show.</summary>
+            Success,
+            /// <summary>404: a server older than v2.47. The caller stops asking for the rest of the session.</summary>
+            NotSupported,
+            /// <summary>Network error, any other non-2xx, or an unparsable body. The caller keeps what it had.</summary>
+            Error
+        }
+
+        public class MotdFetchResult
+        {
+            public MotdFetchStatus status;
+
+            /// <summary>Only meaningful when status == Success. Null means "no message".</summary>
+            public MotdData motd;
+        }
+
+        /// <summary>
+        /// Fetches the message of the day (GET /api/motd — ApiContract Section 20.2). Public route: no
+        /// Authorization header is sent and no API key is needed. Always calls onComplete exactly once.
+        /// </summary>
+        public static void FetchMotd(Action<MotdFetchResult> onComplete)
+        {
+            MelonCoroutines.Start(FetchMotdCoroutine(onComplete));
+        }
+
+        private static IEnumerator FetchMotdCoroutine(Action<MotdFetchResult> onComplete)
+        {
+            string url = $"{ApiBaseUrl}/api/motd";
+
+            UnityWebRequest request = UnityWebRequest.Get(url);
+            try
+            {
+                yield return request.SendWebRequest();
+
+                if (request.isNetworkError)
+                {
+                    DebugLog.Log($"[ExScoring] FetchMotd failed (network error): {request.error}");
+                    onComplete?.Invoke(new MotdFetchResult { status = MotdFetchStatus.Error });
+                    yield break;
+                }
+
+                if (request.isHttpError)
+                {
+                    if (request.responseCode == 404)
+                    {
+                        DebugLog.Log("[ExScoring] FetchMotd: 404, server has no MOTD route.");
+                        onComplete?.Invoke(new MotdFetchResult { status = MotdFetchStatus.NotSupported });
+                        yield break;
+                    }
+
+                    string errorBody = request.downloadHandler != null ? request.downloadHandler.text : "";
+                    DebugLog.Log($"[ExScoring] FetchMotd failed ({request.responseCode}): {request.error} | Body: {errorBody}");
+                    onComplete?.Invoke(new MotdFetchResult { status = MotdFetchStatus.Error });
+                    yield break;
+                }
+
+                MotdApiResponse response = null;
+                try
+                {
+                    response = JsonConvert.DeserializeObject<MotdApiResponse>(request.downloadHandler.text);
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.Log($"[ExScoring] FetchMotd: failed to parse response: {ex}");
+                }
+
+                if (response == null)
+                {
+                    onComplete?.Invoke(new MotdFetchResult { status = MotdFetchStatus.Error });
+                    yield break;
+                }
+
+                onComplete?.Invoke(new MotdFetchResult { status = MotdFetchStatus.Success, motd = response.motd });
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
+
+        /// <summary>
         /// Writes per-player settings to the server (PATCH /api/users/me/settings — see ApiContract.md
         /// Section 14.1). Plain JSON body, not gzip. Null fields of <paramref name="settings"/> are left
         /// out of the body. Requires Config.ApiKey. Always calls onComplete exactly once: with the

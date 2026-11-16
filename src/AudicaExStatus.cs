@@ -17,6 +17,11 @@ namespace ExScoringMod
     /// <see cref="State"/> so the Options > Leaderboard page can show Paste vs Delete.
     /// While an account link is in progress (AccountLink.cs), that flow owns the panel text and
     /// this class leaves the text and buttons alone.
+    /// Also fetches the message of the day (GET /api/motd, ApiContract Section 20) on every Main page
+    /// visit and draws it under the connection line, with its optional link button (MotdButton.cs).
+    /// The MOTD and its button only show while the API key is confirmed valid (State == Valid): not
+    /// with a missing or invalid key, not when the server couldn't be reached, and not while an
+    /// account link runs.
     /// </summary>
     public static class AudicaExStatus
     {
@@ -61,12 +66,32 @@ namespace ExScoringMod
         // check result, so it only ever applies to the key that was just entered.
         private static bool autoEnableUploadOnSuccess;
 
+        // ── Message of the day (ApiContract Section 20.6) ──
+
+        // The line last written above the MOTD (connection status, or an account link's closing
+        // message). Kept so the panel can be redrawn when the MOTD arrives after the key check.
+        // Null until the first status is written: until then the panel is left alone.
+        private static string lastStatusLine;
+
+        // The message to show, or null for none. Kept across fetch errors for the session.
+        private static MotdData currentMotd;
+
+        // updatedAt of the message last logged, so a change is logged once (0 = none logged yet).
+        private static long loggedMotdUpdatedAt;
+
+        // Set by a 404 (server older than v2.47): no more MOTD requests this session.
+        private static bool motdNotSupported;
+
+        // Same staleness guard as requestVersion, for the MOTD fetch.
+        private static int motdRequestVersion = 0;
+
         /// <summary>
         /// No key set: writes the final text synchronously, no request made. Key set: kicks off the
         /// async profile check and leaves the text as whatever the panel already shows (last visit's
         /// status, or the ReleaseNotes wrapper's own default on the very first ever OnEnable) until
         /// the response lands, then writes the resolved state. Safe to call every time the panel is
         /// enabled — a fresh call always wins over an in-flight older one.
+        /// Also re-fetches the message of the day (this is the Main page entry point).
         /// </summary>
         public static void Refresh(TextMeshProUGUI text)
         {
@@ -74,6 +99,7 @@ namespace ExScoringMod
 
             lastText = text;
             Check();
+            FetchMotd();
         }
 
         /// <summary>
@@ -99,10 +125,105 @@ namespace ExScoringMod
         /// <summary>
         /// Writes directly into the release-notes status text. Used by AccountLink to show the pairing
         /// code, countdown and confirm prompt. No-op if the panel hasn't been seen yet.
+        /// While the link is running the text is written as given and the MOTD button is hidden. A
+        /// message written once the flow has ended (AccountLink.Fail) is treated as the status line.
         /// </summary>
         public static void SetPanelText(string value)
         {
-            if (lastText != null) lastText.text = value;
+            if (AccountLink.IsActive)
+            {
+                if (lastText != null) lastText.text = value;
+                MotdButton.Hide();
+                return;
+            }
+
+            lastStatusLine = value;
+            DrawPanel();
+        }
+
+        /// <summary>
+        /// Fetches the message of the day. A reply only changes what's shown when the server answered:
+        /// errors keep the last message, and a 404 turns the feature off for the session.
+        /// </summary>
+        private static void FetchMotd()
+        {
+            if (motdNotSupported) return;
+
+            int thisRequest = ++motdRequestVersion;
+
+            ExScoring.FetchMotd(result =>
+            {
+                if (thisRequest != motdRequestVersion) return;
+
+                switch (result.status)
+                {
+                    case MotdFetchStatus.Success:
+                        SetMotd(result.motd);
+                        break;
+                    case MotdFetchStatus.NotSupported:
+                        motdNotSupported = true;
+                        SetMotd(null);
+                        break;
+                    case MotdFetchStatus.Error:
+                    default:
+                        // Keep the last message fetched this session (or nothing).
+                        break;
+                }
+            });
+        }
+
+        private static void SetMotd(MotdData motd)
+        {
+            if (motd != null && string.IsNullOrEmpty(motd.text)) motd = null;
+
+            long updatedAt = motd != null ? motd.updatedAt : 0;
+            if (updatedAt != loggedMotdUpdatedAt)
+            {
+                loggedMotdUpdatedAt = updatedAt;
+                DebugLog.Log(motd != null
+                    ? $"[ExScoring] MOTD changed: updatedAt={updatedAt}, {motd.text.Length} chars, button={(HasButton(motd) ? "yes" : "no")}"
+                    : "[ExScoring] MOTD cleared.");
+            }
+
+            currentMotd = motd;
+
+            // An account link owns the panel.
+            if (AccountLink.IsActive) return;
+            // A key check is in flight (or none has finished yet): its result redraws the panel, with
+            // the MOTD if the key is valid. Drawing now would blank the MOTD until then.
+            if (State == KeyState.Checking || lastStatusLine == null) return;
+
+            DrawPanel();
+        }
+
+        /// <summary>A button needs a label and an https:// link (checked again when it's shot).</summary>
+        private static bool HasButton(MotdData motd)
+        {
+            return motd != null && motd.button != null
+                && !string.IsNullOrEmpty(motd.button.label)
+                && MotdButton.IsAllowedUrl(motd.button.url);
+        }
+
+        /// <summary>
+        /// Writes the status line, then a blank line and the MOTD when there is one and the API key is
+        /// valid, and shows or hides the MOTD button to match. Only called when no account link is running.
+        /// </summary>
+        private static void DrawPanel()
+        {
+            // The MOTD is only for players connected with a valid key.
+            MotdData motd = State == KeyState.Valid ? currentMotd : null;
+
+            if (lastText != null)
+            {
+                lastText.text = motd != null
+                    ? lastStatusLine + "\n\n" + motd.text
+                    : lastStatusLine;
+            }
+
+            if (HasButton(motd))
+                MotdButton.Show(motd.button.label, motd.button.url);
+            else
+                MotdButton.Hide();
         }
 
         private static void Check()
@@ -167,7 +288,8 @@ namespace ExScoringMod
             // An account link in progress owns the panel (code, countdown, confirm prompt).
             if (AccountLink.IsActive) return;
 
-            if (lastText != null) lastText.text = text;
+            lastStatusLine = text;
+            DrawPanel();
             ApiKeyHelpButtons.SetVisible(showHelpButtons);
         }
     }
