@@ -56,6 +56,8 @@ namespace ExScoringMod
         private const string GunHitFeature = "gunHit";
         /// <summary>The v2.53 feature name: watching a player during a song. Only granted with "presence".</summary>
         private const string SpectateFeature = "spectate";
+        /// <summary>The v2.55 feature name: choosing to spectate (setSpectating). Doesn't need "presence".</summary>
+        private const string SpectatorRoleFeature = "spectatorRole";
 
         /// <summary>Pose rate without "poseRate" (a v2.39 server), as in v2.39.</summary>
         public const int DefaultPoseRateHz = 15;
@@ -123,6 +125,12 @@ namespace ExScoringMod
         /// server and after a disconnect.
         /// </summary>
         public static bool SpectateEnabled { get; private set; }
+
+        /// <summary>
+        /// True when the last welcome listed "spectatorRole" (v2.55): setSpectating may be sent and
+        /// PlayerState.spectating is meaningful. False with a v2.54 or older server and after a disconnect.
+        /// </summary>
+        public static bool SpectatorRoleEnabled { get; private set; }
 
         /// <summary>How many players are watching this player right now (v2.53, from watchers). 0 outside a lobby.</summary>
         public static int WatcherCount => InLobby ? watcherCount : 0;
@@ -604,6 +612,23 @@ namespace ExScoringMod
             Request("setReady", new JObject { ["ready"] = ready }, onComplete);
         }
 
+        /// <summary>
+        /// v2.55: chooses to watch the next matches instead of playing. Lobby phase only. True clears
+        /// ready on the server, and setReady(true) clears it again. Only sent with "spectatorRole".
+        /// </summary>
+        public static void SetSpectating(bool spectating, Action<MpError> onComplete = null)
+        {
+            if (!SpectatorRoleEnabled)
+            {
+                onComplete?.Invoke(new MpError { code = "UNSUPPORTED", message = "This server doesn't support spectating by choice." });
+                return;
+            }
+            Request("setSpectating", new JObject { ["spectating"] = spectating }, onComplete);
+        }
+
+        /// <summary>True when this player chose to spectate (v2.55).</summary>
+        public static bool IsSpectating => SpectatorRoleEnabled && MyPlayer != null && MyPlayer.spectating;
+
         /// <summary>This player's one song pick for the host. Null withdraws it.</summary>
         public static void SetSongChoice(MpSongRef song, Action<MpError> onComplete = null)
         {
@@ -862,7 +887,7 @@ namespace ExScoringMod
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("[Mp] ===== MpSession =====");
-            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} spectate={SpectateEnabled} watchers={WatcherCount} cosmetics={CosmeticsEnabled} assets={AssetsEnabled} seat={MySeat}");
+            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} spectate={SpectateEnabled} spectatorRole={SpectatorRoleEnabled} watchers={WatcherCount} cosmetics={CosmeticsEnabled} assets={AssetsEnabled} seat={MySeat}");
             sb.AppendLine($"[Mp] cosmetics: wanted={wantedCosmeticsKey ?? "none"} sent={(wantedCosmeticsKey != null && wantedCosmeticsKey == lastSentCosmeticsKey ? "yes" : "no")}");
             sb.AppendLine($"[Mp] clock: offset={ClockOffsetMs} ms, lastRtt={LastRttMs} ms, bestRtt={BestRttMs} ms, samples={clockSamples.Count}, serverNow={ServerNowMs}");
             sb.AppendLine($"[Mp] pending requests={pendingRequests.Count}, queued={queuedRequests.Count}, location=\"{currentLocation}\" browsing={currentBrowsingSongId ?? "none"}");
@@ -889,7 +914,7 @@ namespace ExScoringMod
                             ? "-"
                             : p.songStatus.status + (p.songStatus.progress.HasValue ? $" {p.songStatus.progress.Value:P0}" : "");
                         sb.AppendLine($"[Mp]   {(p.isHost ? "*" : " ")} seat {p.seat} \"{p.nickname}\" {p.userId}{(p.guest ? " guest" : "")}{(p.bot ? " bot" : "")}{(p.connected ? "" : " DISCONNECTED")}{(p.presence ? " presence" : "")}{(p.gunColors != null ? " colors" : "")}{(p.cosmetics != null ? " cosmetics" : "")} " +
-                                      $"loc={p.location} mode={p.scoringMode} song={status} diff={p.difficulty ?? "-"} ready={p.ready} " +
+                                      $"loc={p.location} mode={p.scoringMode} song={status} diff={p.difficulty ?? "-"} ready={p.ready} spectating={p.spectating} " +
                                       $"choice={(p.songChoice != null ? p.songChoice.title ?? p.songChoice.songId : "-")} role={p.matchRole ?? "-"}");
                     }
                 }
@@ -952,11 +977,11 @@ namespace ExScoringMod
                 ["modVersion"] = ExScoring.BuildInfo.Version,
                 ["platform"] = helloPlatform,
                 ["guestName"] = helloGuestName,
-                ["features"] = new JArray(PresenceFeature, PoseRateFeature, HeadshotFeature, CosmeticsFeature, GunHitFeature, SpectateFeature)
+                ["features"] = new JArray(PresenceFeature, PoseRateFeature, HeadshotFeature, CosmeticsFeature, GunHitFeature, SpectateFeature, SpectatorRoleFeature)
             };
             if (!string.IsNullOrEmpty(resumeToken)) hello["resumeToken"] = resumeToken;
 
-            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}, {PoseRateFeature}, {HeadshotFeature}, {CosmeticsFeature}, {GunHitFeature}, {SpectateFeature}])");
+            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}, {PoseRateFeature}, {HeadshotFeature}, {CosmeticsFeature}, {GunHitFeature}, {SpectateFeature}, {SpectatorRoleFeature}])");
             MpClient.Send(hello.ToString(Formatting.None));
         }
 
@@ -1142,6 +1167,7 @@ namespace ExScoringMod
             HeadshotEnabled = false;
             GunHitEnabled = false;
             SpectateEnabled = false;
+            SpectatorRoleEnabled = false;
             watcherCount = 0;
             lastSentWatchKey = null;
             CosmeticsEnabled = false;
@@ -1178,6 +1204,8 @@ namespace ExScoringMod
             GunHitEnabled = PresenceEnabled && Array.IndexOf(welcome.features, GunHitFeature) >= 0;
             // "spectate" only counts with "presence" too (v2.53). The server sends watchers again after a resume.
             SpectateEnabled = PresenceEnabled && Array.IndexOf(welcome.features, SpectateFeature) >= 0;
+            // "spectatorRole" stands alone (v2.55).
+            SpectatorRoleEnabled = welcome.features != null && Array.IndexOf(welcome.features, SpectatorRoleFeature) >= 0;
             watcherCount = 0;
             lastSentWatchKey = null; // the watch is sent again on this connection
             // "cosmetics" only counts with "presence" too (v2.44); assets need the server's storage and a token.
@@ -1196,7 +1224,7 @@ namespace ExScoringMod
             MpClient.MarkWelcomed();
             nextPingAtMs = 0; // ping right away for a real clock sample
 
-            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz" : "off (" + PoseRateHz + " Hz)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} spectate={SpectateEnabled} watchers={WatcherCount} cosmetics={CosmeticsEnabled} assets={AssetsEnabled}");
+            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz" : "off (" + PoseRateHz + " Hz)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} spectate={SpectateEnabled} spectatorRole={SpectatorRoleEnabled} watchers={WatcherCount} cosmetics={CosmeticsEnabled} assets={AssetsEnabled}");
 
             if (welcome.lobby != null)
             {

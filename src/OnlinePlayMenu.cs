@@ -257,9 +257,24 @@ namespace ExScoringMod
                 () => MpSession.MyPlayer != null && MpSession.MyPlayer.ready,
                 v => MpSession.SetReady(v, ReportError),
                 "Ready to play the selected song (you need the song, on an available difficulty)");
-            var leave = OptionsMenuClone.CreateButton(1, "Leave Lobby", () => MpSession.LeaveLobby(ReportError),
-                "Leaves the lobby");
-            OptionsMenuClone.AddRow(ready, leave);
+            if (MpSession.SpectatorRoleEnabled)
+            {
+                // v2.55: the same toggle as the lobby panel's Spectate (SpectatorWindow): opens the
+                // window and tells the server. Ready and Spectate exclude each other on the server.
+                var spectate = OptionsMenuClone.CreateToggle(1, "Spectate",
+                    () => SpectatorWindow.IsOpen,
+                    v => SpectatorWindow.SetSpectate(v),
+                    "Watch the next matches instead of playing, in a window showing another player's view (you don't need the song, and the match doesn't wait for you)");
+                OptionsMenuClone.AddRow(ready, spectate);
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateButton(0, "Leave Lobby", () => MpSession.LeaveLobby(ReportError),
+                    "Leaves the lobby"));
+            }
+            else
+            {
+                var leave = OptionsMenuClone.CreateButton(1, "Leave Lobby", () => MpSession.LeaveLobby(ReportError),
+                    "Leaves the lobby");
+                OptionsMenuClone.AddRow(ready, leave);
+            }
 
             // The song currently selected in the song list, with the selected difficulty.
             MpSongRef current = CurrentSongRef();
@@ -314,7 +329,7 @@ namespace ExScoringMod
                     var force = OptionsMenuClone.CreateToggle(1, "Force Start",
                         () => ForceStart,
                         v => ForceStart = v,
-                        "On: start without waiting for everyone to be ready; players who aren't ready spectate");
+                        "On: start without waiting for everyone to be ready; players who aren't ready spectate (players set to Spectate never play)");
                     OptionsMenuClone.AddRow(start, force);
                 }
                 else
@@ -595,6 +610,8 @@ namespace ExScoringMod
                 case "NO_SONG_SELECTED": return "Select a song first.";
                 case "NOT_ELIGIBLE": return "You need the selected song (on an available difficulty) to be ready.";
                 case "NOT_ALL_READY": return "Not everyone is ready." + NotReadyNames(error.userIds);
+                case "NO_PARTICIPANTS": return "Nobody would play: everyone is spectating or not ready.";
+                case "UNSUPPORTED": return string.IsNullOrEmpty(error.message) ? "Not supported by this server." : error.message;
                 case "BAD_DIFFICULTY": return "That difficulty isn't available for this song.";
                 case "UNKNOWN_PLAYER": return "That player isn't in the lobby anymore.";
                 case "RATE_LIMITED": return "Too fast, try again in a moment.";

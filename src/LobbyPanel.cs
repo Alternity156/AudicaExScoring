@@ -216,7 +216,8 @@ namespace ExScoringMod
 
         /// <summary>
         /// A selected song that is also the host's song-list selection, and every connected player
-        /// ready (the host counts as ready), or Force Start on.
+        /// ready or spectating (the host counts as ready), or Force Start on; and at least one
+        /// player who would play (v2.55).
         /// </summary>
         private static bool CanStart()
         {
@@ -226,14 +227,25 @@ namespace ExScoringMod
             // else it's fine: the match always plays the lobby's selected song (the last pool song
             // the host picked); matchPrepare sets the local selection to it before launching.
             if (ExScoring.menuState == MenuState.State.SongPage && !LobbyLaunchButton.HostOnLobbySong()) return false;
-            if (OnlinePlayMenu.ForceStart) return true;
             if (lobby.players == null) return false;
+
+            // v2.55: a spectating player never plays and doesn't hold up a normal start. The host
+            // plays unless spectating. Someone has to play, with or without Force Start.
+            bool spectatorRole = MpSession.SpectatorRoleEnabled;
+            bool anyPlayer = false;
             foreach (MpPlayerState p in lobby.players)
             {
-                if (p == null || !p.connected || p.userId == lobby.hostUserId) continue;
-                if (!p.ready) return false;
+                if (p == null || !p.connected) continue;
+                bool spectating = spectatorRole && p.spectating;
+                if (p.userId == lobby.hostUserId)
+                {
+                    if (!spectating) anyPlayer = true;
+                    continue;
+                }
+                if (p.ready) anyPlayer = true;
+                else if (!spectating && !OnlinePlayMenu.ForceStart) return false;
             }
-            return true;
+            return anyPlayer;
         }
 
         private static bool EnsureStartButton()
@@ -733,7 +745,8 @@ namespace ExScoringMod
                 }
 
                 line.Append("  <color=#d8d8d8>").Append(FriendlyLocation(p.location)).Append("</color>");
-                line.Append(p.ready ? "  <color=#66ff66>Ready</color>" : "  <color=#c0c0c0>Not ready</color>");
+                if (MpSession.SpectatorRoleEnabled && p.spectating) line.Append("  <color=#b48cff>Spectating</color>");
+                else line.Append(p.ready ? "  <color=#66ff66>Ready</color>" : "  <color=#c0c0c0>Not ready</color>");
 
                 string songStatus = SongStatusText(p.songStatus);
                 if (songStatus.Length > 0) line.Append("  ").Append(songStatus);

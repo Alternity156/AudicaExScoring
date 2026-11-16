@@ -4357,12 +4357,14 @@ namespace ExScoringMod
 
         /// <summary>
         /// True when this player's disc should be dark: the setting is on, the lobby is between
-        /// matches, and they aren't ready or are reconnecting.
+        /// matches, and they aren't ready (nor spectating, v2.55) or are reconnecting.
         /// </summary>
         private static bool WantsDarkDisc(MpPlayerState player, MpLobbyState lobby)
         {
             if (!Config.DimUnreadyPlatforms) return false;
             if (lobby == null || lobby.phase != "lobby" || player == null) return false;
+            // v2.55: a spectating player made their choice and doesn't hold up the start: bright disc.
+            if (MpSession.SpectatorRoleEnabled && player.spectating && player.connected) return false;
             return !player.ready || !player.connected;
         }
 

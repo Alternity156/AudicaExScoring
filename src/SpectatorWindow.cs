@@ -169,6 +169,13 @@ namespace ExScoringMod
 
         // ── State ────────────────────────────────────────────────────────────
         private static bool open;            // the player wants the window
+
+        // v2.55 ("spectatorRole"): the Spectate toggle also tells the server this player spectates.
+        // While a setSpectating is in flight the window isn't synced to the server's flag.
+        private const float SpectatingPendingSeconds = 2f;
+        private static float spectatingPendingUntil;
+        // The server refused setSpectating(true): don't ask again until the next shot.
+        private static bool spectatingRefused;
         private static string watchedId;
 
         private static GameObject root;
@@ -263,6 +270,7 @@ namespace ExScoringMod
                 }
 
                 UpdateOpener(available);
+                if (available) SyncSpectating();
 
                 // v2.53: who the server should keep sending while they play. Only changes go out.
                 if (Time.unscaledTime >= nextWatchSync)
@@ -356,7 +364,7 @@ namespace ExScoringMod
             OptionsMenuButton toggle = OptionsMenuClone.Menu.AddButton(0, "Spectate",
                 new Action(OnOpenerShot),
                 new Func<bool>(() => open),
-                "Opens a window showing another player's view");
+                "Watch the next matches instead of playing, in a window showing another player's view");
             if (toggle == null || toggle.button == null)
             {
                 Log("couldn't make the Spectate toggle");
@@ -384,9 +392,77 @@ namespace ExScoringMod
 
         private static void OnOpenerShot()
         {
-            open = !open;
+            SetSpectate(!open);
+        }
+
+        /// <summary>True while the player wants the window (the Spectate toggle is on).</summary>
+        internal static bool IsOpen => open;
+
+        /// <summary>
+        /// The Spectate toggle (here and in the Online Play screen): opens or closes the window and,
+        /// in the lobby phase with "spectatorRole" (v2.55), tells the server this player spectates
+        /// (which clears Ready) or plays again. During a match only the window changes; SyncSpectating
+        /// catches the server up once back in the lobby.
+        /// </summary>
+        internal static void SetSpectate(bool want)
+        {
+            open = want;
+            if (!want) watchedId = null;
             nextStateRefresh = 0f;
+            spectatingRefused = false;
             Log(open ? "opened" : "closed");
+
+            if (CanSendSpectating()) SendSpectating(want);
+        }
+
+        private static bool CanSendSpectating()
+        {
+            return MpSession.SpectatorRoleEnabled && MpSession.IsConnected && MpSession.Lobby != null
+                   && MpSession.Lobby.phase == "lobby" && MpSession.MyPlayer != null;
+        }
+
+        private static void SendSpectating(bool spectating)
+        {
+            spectatingPendingUntil = Time.unscaledTime + SpectatingPendingSeconds;
+            MpSession.SetSpectating(spectating, error =>
+            {
+                spectatingPendingUntil = 0f;
+                if (error == null) return;
+                Log("setSpectating(" + spectating + "): " + OnlinePlayMenu.Describe(error));
+                if (spectating) spectatingRefused = true;
+            });
+        }
+
+        /// <summary>
+        /// Keeps the window and the server's spectating flag (v2.55) together in the lobby phase:
+        /// spectating set elsewhere (another client session, a reconnect) opens the window; Ready
+        /// (which clears spectating on the server) closes it; a window opened during a match tells
+        /// the server once back in the lobby.
+        /// </summary>
+        private static void SyncSpectating()
+        {
+            if (!CanSendSpectating() || Time.unscaledTime < spectatingPendingUntil) return;
+
+            MpPlayerState me = MpSession.MyPlayer;
+            if (me.spectating && !open)
+            {
+                open = true;
+                nextStateRefresh = 0f;
+                Log("opened (spectating on the server)");
+            }
+            else if (!me.spectating && open)
+            {
+                if (me.ready)
+                {
+                    open = false;
+                    watchedId = null;
+                    Log("closed (ready to play)");
+                }
+                else if (!spectatingRefused)
+                {
+                    SendSpectating(true);
+                }
+            }
         }
 
         // ── Building the window ──────────────────────────────────────────────

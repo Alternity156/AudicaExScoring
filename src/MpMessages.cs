@@ -60,6 +60,11 @@ namespace ExScoringMod
         /// <summary>Effective difficulty for the selected song.</summary>
         public string difficulty;
         public bool ready;
+        /// <summary>
+        /// This player chose to watch (v2.55, "spectatorRole"): a normal start doesn't wait for them and
+        /// they never play. Never true together with ready. False from an older server.
+        /// </summary>
+        public bool spectating;
         public MpSongRef songChoice;
         /// <summary>"player" | "spectator" | null (only set during loading/playing).</summary>
         public string matchRole;
