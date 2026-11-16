@@ -37,6 +37,7 @@ namespace ExScoringMod
         public string titleOverride; // song: text shown instead of the song's own title (e.g. "Destiny (Suggested by Bob)")
         public bool disabled;     // action/downloadable: shown but not shootable
         public bool labelOnly;    // action: plain label (e.g. playlist title) — not dimmed, colliders off so the gun can't highlight or hit it
+        internal FolderStyle style; // header: folder.json customization (display name, image, text color), or null
 
         /// <summary>Default folder-header grey. Action rows override via their own color.</summary>
         public static Color FolderColor => ColorSettings.FolderOther.Value; // customisable (Options > Colors)
@@ -388,6 +389,17 @@ namespace ExScoringMod
             public bool inUse;
             public List<Collider> colliders; // cached on first bind; turned off for label rows
             public bool collidersEnabled = true;
+
+            // folder.json customization. The image sits on its own mesh just in front of the
+            // colored Quad, so the folder color shows through transparent / uncovered parts.
+            public Transform quadTransform;
+            public Vector3 quadMeshCenter;  // Quad mesh bounds in Quad-local space; the image area is
+            public Vector2 quadMeshSize;    // expressed as fractions of this rect (not the unit quad)
+            public GameObject imageGo;     // child of Quad, hidden unless the bound row has an image
+            public Material imageMat;
+            public Mesh imageMesh;         // own mesh so crop can be done with UVs
+            public Color titleColor;       // the button's default text colors, restored for rows without textColor
+            public Color artistColor;
 
             // Star-display reuse (star-sort headers). Cached once at creation; toggled per bind.
             public GameObject starDisplay;                 // Canvas/StarDisplay (kept off except on star headers)
@@ -1028,7 +1040,11 @@ namespace ExScoringMod
                     }
                     else
                     {
-                        if (hi.title != null) hi.title.text = row.folderName;
+                        if (hi.title != null)
+                            hi.title.text = row.style == null ? row.folderName
+                                : row.style.hideName ? ""
+                                : !string.IsNullOrEmpty(row.style.displayName) ? row.style.displayName
+                                : row.folderName;
                         if (hi.artist != null) hi.artist.text = row.subLabel ?? $"{row.songCount} song{(row.songCount != 1 ? "s" : "")}";
                     }
 
@@ -1056,6 +1072,9 @@ namespace ExScoringMod
                         hi.button.SetInteractable(row.labelOnly || !row.disabled);
                     }
                 }
+
+                // Always applied (style may be null) so a pooled item never keeps another row's image/text color.
+                ApplyFolderStyle(hi, row.kind == ViewRowKind.FolderHeader && !row.starHeader ? row.style : null);
 
                 hi.inUse = true;
                 rowBindings[physicalIndex] = new Binding { isHeader = true, slot = slot };
@@ -1482,7 +1501,7 @@ namespace ExScoringMod
                 }
             }
 
-            return new HeaderPoolItem
+            var item = new HeaderPoolItem
             {
                 go = clone,
                 title = title,
@@ -1492,8 +1511,164 @@ namespace ExScoringMod
                 inUse = false,
                 starDisplay = starDisplay,
                 starPips = starPips,
-                starObjs = starObjs
+                starObjs = starObjs,
+                titleColor = title != null ? title.color : Color.white,
+                artistColor = artist != null ? artist.color : Color.white
             };
+            CreateFolderImageLayer(item);
+            return item;
+        }
+
+        // ── folder.json image layer ──────────────────────────────────────────
+
+        private static Shader folderImageShader;
+
+        /// <summary>
+        /// Adds a hidden, collider-less image mesh as a child of the header's Quad. The Quad's mesh
+        /// is NOT a unit quad (measured ~4x), so the image mesh is built to the Quad mesh's bounds:
+        /// scale (1,1) at localPosition = bounds center covers the whole button, and
+        /// imageSize / imagePosition are fractions of that rect.
+        /// </summary>
+        private static void CreateFolderImageLayer(HeaderPoolItem hi)
+        {
+            try
+            {
+                Transform quad = FindChild(hi.go.transform, "Quad");
+                if (quad == null) return;
+                hi.quadTransform = quad;
+
+                if (folderImageShader == null)
+                    folderImageShader = Shader.Find("Sprites/Default") ?? Shader.Find("Unlit/Transparent");
+                if (folderImageShader == null)
+                {
+                    DebugLog.Log("[VList] No shader for folder images (Sprites/Default, Unlit/Transparent).");
+                    return;
+                }
+
+                var go = new GameObject("FolderImage");
+                go.layer = quad.gameObject.layer;
+                go.transform.SetParent(quad, false);
+                go.transform.localRotation = Quaternion.identity;
+                go.transform.localScale = Vector3.one;
+
+                // Button rect in Quad-local space, from the Quad's own mesh (fallback: unit quad).
+                Vector3 center = Vector3.zero;
+                Vector2 size = Vector2.one;
+                var quadFilter = quad.GetComponent<MeshFilter>();
+                if (quadFilter != null && quadFilter.sharedMesh != null)
+                {
+                    Bounds b = quadFilter.sharedMesh.bounds;
+                    if (b.size.x > 1e-5f && b.size.y > 1e-5f)
+                    {
+                        center = b.center;
+                        size = new Vector2(b.size.x, b.size.y);
+                    }
+                }
+                hi.quadMeshCenter = center;
+                hi.quadMeshSize = size;
+
+                // Just in front of the Quad (verified in-game: -0.01 local z is the player's side),
+                // so it draws over the folder color but under the labels.
+                go.transform.localPosition = new Vector3(center.x, center.y, center.z - 0.01f);
+
+                float hx = size.x * 0.5f, hy = size.y * 0.5f;
+                var mesh = new Mesh { name = "FolderImageMesh" };
+                mesh.vertices = new Vector3[]
+                {
+                    new Vector3(-hx, -hy, 0f), new Vector3(hx, -hy, 0f),
+                    new Vector3(-hx,  hy, 0f), new Vector3(hx,  hy, 0f)
+                };
+                mesh.uv = new Vector2[] { new Vector2(0f, 0f), new Vector2(1f, 0f), new Vector2(0f, 1f), new Vector2(1f, 1f) };
+                mesh.triangles = new int[] { 0, 2, 1, 2, 3, 1 };
+                mesh.RecalculateBounds();
+                mesh.hideFlags = HideFlags.DontUnloadUnusedAsset;
+
+                go.AddComponent<MeshFilter>().sharedMesh = mesh;
+                var renderer = go.AddComponent<MeshRenderer>();
+                var mat = new Material(folderImageShader) { color = Color.white };
+                mat.hideFlags = HideFlags.DontUnloadUnusedAsset;
+                renderer.sharedMaterial = mat;
+
+                go.SetActive(false);
+                hi.imageGo = go;
+                hi.imageMat = mat;
+                hi.imageMesh = mesh;
+            }
+            catch (Exception e)
+            {
+                DebugLog.Log("[VList] CreateFolderImageLayer failed: " + e.Message);
+            }
+        }
+
+        /// <summary>Applies (or clears, with null) a folder.json style on a bound header.</summary>
+        private static void ApplyFolderStyle(HeaderPoolItem hi, FolderStyle style)
+        {
+            try
+            {
+                Color? textColor = style != null ? style.textColor : null;
+                if (hi.title != null) hi.title.color = textColor ?? hi.titleColor;
+                if (hi.artist != null) hi.artist.color = textColor ?? hi.artistColor;
+
+                bool show = style != null && style.image != null
+                            && hi.imageGo != null && hi.imageMat != null && hi.imageMesh != null && hi.quadTransform != null;
+                if (!show)
+                {
+                    if (hi.imageGo != null && hi.imageGo.activeSelf) hi.imageGo.SetActive(false);
+                    return;
+                }
+
+                Texture2D tex = style.image;
+                float bright = 1f - style.imageDim;
+                hi.imageMat.mainTexture = tex;
+                hi.imageMat.color = new Color(bright, bright, bright, 1f);
+
+                // Aspect ratios: the button's (its mesh rect measured in world space, so parent
+                // scale/rotation is accounted for), the image area's, the texture's.
+                Vector2 area = style.imageSize;
+                float worldW = hi.quadTransform.TransformVector(new Vector3(hi.quadMeshSize.x, 0f, 0f)).magnitude;
+                float worldH = hi.quadTransform.TransformVector(new Vector3(0f, hi.quadMeshSize.y, 0f)).magnitude;
+                float buttonAspect = worldH > 1e-5f ? worldW / worldH : 1f;
+                float areaAspect = buttonAspect * area.x / area.y;
+                float texAspect = tex.height > 0 ? (float)tex.width / tex.height : 1f;
+
+                Vector2 scale = area;
+                float u0 = 0f, u1 = 1f, v0 = 0f, v1 = 1f;
+                switch (style.imageFit)
+                {
+                    case FolderImageFit.Crop:
+                        if (texAspect > areaAspect)
+                        {
+                            float w = areaAspect / texAspect; // visible fraction of the texture width
+                            u0 = (1f - w) * 0.5f; u1 = u0 + w;
+                        }
+                        else
+                        {
+                            float h = texAspect / areaAspect;
+                            v0 = (1f - h) * 0.5f; v1 = v0 + h;
+                        }
+                        break;
+                    case FolderImageFit.Fit:
+                        if (texAspect > areaAspect) scale.y = area.y * (areaAspect / texAspect);
+                        else scale.x = area.x * (texAspect / areaAspect);
+                        break;
+                        // Stretch: full texture over the full area.
+                }
+
+                hi.imageMesh.uv = new Vector2[] { new Vector2(u0, v0), new Vector2(u1, v0), new Vector2(u0, v1), new Vector2(u1, v1) };
+
+                Transform t = hi.imageGo.transform;
+                t.localPosition = new Vector3(
+                    hi.quadMeshCenter.x + style.imagePosition.x * hi.quadMeshSize.x,
+                    hi.quadMeshCenter.y + style.imagePosition.y * hi.quadMeshSize.y,
+                    t.localPosition.z);
+                t.localScale = new Vector3(scale.x, scale.y, 1f);
+
+                if (!hi.imageGo.activeSelf) hi.imageGo.SetActive(true);
+            }
+            catch (Exception e)
+            {
+                DebugLog.Log("[VList] ApplyFolderStyle failed: " + e.Message);
+            }
         }
 
         private static void DestroyPool()

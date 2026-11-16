@@ -221,6 +221,7 @@
     <Compile Include="src\ExLeaderboardDisplay.cs" />
     <Compile Include="src\ExScoreComparison.cs" />
     <Compile Include="src\FavoriteStore.cs" />
+    <Compile Include="src\FolderCustomization.cs" />
     <Compile Include="src\FolderRowManager.cs" />
     <Compile Include="src\GameplayStatsPanel.cs" />
     <Compile Include="src\GlobalOptions.cs" />

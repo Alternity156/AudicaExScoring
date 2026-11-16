@@ -100,6 +100,10 @@ namespace ExScoringMod
 
             Dictionary<string, List<string>> subfolderByFilename = BuildSubfolderMap(mainSongDirectory);
 
+            // Optional folder.json per pack subfolder (display name, colors, image). Cached by
+            // write time, so unchanged folders don't reload their image on every rebuild.
+            FolderCustomization.Reload(mainSongDirectory);
+
             bool hasAudica = false;
             bool hasAudicaDLC = false;
             bool hasCustom = false;
@@ -197,7 +201,17 @@ namespace ExScoringMod
             if (hasAudica) availableFolders.Add(FolderAudica);
             if (hasAudicaDLC) availableFolders.Add(FolderAudicaDLC);
             if (hasCustom) availableFolders.Add(FolderCustom);
-            foreach (string name in customFolders.Keys)
+
+            // Pack folders sort by what's shown on the button (folder.json "name" if set, else the
+            // folder name), case-insensitive; the on-disk name breaks ties so the order is stable.
+            var packFolders = new List<string>(customFolders.Keys);
+            packFolders.Sort((a, b) =>
+            {
+                int c = string.Compare(FolderCustomization.DisplayName(a), FolderCustomization.DisplayName(b),
+                                       System.StringComparison.OrdinalIgnoreCase);
+                return c != 0 ? c : string.CompareOrdinal(a, b);
+            });
+            foreach (string name in packFolders)
                 if (!availableFolders.Contains(name)) // a pack folder can't shadow a virtual folder's name
                     availableFolders.Add(name);
 

@@ -611,6 +611,10 @@ namespace ExScoringMod
                     // Search-results folder (dynamic name).
                     if (folder == SongFolderManager.searchFolderName)
                         return ColorSettings.FolderSearch.Value;
+                    // Pack subfolder with a folder.json "color" → that color instead of "Other Folders".
+                    FolderStyle style = FolderCustomization.Get(folder);
+                    if (style != null && style.color.HasValue)
+                        return style.color.Value;
                     return ViewRow.FolderColor;
             }
         }
@@ -690,7 +694,11 @@ namespace ExScoringMod
                         folder == SongFolderManager.FolderFavorites ? favCount :
                         folder == SongFolderManager.searchFolderName ? (searchCount + GetSearchDownloadables().Count) :
                         (counts.TryGetValue(folder, out int c) ? c : 0);
-                    rows.Add(ViewRow.Header(folder, count, color: FolderColorFor(folder)));
+                    ViewRow header = ViewRow.Header(folder, count, color: FolderColorFor(folder));
+                    // folder.json look (name / image / text color) — pack subfolders only, never the virtual folders.
+                    if (folder != SongFolderManager.FolderFavorites && folder != SongFolderManager.searchFolderName)
+                        header.style = FolderCustomization.Get(folder);
+                    rows.Add(header);
                 }
 
                 if (folder == open)
