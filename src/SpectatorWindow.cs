@@ -60,7 +60,7 @@ namespace ExScoringMod
     /// OptionsMenuFunctions' GrabScroll.OnGrab patch).
     ///
     /// Size: the - and + buttons right of Next Player divide or multiply the window by SizeStepFactor,
-    /// SizeStepMin..SizeStepMax steps from the base size (WindowWidth x WindowHeight). Only the frame,
+    /// down to SizeStepMin steps from the base size and with no upper limit (WindowWidth x WindowHeight). Only the frame,
     /// picture and shot blocker change; the title and the buttons keep their size and follow the
     /// window's top and bottom edges. Saved as PrefsScale (a factor) and snapped to a step on load.
     /// The two buttons are copies of the small square "reload" button of the customization menu's
@@ -97,8 +97,8 @@ namespace ExScoringMod
     internal static class SpectatorWindow
     {
         // ── Tunables ─────────────────────────────────────────────────────────
-        private const int TextureWidth = 960;
-        private const int TextureHeight = 540;
+        private const int TextureWidth = 1920;
+        private const int TextureHeight = 1080;
         private const int TextureAntiAliasing = 2;
 
         private const float WindowWidth = 0.6f;                      // metres
@@ -130,7 +130,6 @@ namespace ExScoringMod
         // Size buttons (- and +), right of Next Player.
         private const float SizeStepFactor = 1.25f;
         private const int SizeStepMin = -3;                          // 1.25^-3 = 0.51x
-        private const int SizeStepMax = 5;                           // 1.25^5  = 3.05x
         private const float SizeButtonGap = 0.012f;                  // metres between buttons
         private const float SizeLabelFontSize = 0.45f;               // the - and + labels
         private const string CustomModelSliderName = "OptionsMenuSlider_CustomModel";
@@ -720,7 +719,7 @@ namespace ExScoringMod
                 plusButton.mShellPage = page;
             }
             minusButton.SetInteractable(sizeStep > SizeStepMin);
-            plusButton.SetInteractable(sizeStep < SizeStepMax);
+            plusButton.SetInteractable(true);
         }
 
         // ── Size ─────────────────────────────────────────────────────────────
@@ -748,13 +747,12 @@ namespace ExScoringMod
 
         private static void ChangeSize(int delta)
         {
-            int step = Mathf.Clamp(sizeStep + delta, SizeStepMin, SizeStepMax);
+            int step = Mathf.Max(sizeStep + delta, SizeStepMin);
             if (step == sizeStep) return;
             sizeStep = step;
             ApplySize();
             SaveScale();
             if (minusButton != null) minusButton.SetInteractable(sizeStep > SizeStepMin);
-            if (plusButton != null) plusButton.SetInteractable(sizeStep < SizeStepMax);
             Log($"size step {sizeStep} ({SizeScale:0.##}x)");
         }
 
@@ -1223,7 +1221,7 @@ namespace ExScoringMod
                 EnsurePrefs();
                 float scale = MelonPrefs.GetFloat(PrefsCategory, PrefsScale);
                 if (float.IsNaN(scale) || float.IsInfinity(scale) || scale <= 0f) scale = 1f;
-                sizeStep = Mathf.Clamp(Mathf.RoundToInt(Mathf.Log(scale) / Mathf.Log(SizeStepFactor)), SizeStepMin, SizeStepMax);
+                sizeStep = Mathf.Max(Mathf.RoundToInt(Mathf.Log(scale) / Mathf.Log(SizeStepFactor)), SizeStepMin);
             }
             catch (Exception ex)
             {
