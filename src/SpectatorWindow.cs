@@ -5,6 +5,7 @@ using TMPro;
 using UnhollowerBaseLib;      // TryCast
 using UnhollowerRuntimeLib;   // Il2CppType (ML 0.5.7)
 using UnityEngine;
+using UnityEngine.Events;
 
 namespace ExScoringMod
 {
@@ -58,6 +59,18 @@ namespace ExScoringMod
     /// trigger grab aimed at the window doesn't grab-scroll a list behind it (BlocksGrabScroll, used by
     /// OptionsMenuFunctions' GrabScroll.OnGrab patch).
     ///
+    /// Size: the - and + buttons right of Next Player divide or multiply the window by SizeStepFactor,
+    /// SizeStepMin..SizeStepMax steps from the base size (WindowWidth x WindowHeight). Only the frame,
+    /// picture and shot blocker change; the title and the buttons keep their size and follow the
+    /// window's top and bottom edges. Saved as PrefsScale (a factor) and snapped to a step on load.
+    /// The two buttons are copies of the small square "reload" button of the customization menu's
+    /// slider (the OptionsMenuSlider_CustomModel prefab, found among loaded objects even while that
+    /// menu isn't open). Its children (UnityExplorer dump 2026-11-15): colliderreset (MeshCollider +
+    /// GunButton), highlightreset (shown while aimed at), panel (ButtonMirror background), icon
+    /// (SpriteRenderer). The icon is hidden and a - or + label is drawn in its place. Not "reset":
+    /// that one is only a hit area and highlight, drawn over the slider's own panel, so it is
+    /// invisible on its own.
+    ///
     /// Watching during a song (v2.53, "spectate"): the window tells the server who it shows
     /// (MpSession.SetWatch, re-sent by MpSession when needed; nobody while the window is closed or
     /// this player is in a song). The server then keeps listing that player in poses while they
@@ -110,7 +123,19 @@ namespace ExScoringMod
 
         // Buttons: options-menu rows at LobbyPanel's scale.
         private static readonly Vector3 ButtonScale = new Vector3(0.05f, 0.05f, 0.05f);
-        private static readonly Vector3 NextButtonPosition = new Vector3(-0.125f, -(WindowHeight * 0.5f) - 0.06f, -0.005f);
+        private const float NextButtonX = -0.125f;
+        private const float NextButtonBelow = 0.06f;                 // below the picture's bottom edge
+        private const float NextButtonZ = -0.005f;
+
+        // Size buttons (- and +), right of Next Player.
+        private const float SizeStepFactor = 1.25f;
+        private const int SizeStepMin = -3;                          // 1.25^-3 = 0.51x
+        private const int SizeStepMax = 5;                           // 1.25^5  = 3.05x
+        private const float SizeButtonGap = 0.012f;                  // metres between buttons
+        private const float SizeLabelFontSize = 0.45f;               // the - and + labels
+        private const string CustomModelSliderName = "OptionsMenuSlider_CustomModel";
+        private const string SquareButtonChild = "reload";           // in CustomModelSliderName
+        private const string SquareButtonIcon = "icon";              // in SquareButtonChild
 
         // The opener sits under LobbyPanel's Start Song button (same 0.081 spacing), in LobbyPanel's frame.
         private static readonly Vector3 LobbyPanelPosition = new Vector3(-0.549f, 1.03f, 1.33f);
@@ -141,6 +166,7 @@ namespace ExScoringMod
 
         private const string PrefsCategory = "ExScoringSpectatorWindow";
         private const string PrefsPose = "WindowPose";
+        private const string PrefsScale = "WindowScale";
 
         // ── State ────────────────────────────────────────────────────────────
         private static bool open;            // the player wants the window
@@ -158,6 +184,14 @@ namespace ExScoringMod
 
         private static GameObject nextObject;
         private static GunButton nextButton;
+
+        private static int sizeStep;                     // 0 = base size
+        private static GameObject frameObject, pictureObject;
+        private static BoxCollider blockerBox;
+        private static GameObject minusObject, plusObject;
+        private static GunButton minusButton, plusButton;
+        private static Vector3 minusOffset, plusOffset;  // from Next Player's local position
+        private static bool sizeButtonsFailed;            // no source button found: don't search every refresh
 
         private static GameObject openerRoot;
         private static GameObject openerObject;
@@ -208,6 +242,11 @@ namespace ExScoringMod
                 return HeadOf(watchedId) != null ? watchedRoot : null;
             }
         }
+
+        private static float SizeScale => Mathf.Pow(SizeStepFactor, sizeStep);
+        private static float CurrentWidth => WindowWidth * SizeScale;
+        private static float CurrentHeight => WindowHeight * SizeScale;
+        private static Vector3 NextButtonPosition => new Vector3(NextButtonX, -(CurrentHeight * 0.5f) - NextButtonBelow, NextButtonZ);
 
         // ── Tick ─────────────────────────────────────────────────────────────
 
@@ -378,6 +417,7 @@ namespace ExScoringMod
                 root.transform.eulerAngles = DefaultRotation;
                 root.transform.localScale = Vector3.one;
                 LoadPose();
+                LoadScale();
 
                 // Render target
                 texture = new RenderTexture(TextureWidth, TextureHeight, 24);
@@ -414,21 +454,21 @@ namespace ExScoringMod
                 frameMaterial = new Material(frameShader) { name = "ExScoring_SpectatorWindowFrame", color = FrameColor };
                 frameMaterial.renderQueue = opaque ? FrameRenderQueue : FallbackFrameRenderQueue;
                 frameMaterial.hideFlags = HideFlags.DontUnloadUnusedAsset;
-                CreateQuad("Frame", root.transform, WindowWidth + FrameBorder * 2f, WindowHeight + FrameBorder * 2f, 0.002f, frameMaterial);
+                frameObject = CreateQuad("Frame", root.transform, WindowWidth + FrameBorder * 2f, WindowHeight + FrameBorder * 2f, 0.002f, frameMaterial);
 
                 pictureMaterial = new Material(pictureShader) { name = "ExScoring_SpectatorWindowPicture", color = Color.white };
                 pictureMaterial.mainTexture = texture;
                 pictureMaterial.renderQueue = opaque ? PictureRenderQueue : FallbackPictureRenderQueue;
                 pictureMaterial.hideFlags = HideFlags.DontUnloadUnusedAsset;
-                CreateQuad("Picture", root.transform, WindowWidth, WindowHeight, 0f, pictureMaterial);
+                pictureObject = CreateQuad("Picture", root.transform, WindowWidth, WindowHeight, 0f, pictureMaterial);
 
                 // Stops shots, so a menu button behind the window isn't pressed through it.
                 GameObject blocker = new GameObject("ShotBlocker");
                 blocker.layer = WindowLayer;
                 blocker.transform.SetParent(root.transform, false);
                 blocker.transform.localPosition = new Vector3(0f, 0f, 0.002f);
-                BoxCollider box = blocker.AddComponent<BoxCollider>();
-                box.size = new Vector3(WindowWidth + FrameBorder * 2f, WindowHeight + FrameBorder * 2f, 0.004f);
+                blockerBox = blocker.AddComponent<BoxCollider>();
+                blockerBox.size = new Vector3(WindowWidth + FrameBorder * 2f, WindowHeight + FrameBorder * 2f, 0.004f);
 
                 // Title, growing upward from the frame's top edge.
                 GameObject titleObject = new GameObject("Title");
@@ -448,6 +488,7 @@ namespace ExScoringMod
                 title.rectTransform.sizeDelta = new Vector2(WindowWidth, 0.1f);
                 titleObject.transform.localPosition = new Vector3(0f, WindowHeight * 0.5f + FrameBorder + TitleGap, -0.002f);
                 lastTitle = null;
+                ApplySize();
 
                 Log("built");
                 return true;
@@ -462,7 +503,7 @@ namespace ExScoringMod
         }
 
         /// <summary>A quad facing local -Z with UVs (not mirrored when seen from -Z), no collider. z pushes it back.</summary>
-        private static void CreateQuad(string name, Transform parent, float width, float height, float z, Material material)
+        private static GameObject CreateQuad(string name, Transform parent, float width, float height, float z, Material material)
         {
             GameObject quad = new GameObject(name);
             quad.layer = WindowLayer;
@@ -490,6 +531,7 @@ namespace ExScoringMod
             renderer.sharedMaterial = material;
             renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
             renderer.receiveShadows = false;
+            return quad;
         }
 
         /// <summary>Sky, background and clip planes from the spectator camera (or the headset's, without one). The mask is our own.</summary>
@@ -670,6 +712,254 @@ namespace ExScoringMod
             ShellPage page = LobbyPanel.CurrentShellPage();
             if (page != null) nextButton.mShellPage = page;
             nextButton.SetInteractable(candidates.Count > 1);
+
+            if (!EnsureSizeButtons()) return;
+            if (page != null)
+            {
+                minusButton.mShellPage = page;
+                plusButton.mShellPage = page;
+            }
+            minusButton.SetInteractable(sizeStep > SizeStepMin);
+            plusButton.SetInteractable(sizeStep < SizeStepMax);
+        }
+
+        // ── Size ─────────────────────────────────────────────────────────────
+
+        /// <summary>Sizes the frame, picture and shot blocker, and moves the title and buttons to the edges.</summary>
+        private static void ApplySize()
+        {
+            float w = CurrentWidth, h = CurrentHeight;
+            if (pictureObject != null) pictureObject.transform.localScale = new Vector3(w, h, 1f);
+            if (frameObject != null) frameObject.transform.localScale = new Vector3(w + FrameBorder * 2f, h + FrameBorder * 2f, 1f);
+            if (blockerBox != null) blockerBox.size = new Vector3(w + FrameBorder * 2f, h + FrameBorder * 2f, 0.004f);
+            if (title != null)
+            {
+                title.rectTransform.sizeDelta = new Vector2(w, 0.1f);
+                title.transform.localPosition = new Vector3(0f, h * 0.5f + FrameBorder + TitleGap, -0.002f);
+            }
+            Vector3 next = NextButtonPosition;
+            if (nextObject != null) nextObject.transform.localPosition = next;
+            if (minusObject != null) minusObject.transform.localPosition = next + minusOffset;
+            if (plusObject != null) plusObject.transform.localPosition = next + plusOffset;
+        }
+
+        private static void OnMinusShot() => ChangeSize(-1);
+        private static void OnPlusShot() => ChangeSize(+1);
+
+        private static void ChangeSize(int delta)
+        {
+            int step = Mathf.Clamp(sizeStep + delta, SizeStepMin, SizeStepMax);
+            if (step == sizeStep) return;
+            sizeStep = step;
+            ApplySize();
+            SaveScale();
+            if (minusButton != null) minusButton.SetInteractable(sizeStep > SizeStepMin);
+            if (plusButton != null) plusButton.SetInteractable(sizeStep < SizeStepMax);
+            Log($"size step {sizeStep} ({SizeScale:0.##}x)");
+        }
+
+        /// <summary>The square "reload" button of the customization menu's slider (the prefab, else a scene copy).</summary>
+        private static GameObject FindSizeButtonSource(out Transform sliderRoot, out string from)
+        {
+            sliderRoot = null; from = null;
+            OptionsMenuSlider custom = null, customClone = null;
+            foreach (var o in Resources.FindObjectsOfTypeAll(Il2CppType.Of<OptionsMenuSlider>()))
+            {
+                OptionsMenuSlider slider = o.TryCast<OptionsMenuSlider>();
+                if (slider == null) continue;
+                string name = slider.gameObject.name;
+                if (name == CustomModelSliderName) { custom = slider; break; }     // the prefab
+                if (customClone == null && name.StartsWith(CustomModelSliderName)) customClone = slider;
+            }
+            if (custom == null) custom = customClone;
+            if (custom == null) return null;
+
+            Transform square = custom.transform.Find(SquareButtonChild);
+            if (square == null) return null;
+            sliderRoot = custom.transform;
+            from = custom.gameObject.name + "/" + SquareButtonChild;
+            return square.gameObject;
+        }
+
+        private static bool EnsureSizeButtons()
+        {
+            if (minusObject != null && plusObject != null && minusButton != null && plusButton != null) return true; // Unity-null: rebuilt if destroyed
+            if (sizeButtonsFailed || nextObject == null) return false;
+
+            if (minusObject != null) GameObject.Destroy(minusObject);
+            if (plusObject != null) GameObject.Destroy(plusObject);
+            minusObject = plusObject = null; minusButton = plusButton = null;
+
+            GameObject source = FindSizeButtonSource(out Transform sliderRoot, out string from);
+            if (source == null)
+            {
+                MelonLogger.Log("[SpectatorWindow] " + CustomModelSliderName + "/" + SquareButtonChild + " not found; no size buttons");
+                sizeButtonsFailed = true;
+                return false;
+            }
+
+            // Same size and turn relative to an options row as in its slider (Next Player is a row at ButtonScale).
+            Vector3 rootScale = sliderRoot.lossyScale;
+            Vector3 srcScale = source.transform.lossyScale;
+            Vector3 scale = new Vector3(
+                ButtonScale.x * SafeRatio(srcScale.x, rootScale.x),
+                ButtonScale.y * SafeRatio(srcScale.y, rootScale.y),
+                ButtonScale.z * SafeRatio(srcScale.z, rootScale.z));
+            Quaternion rotation = Quaternion.Inverse(sliderRoot.rotation) * source.transform.rotation;
+
+            minusObject = CreateSizeButton(source, "SizeMinusButton", "-", OnMinusShot, scale, rotation, out minusButton);
+            plusObject = CreateSizeButton(source, "SizePlusButton", "+", OnPlusShot, scale, rotation, out plusButton);
+            if (minusObject == null || plusObject == null)
+            {
+                if (minusObject != null) GameObject.Destroy(minusObject);
+                if (plusObject != null) GameObject.Destroy(plusObject);
+                minusObject = plusObject = null; minusButton = plusButton = null;
+                sizeButtonsFailed = true;
+                return false;
+            }
+
+            // Placed by what can actually be shot: right of Next Player's collider, - then +.
+            Vector3 nextPos = nextObject.transform.localPosition;
+            float nextRight = nextPos.x + 0.15f;
+            float centerY = nextPos.y;
+            if (LocalColliderBounds(nextObject, out Bounds nextBounds))
+            {
+                nextRight = nextBounds.max.x;
+                centerY = nextBounds.center.y;
+            }
+
+            minusOffset = PlaceRightOf(minusObject, nextRight, centerY, nextPos, out float minusRight);
+            plusOffset = PlaceRightOf(plusObject, minusRight, centerY, nextPos, out _);
+            ApplySize();
+
+            Log($"size buttons created (copied from {from})");
+            return true;
+        }
+
+        private static float SafeRatio(float a, float b) => Mathf.Abs(b) < 1e-6f ? 1f : a / b;
+
+        private static GameObject CreateSizeButton(GameObject source, string name, string label, Action onShot,
+                                                   Vector3 scale, Quaternion rotation, out GunButton gunButton)
+        {
+            gunButton = null;
+            GameObject button = GameObject.Instantiate(source, root.transform);
+            button.name = name;
+            button.transform.localPosition = Vector3.zero;
+            button.transform.localRotation = rotation;
+            button.transform.localScale = scale;
+
+            // The native button hides itself in some resolution setting; ours always shows.
+            foreach (var o in button.GetComponentsInChildren(Il2CppType.Of<LowResDisabler>(), true))
+            {
+                LowResDisabler disabler = o.TryCast<LowResDisabler>();
+                if (disabler != null) GameObject.Destroy(disabler);
+            }
+            foreach (var o in button.GetComponentsInChildren(Il2CppType.Of<Localizer>(), true))
+            {
+                Localizer localizer = o.TryCast<Localizer>();
+                if (localizer != null) GameObject.Destroy(localizer);
+            }
+            button.SetActive(true);
+
+            gunButton = button.GetComponentInChildren<GunButton>(true);
+            if (gunButton == null)
+            {
+                Log($"{name}: the copied button has no GunButton");
+                GameObject.Destroy(button);
+                return null;
+            }
+            gunButton.destroyOnShot = false;
+            gunButton.disableOnShot = false;
+            gunButton.doMeshExplosion = false;
+            gunButton.doParticles = false;
+            gunButton.onHitEvent = new UnityEvent();
+            gunButton.onHitEvent.AddListener(onShot);
+            gunButton.SetInteractable(true);
+
+            Transform icon = button.transform.Find(SquareButtonIcon);
+            if (icon != null) icon.gameObject.SetActive(false);
+
+            // The label lives under the window (scale 1) and is moved onto the button by PlaceRightOf.
+            GameObject labelObject = new GameObject("SizeLabel");
+            labelObject.layer = WindowLayer;
+            labelObject.transform.SetParent(root.transform, false);
+            TextMeshPro tmp = labelObject.AddComponent<TextMeshPro>();
+            LobbyPanel.ApplyGameFont(tmp);
+            tmp.text = label;
+            tmp.fontSize = SizeLabelFontSize;
+            tmp.alignment = TextAlignmentOptions.Center;
+            tmp.enableWordWrapping = false;
+            tmp.color = Color.white;
+            tmp.rectTransform.sizeDelta = new Vector2(0.05f, 0.05f);
+            tmp.fontMaterial.renderQueue = TextRenderQueue;
+            labelObject.transform.SetParent(button.transform, true);
+            return button;
+        }
+
+        /// <summary>Puts a button's collider centre just right of leftEdge on centerY; returns its offset from nextPos.</summary>
+        private static Vector3 PlaceRightOf(GameObject button, float leftEdge, float centerY, Vector3 nextPos, out float rightEdge)
+        {
+            float width = 0.05f;
+            Vector3 centerFromPivot = Vector3.zero;
+            if (LocalColliderBounds(button, out Bounds b))
+            {
+                width = b.size.x;
+                centerFromPivot = b.center - button.transform.localPosition;
+            }
+            Vector3 center = new Vector3(leftEdge + SizeButtonGap + width * 0.5f, centerY, nextPos.z);
+            Vector3 pivot = center - new Vector3(centerFromPivot.x, centerFromPivot.y, 0f);
+            button.transform.localPosition = pivot;
+
+            Transform label = button.transform.Find("SizeLabel");
+            if (label != null)
+            {
+                label.SetParent(root.transform, false);
+                label.localRotation = Quaternion.identity;
+                label.localScale = Vector3.one;
+                label.localPosition = new Vector3(center.x, center.y, nextPos.z - 0.004f);
+                label.SetParent(button.transform, true); // follows the button when the window is resized
+            }
+
+            rightEdge = center.x + width * 0.5f;
+            return pivot - nextPos;
+        }
+
+        /// <summary>
+        /// The shootable area's box in the window's local space: the colliders on the GunButton objects
+        /// only (Box and Mesh). Not every collider: the glow planes (FakeBloom, FakeHighlightBloom)
+        /// carry large MeshColliders too.
+        /// </summary>
+        private static bool LocalColliderBounds(GameObject go, out Bounds bounds)
+        {
+            bounds = new Bounds();
+            bool any = false;
+            foreach (var g in go.GetComponentsInChildren(Il2CppType.Of<GunButton>(), true))
+            {
+                GunButton gb = g.TryCast<GunButton>();
+                if (gb == null) continue;
+                foreach (var o in gb.gameObject.GetComponents(Il2CppType.Of<Collider>()))
+                {
+                    Collider c = o.TryCast<Collider>();
+                    if (c == null) continue;
+                    BoxCollider box = c.TryCast<BoxCollider>();
+                    MeshCollider meshCollider = box == null ? c.TryCast<MeshCollider>() : null;
+                    if (box != null) Encapsulate(ref bounds, ref any, c.transform, new Bounds(box.center, box.size));
+                    else if (meshCollider != null && meshCollider.sharedMesh != null) Encapsulate(ref bounds, ref any, c.transform, meshCollider.sharedMesh.bounds);
+                }
+            }
+            return any;
+        }
+
+        private static void Encapsulate(ref Bounds bounds, ref bool any, Transform t, Bounds local)
+        {
+            Vector3 c = local.center, e = local.extents;
+            for (int i = 0; i < 8; i++)
+            {
+                Vector3 corner = c + new Vector3((i & 1) == 0 ? -e.x : e.x, (i & 2) == 0 ? -e.y : e.y, (i & 4) == 0 ? -e.z : e.z);
+                Vector3 p = root.transform.InverseTransformPoint(t.TransformPoint(corner));
+                if (!any) { bounds = new Bounds(p, Vector3.zero); any = true; }
+                else bounds.Encapsulate(p);
+            }
         }
 
         private static bool EnsureNextButton()
@@ -855,7 +1145,7 @@ namespace ExScoringMod
 
             float x = origin.x + direction.x * t;
             float y = origin.y + direction.y * t;
-            return Mathf.Abs(x) <= WindowWidth * 0.5f + FrameBorder && Mathf.Abs(y) <= WindowHeight * 0.5f + FrameBorder;
+            return Mathf.Abs(x) <= CurrentWidth * 0.5f + FrameBorder && Mathf.Abs(y) <= CurrentHeight * 0.5f + FrameBorder;
         }
 
         // ── Saved pose ───────────────────────────────────────────────────────
@@ -865,6 +1155,7 @@ namespace ExScoringMod
             if (prefsRegistered) return;
             prefsRegistered = true;
             MelonPrefs.RegisterString(PrefsCategory, PrefsPose, "", "Spectator window position (set by dragging it in game)");
+            MelonPrefs.RegisterFloat(PrefsCategory, PrefsScale, 1f, "Spectator window size (set with its - and + buttons)");
         }
 
         /// <summary>Read on every build: the saved string is the single source for where the window goes.</summary>
@@ -924,14 +1215,48 @@ namespace ExScoringMod
             }
         }
 
-        /// <summary>Puts the window back at its default place (from the UnityExplorer console) and saves that.</summary>
+        /// <summary>Read on every build, snapped to a step.</summary>
+        private static void LoadScale()
+        {
+            try
+            {
+                EnsurePrefs();
+                float scale = MelonPrefs.GetFloat(PrefsCategory, PrefsScale);
+                if (float.IsNaN(scale) || float.IsInfinity(scale) || scale <= 0f) scale = 1f;
+                sizeStep = Mathf.Clamp(Mathf.RoundToInt(Mathf.Log(scale) / Mathf.Log(SizeStepFactor)), SizeStepMin, SizeStepMax);
+            }
+            catch (Exception ex)
+            {
+                sizeStep = 0;
+                Log($"size load failed: {ex.Message}");
+            }
+        }
+
+        private static void SaveScale()
+        {
+            try
+            {
+                EnsurePrefs();
+                MelonPrefs.SetFloat(PrefsCategory, PrefsScale, SizeScale);
+                MelonPrefs.SaveConfig();
+            }
+            catch (Exception ex)
+            {
+                Log($"size save failed: {ex.Message}");
+            }
+        }
+
+        /// <summary>Puts the window back at its default place and size (from the UnityExplorer console) and saves that.</summary>
         public static void ResetPose()
         {
             if (root == null) return;
             EndGrab(false);
             root.transform.position = DefaultPosition;
             root.transform.eulerAngles = DefaultRotation;
+            sizeStep = 0;
+            ApplySize();
             SavePose();
+            SaveScale();
         }
 
         // ── Cleanup / debug ──────────────────────────────────────────────────
@@ -953,6 +1278,8 @@ namespace ExScoringMod
             root = null; windowCamera = null; texture = null; title = null;
             pictureMaterial = null; frameMaterial = null;
             nextObject = null; nextButton = null;
+            frameObject = null; pictureObject = null; blockerBox = null;
+            minusObject = null; plusObject = null; minusButton = null; plusButton = null;
             cameraConfigured = false; hasCameraPose = false; grabHand = -1; lastTitle = null;
         }
 
@@ -964,7 +1291,8 @@ namespace ExScoringMod
             MelonLogger.Log($"  watched={watchedId ?? "none"} targetVisible={targetVisible} avatarRoot={(watchedRoot != null ? "found" : "null")} head={(watchedHead != null ? "found" : "null")}");
             MelonLogger.Log($"  root={(root != null ? (root.activeSelf ? "active" : "inactive") : "null")} opener={(openerObject != null ? "built" : "null")} next={(nextObject != null ? "built" : "null")}");
             if (root != null && !root.WasCollected)
-                MelonLogger.Log($"  window pos={root.transform.position} rot={root.transform.eulerAngles} size={WindowWidth}x{WindowHeight:0.###} grabHand={grabHand}");
+                MelonLogger.Log($"  window pos={root.transform.position} rot={root.transform.eulerAngles} size={CurrentWidth:0.###}x{CurrentHeight:0.###} (step {sizeStep}) grabHand={grabHand}");
+            MelonLogger.Log($"  size buttons: {(minusObject != null && plusObject != null ? "built" : (sizeButtonsFailed ? "failed" : "null"))}");
             if (windowCamera != null && !windowCamera.WasCollected)
                 MelonLogger.Log($"  camera pos={windowCamera.transform.position} rot={windowCamera.transform.eulerAngles} fov={windowCamera.fieldOfView} " +
                     $"mask=0x{windowCamera.cullingMask:X8} clear={windowCamera.clearFlags} configured={cameraConfigured} hasPose={hasCameraPose}");
