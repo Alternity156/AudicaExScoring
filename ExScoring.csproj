@@ -322,6 +322,13 @@
     <Compile Include="src\SongSearchField.cs" />
     <Compile Include="src\SongSearchMenu.cs" />
     <Compile Include="src\SongTimelineGraph.cs" />
+    <Compile Include="src\SpectatorDebug.cs" />
+    <Compile Include="src\SpectatorEvents.cs" />
+    <Compile Include="src\SpectatorPopups.cs" />
+    <Compile Include="src\SpectatorSong.cs" />
+    <Compile Include="src\SpectatorSounds.cs" />
+    <Compile Include="src\SpectatorTargets.cs" />
+    <Compile Include="src\SpectatorWindow.cs" />
     <Compile Include="src\TargetIcons.cs" />
     <Compile Include="src\TimingGraph.cs" />
     <Compile Include="src\TopScoreUI.cs" />

@@ -954,6 +954,17 @@ namespace ExScoringMod
                     "For testing only, resets when the game closes: every chain tail becomes a 1-measure chain sustain, you can't fail, and runs aren't saved or uploaded. Applies to the next song you start");
                 OptionsMenuClone.AddRow(chainSustainTestToggle);
 
+                // Spectator window test without a server or a second player (SpectatorDebug.cs).
+                var spectatorRecordToggle = OptionsMenuClone.CreateToggle(0, "Record Spectator Poses",
+                    () => SpectatorDebug.Record,
+                    v => SpectatorDebug.Record = v,
+                    "For testing only, resets when the game closes: records what a spectator would receive from you during the next song you play, for Replay Fake Player");
+                var spectatorReplayToggle = OptionsMenuClone.CreateToggle(1, "Replay Fake Player",
+                    () => SpectatorDebug.Replay,
+                    v => SpectatorDebug.Replay = v,
+                    "For testing only, resets when the game closes: in a lobby, adds a fake player who replays the last recording as if playing a song, to watch in the spectator window");
+                OptionsMenuClone.AddRow(spectatorRecordToggle, spectatorReplayToggle);
+
                 // Online play state dumps, written to the MelonLoader log (shown even with Enable Logs off).
                 OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Online Play Dumps"));
                 var sessionDump = OptionsMenuClone.CreateButton(0, "Session",

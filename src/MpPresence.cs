@@ -270,6 +270,20 @@ namespace ExScoringMod
     ///    HeadshotMaxBoost. HeadshotSounds plays the native sound too: OnShotHead, then the countdown
     ///    is put straight back so this player's screen doesn't flash.
     ///
+    /// Watching during a song (v2.53, "spectate"):
+    ///  - Being watched: in a song, while MpSession.WatcherCount > 0 and Config.AllowSpectators is on,
+    ///    this player's pose keeps going out on the normal schedule, with songTick (AudioDriver's
+    ///    Audio tick). Nothing else runs in a song, as before. With nobody watching, nothing is sent.
+    ///  - Watching: the server lists the player this client watches (MpSession.SetWatch, from
+    ///    SpectatorWindow) in poses with inSong while they play. Such a player is drawn for the
+    ///    spectator window only: when a remote's inSong flips, their avatar is rebuilt, and an
+    ///    in-song avatar gets the song look (ApplySongLook): everything on SongOnlyLayer (31, which
+    ///    only SpectatorWindow's camera renders), head and body renderers off (the window's camera
+    ///    sits in the head), every collider off, no name labels, no disc fade or shade. Their shots
+    ///    show the beam, the muzzle flash and the gun's fire animation on that layer too (PlayShot's
+    ///    in-song branch), straight along the gun's aim: no rebounds, no beam dust, no sounds. They
+    ///    are left out of every hit test (rebounds, thrown guns, headshots).
+    ///
     /// From the UnityExplorer console: ExScoringMod.MpPresence.DebugDump();
     /// </summary>
     public static class MpPresence
@@ -331,6 +345,8 @@ namespace ExScoringMod
         private const string DiscColliderPath = "Static/GroundCollider";
         private const string GunColliderPath = "tricks";
         private const int PartColliderLayer = 11;        // Player: what the local guns are on
+        /// <summary>v2.53: the layer of an in-song (watched) avatar. Unnamed and unused by the game; neither the headset nor SpectatorCam renders it (layer dump 2026-11-13).</summary>
+        internal const int SongOnlyLayer = 31;
 
         // Cosmetics (v2.44).
         private const string DefaultModelKey = "d";
@@ -446,6 +462,10 @@ namespace ExScoringMod
             public readonly bool[] HasHandAnim = new bool[2];
             public readonly float[][] Fingers = { new float[5], new float[5] };
             public readonly bool[] HasFingers = new bool[2];
+
+            // v2.53: the sender's song position in ticks when the pose was sampled in a song.
+            public double SongTick;
+            public bool HasSongTick;
 
             public bool Trigger(int hand) => hand == 0 ? LTrigger : RTrigger;
         }
@@ -714,6 +734,10 @@ namespace ExScoringMod
             public readonly List<Sample> Samples = new List<Sample>();
             /// <summary>In the latest poses message.</summary>
             public bool Present;
+            /// <summary>v2.53: listed with inSong (this client is watching them while they play): drawn for the spectator window only.</summary>
+            public bool InSong;
+            /// <summary>v2.53: the current avatar already got the song look (ApplySongLook).</summary>
+            public bool SongLook;
 
             // Built lazily, once templates exist.
             public GameObject Root;
@@ -872,6 +896,7 @@ namespace ExScoringMod
         private static System.Reflection.MethodInfo particleCreateAndPlay;
         private static bool particleCallFailed, ricochetSoundFailed;
         private static int selfHeadshotsSent;
+        private static int songPoseFrames; // v2.53: frames spent sending poses in a song while watched (debug dump)
         private static float lastSelfHeadshotSent = -100f;
         // Thrown-gun headshots (v2.48), per hand: the gun's solid box (found while in hand, kept while
         // thrown), last frame's box centre while thrown, and when that gun last headshot someone.
@@ -982,6 +1007,7 @@ namespace ExScoringMod
                     wasInSong = true;
                     HideAndClearAll();
                 }
+                SendSongPoseIfWatched(); // v2.53
                 return;
             }
             wasInSong = false;
@@ -1040,6 +1066,12 @@ namespace ExScoringMod
             long t = MpSession.ServerNowMs;
             RecordOwnGunPoses(t); // v2.51: exactly what the others will interpolate, for rewinding their shots
 
+            MpSession.SendPose(BuildPose(t));
+        }
+
+        /// <summary>This player's pose message for time t, from the local rig (FindLocalRig must have succeeded).</summary>
+        private static JObject BuildPose(long t)
+        {
             JObject pose = new JObject
             {
                 ["t"] = t,
@@ -1062,7 +1094,201 @@ namespace ExScoringMod
             pose["rHandAnim"] = HandAnimJson(localKataR, 1, knuckles);
             pose["lFingers"] = FingersJson(localKataL, knuckles);
             pose["rFingers"] = FingersJson(localKataR, knuckles);
-            MpSession.SendPose(pose);
+            if (InSong()) pose["songTick"] = SongTickJson(); // v2.53
+            return pose;
+        }
+
+        // ── Debug hooks for SpectatorDebug (record and replay, no server needed) ──
+
+        /// <summary>In a song, end screen excluded: when a recording runs.</summary>
+        internal static bool DebugInSong => InSong();
+
+        /// <summary>The pose this player would send right now, stamped t, or null without a rig. Nothing is sent.</summary>
+        internal static JObject DebugBuildPose(long t)
+        {
+            return FindLocalRig() ? BuildPose(t) : null;
+        }
+
+        /// <summary>Takes one pose entry as if the server had listed it (the fake player's replay).</summary>
+        internal static void DebugInjectPose(MpPoseEntry entry)
+        {
+            if (entry == null || entry.userId == null || !MpSession.InLobby || InSong()) return;
+            AcceptEntry(entry);
+        }
+
+        /// <summary>Removes a player added by DebugInjectPose, with their avatar.</summary>
+        internal static void DebugRemoveRemote(string userId)
+        {
+            if (userId == null || !remotes.TryGetValue(userId, out Remote remote)) return;
+            DestroyAvatar(remote);
+            remotes.Remove(userId);
+            Log($"{userId} removed (debug)");
+        }
+
+        /// <summary>The debug replay's fake player, who is in no lobby list and no poses message.</summary>
+        private static bool IsDebugFake(Remote remote)
+        {
+            return SpectatorDebug.ReplayActive && remote.UserId == SpectatorDebug.FakeUserId;
+        }
+
+        /// <summary>
+        /// v2.53: in a song, this player's pose still goes out while someone is watching them (the
+        /// server's watchers message) and Allow Spectators is on. The server relays it to the
+        /// watchers only, and drops it when nobody is watching.
+        /// </summary>
+        private static void SendSongPoseIfWatched()
+        {
+            if (!Config.AllowSpectators) return;
+            if (!MpSession.PresenceEnabled || !MpSession.SpectateEnabled || MpSession.WatcherCount <= 0) return;
+            UpdateLocalSpin();
+            SendPoseIfDue();
+            SpectatorSong.SendInfoIfDue(); // what is being played, for the watchers' audio and chart
+            SpectatorEvents.FlushIfDue();  // hits, misses and sustains, for the watchers' targets
+            songPoseFrames++;
+        }
+
+        // ── For SpectatorTargets (the watched player's colours) ──
+
+        /// <summary>
+        /// A player's gun colours as the lobby has them (the defaults without any). The debug
+        /// replay's fake player has this player's own.
+        /// </summary>
+        internal static void GetGunColors(string userId, out Color left, out Color right)
+        {
+            left = DefaultLeftColor;
+            right = DefaultRightColor;
+            try
+            {
+                if (userId == SpectatorDebug.FakeUserId)
+                {
+                    KataConfig config = KataConfig.I;
+                    if (config != null)
+                    {
+                        left = config.leftHandColor;
+                        right = config.rightHandColor;
+                    }
+                    return;
+                }
+
+                MpLobbyState lobby = MpSession.Lobby;
+                MpPlayerState player = lobby != null && userId != null ? lobby.FindPlayer(userId) : null;
+                if (player != null && player.gunColors != null)
+                {
+                    left = ToColor(player.gunColors.left, DefaultLeftColor);
+                    right = ToColor(player.gunColors.right, DefaultRightColor);
+                }
+            }
+            catch
+            {
+                // keep the defaults
+            }
+        }
+
+        /// <summary>
+        /// Where a drawn remote player's gun fires from (hand 0 = left, 1 = right), in world space.
+        /// False while their avatar or that gun isn't shown. For the spectator window's sustain beam.
+        /// </summary>
+        internal static bool TryGetRemoteFirepoint(string userId, int hand, out Vector3 position, out Vector3 forward)
+        {
+            position = Vector3.zero;
+            forward = Vector3.forward;
+            if (userId == null || !remotes.TryGetValue(userId, out Remote remote)) return false;
+            if (remote.Root == null || !remote.Root.activeSelf) return false;
+            Transform gunPart = hand == 0 ? remote.LGun : remote.RGun;
+            if (gunPart == null || !gunPart.gameObject.activeSelf) return false;
+            Transform firepoint = hand == 0 ? remote.LFire : remote.RFire;
+            if (firepoint == null) firepoint = gunPart;
+            position = firepoint.position;
+            forward = firepoint.forward;
+            return true;
+        }
+
+        // ── For SpectatorSong (the watcher's audio and chart) ──
+
+        // A watched player's song position is carried this far past their newest pose before it counts as lost.
+        private const long SongTickExtrapolateMs = 500;
+
+        /// <summary>This client is watching userId and they are listed as in a song right now.</summary>
+        internal static bool IsRemoteInSong(string userId)
+        {
+            return userId != null && remotes.TryGetValue(userId, out Remote remote) && remote.Present && remote.InSong;
+        }
+
+        /// <summary>
+        /// A watched in-song player's song position, in ticks, at the moment their avatar is drawn
+        /// (RenderDelayMs behind the server clock, like their pose), from the songTick of the
+        /// samples around it. moving = the position is advancing (false while they are paused).
+        /// False when there is no usable position: not in a song, no songTick, or their newest
+        /// pose is more than SongTickExtrapolateMs old.
+        /// </summary>
+        internal static bool TryGetSongTick(string userId, out double tick, out bool moving)
+        {
+            tick = 0;
+            moving = false;
+            if (userId == null || !remotes.TryGetValue(userId, out Remote remote)) return false;
+            if (!remote.Present || !remote.InSong) return false;
+
+            List<Sample> samples = remote.Samples;
+            long renderTime = MpSession.ServerNowMs - RenderDelayMs;
+
+            // The newest sample at or before the render time, and the one after it.
+            Sample a = null, b = null;
+            for (int i = 0; i < samples.Count; i++)
+            {
+                if (!samples[i].HasSongTick) continue;
+                if (samples[i].T <= renderTime) a = samples[i];
+                else { b = samples[i]; break; }
+            }
+            if (a == null && b == null) return false;
+
+            if (a != null && b != null)
+            {
+                double frac = b.T > a.T ? (double)(renderTime - a.T) / (b.T - a.T) : 0;
+                tick = a.SongTick + (b.SongTick - a.SongTick) * frac;
+                moving = b.SongTick > a.SongTick;
+                return true;
+            }
+
+            if (a == null)
+            {
+                // Before their first sample (they just appeared): start from it.
+                tick = b.SongTick;
+                moving = false;
+                return true;
+            }
+
+            // Past their newest sample: carry on at the rate of the last two, for a short while.
+            if (renderTime - a.T > SongTickExtrapolateMs) return false;
+            Sample previous = null;
+            for (int i = samples.Count - 1; i >= 0; i--)
+            {
+                if (samples[i].HasSongTick && samples[i].T < a.T) { previous = samples[i]; break; }
+            }
+            tick = a.SongTick;
+            if (previous != null && a.SongTick > previous.SongTick)
+            {
+                double ticksPerMs = (a.SongTick - previous.SongTick) / (a.T - previous.T);
+                tick += ticksPerMs * (renderTime - a.T);
+                moving = true;
+            }
+            return true;
+        }
+
+        /// <summary>The song position in ticks (AudioDriver's Audio tick), 1 decimal, or null when it can't be read.</summary>
+        private static JToken SongTickJson()
+        {
+            try
+            {
+                AudioDriver audio = AudioDriver.I;
+                if (audio == null) return JValue.CreateNull();
+                float tick = audio.GetTick(AudioDriver.TickContext.Audio);
+                if (float.IsNaN(tick) || float.IsInfinity(tick) || tick < 0f) return JValue.CreateNull();
+                return Math.Round((double)tick, 1);
+            }
+            catch
+            {
+                return JValue.CreateNull();
+            }
         }
 
         /// <summary>The same check KataHand.Update makes: VRHardwareSetup hardware 4 poses the hands from the SteamVR skeleton.</summary>
@@ -1330,26 +1556,43 @@ namespace ExScoringMod
                 {
                     if (entry == null || entry.userId == null || entry.userId == MpSession.MyUserId) continue;
                     present.Add(entry.userId);
-
-                    if (!remotes.TryGetValue(entry.userId, out Remote remote))
-                    {
-                        remote = new Remote { UserId = entry.userId };
-                        remotes[entry.userId] = remote;
-                    }
-                    remote.Present = true;
-                    AddSample(remote, entry);
+                    AcceptEntry(entry);
                 }
             }
 
             foreach (Remote remote in remotes.Values)
             {
                 if (present.Contains(remote.UserId)) continue;
+                if (IsDebugFake(remote)) continue; // fed by SpectatorDebug, never by the server
                 if (remote.Present) Log($"{remote.UserId} left the poses (song, disconnected or stale), hiding");
                 remote.Present = false;
                 remote.Samples.Clear();
                 remote.BodyInit = false;
                 remote.ResetShots(); // coming back, their count only sets a new baseline
             }
+        }
+
+        /// <summary>One player's entry from a poses message: marks them present and buffers the sample.</summary>
+        private static void AcceptEntry(MpPoseEntry entry)
+        {
+            if (!remotes.TryGetValue(entry.userId, out Remote remote))
+            {
+                remote = new Remote { UserId = entry.userId };
+                remotes[entry.userId] = remote;
+            }
+            remote.Present = true;
+            if (remote.InSong != entry.inSong)
+            {
+                // v2.53: entering or leaving a song while watched. The avatar is rebuilt with
+                // or without the song look, and the old samples don't carry over the gap.
+                remote.InSong = entry.inSong;
+                Log($"{remote.UserId} is {(entry.inSong ? "in a song (watched): spectator window only" : "back in the menus")}");
+                if (remote.Root != null) DestroyAvatar(remote);
+                remote.Samples.Clear();
+                remote.BodyInit = false;
+                remote.ResetShots();
+            }
+            AddSample(remote, entry);
         }
 
         private static void AddSample(Remote remote, MpPoseEntry entry)
@@ -1371,6 +1614,9 @@ namespace ExScoringMod
             sample.HasHandAnim[1] = ReadUnitValues(entry.rHandAnim, sample.HandAnim[1]);
             sample.HasFingers[0] = ReadUnitValues(entry.lFingers, sample.Fingers[0]);
             sample.HasFingers[1] = ReadUnitValues(entry.rFingers, sample.Fingers[1]);
+            sample.HasSongTick = entry.songTick.HasValue && !double.IsNaN(entry.songTick.Value)
+                && !double.IsInfinity(entry.songTick.Value) && entry.songTick.Value >= 0;
+            sample.SongTick = sample.HasSongTick ? entry.songTick.Value : 0;
             samples.Add(sample);
 
             // Keep about a second, never fewer than two.
@@ -1429,6 +1675,7 @@ namespace ExScoringMod
             foreach (Remote remote in remotes.Values)
             {
                 if (lobby != null && lobby.FindPlayer(remote.UserId) != null) continue;
+                if (IsDebugFake(remote)) continue; // SpectatorDebug removes it itself
                 if (gone == null) gone = new List<string>();
                 gone.Add(remote.UserId);
             }
@@ -1505,7 +1752,10 @@ namespace ExScoringMod
                     continue;
                 }
 
+                if (remote.InSong && !remote.SongLook) ApplySongLook(remote); // v2.53
+
                 int seat = player != null ? player.seat : 0;
+                if (player == null && IsDebugFake(remote)) seat = (Math.Max(0, mySeat) + 1) % Spots.Length; // the spot after this player's
                 remote.Root.transform.position = LayoutOffset(seat, mySeat);
                 remote.Root.transform.rotation = Quaternion.identity;
 
@@ -1533,18 +1783,20 @@ namespace ExScoringMod
                     }
                 }
 
-                UpdateNames(remote, player, headsetEye, spectatorEye);
+                if (remote.InSong) HideNames(remote);
+                else UpdateNames(remote, player, headsetEye, spectatorEye);
 
                 SetVisible(remote, true);
                 UpdateHeadshotFx(remote);
 
-                if (fadeDiscs) UpdateDiscFade(remote, checkBlocks, eyePos);
+                if (fadeDiscs && !remote.InSong) UpdateDiscFade(remote, checkBlocks, eyePos);
                 else ResetDiscFade(remote, true);
 
                 // After the fade, so a ghosted disc's colour is darkened on top of this frame's alpha.
-                UpdateDiscShade(remote, player, lobby);
+                if (!remote.InSong) UpdateDiscShade(remote, player, lobby);
 
                 // After the parts are placed and shown, so a beam leaves from this frame's gun.
+                // v2.53: an in-song player's shots are drawn for the spectator window only (PlayShot).
                 ReadShotsUpTo(remote, renderTime, true);
 
                 for (int h = 0; h < 2; h++)
@@ -1790,6 +2042,51 @@ namespace ExScoringMod
         /// Text, visibility, layer and facing of a player's labels. Called after the parts are
         /// placed, so the head's world position is current.
         /// </summary>
+        /// <summary>v2.53: an in-song avatar has no name labels.</summary>
+        private static void HideNames(Remote remote)
+        {
+            if (remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf) remote.NameHeadset.gameObject.SetActive(false);
+            if (remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf) remote.NameSpectator.gameObject.SetActive(false);
+        }
+
+        /// <summary>
+        /// v2.53: makes a freshly built avatar a spectator-window-only one, for a watched player in a
+        /// song: every object on SongOnlyLayer, the head's and body's renderers off (the window's
+        /// camera sits at the head; the objects stay, since the window reads the head's pose), and
+        /// every collider off, so nothing of this player's bounces off or hits something they can't
+        /// see. Never undone: the avatar is rebuilt when the player is back in the menus.
+        /// </summary>
+        private static void ApplySongLook(Remote remote)
+        {
+            remote.SongLook = true;
+            try
+            {
+                SetLayerRecursive(remote.Root, SongOnlyLayer);
+
+                for (int p = 0; p < 2; p++)
+                {
+                    Transform part = p == 0 ? remote.Head : remote.Body;
+                    if (part == null) continue;
+                    var renderers = part.GetComponentsInChildren<Renderer>(true);
+                    for (int i = 0; i < renderers.Length; i++)
+                    {
+                        if (renderers[i] != null) renderers[i].enabled = false;
+                    }
+                }
+
+                var colliders = remote.Root.GetComponentsInChildren<Collider>(true);
+                for (int i = 0; i < colliders.Length; i++)
+                {
+                    if (colliders[i] != null) colliders[i].enabled = false;
+                }
+                Log($"{remote.UserId}: song look applied (layer {SongOnlyLayer}, {colliders.Length} colliders off)");
+            }
+            catch (Exception ex)
+            {
+                Log($"{remote.UserId}: song look failed: {ex.Message}");
+            }
+        }
+
         private static void UpdateNames(Remote remote, MpPlayerState player, Transform headsetEye, Transform spectatorEye)
         {
             if (remote.NameHeadset == null) return;
@@ -2042,7 +2339,8 @@ namespace ExScoringMod
 
             string capped = rise > count ? $" (count rose by {rise}, capped at {MaxShotsPerJump})" : "";
             string source = remote.Samples.Count > 0 && remote.Samples[remote.Samples.Count - 1].HasShots[hand] ? "count" : "trigger";
-            Log($"{remote.UserId} shot {HandName(hand)}{(count > 1 ? " x" + count : "")}{capped} [{source}], {state.Fired} so far");
+            // Not for a watched player in a song: that would be several lines a second.
+            if (!remote.InSong) Log($"{remote.UserId} shot {HandName(hand)}{(count > 1 ? " x" + count : "")}{capped} [{source}], {state.Fired} so far");
 
             try
             {
@@ -2087,6 +2385,30 @@ namespace ExScoringMod
             Vector3 forward = firepoint.forward;
             float roll = gunPart.eulerAngles.z;
 
+            if (remote.InSong)
+            {
+                // v2.53: a watched player's shot during their song, for the spectator window only:
+                // the beam, the muzzle flash and the gun's fire animation, all on SongOnlyLayer.
+                // It meets nothing here (no rebounds, no thrown guns), and there's no beam dust
+                // (one shared system, which would show in this player's own world).
+                SongLayerShotFx(fx);
+                // A shot that hit a target goes to where it hit (their spectateEvents), else straight ahead.
+                if (SpectatorTargets.TryGetShotAim(remote.UserId, hand, out Vector3 hitPoint))
+                {
+                    Vector3 toHit = hitPoint - position;
+                    if (toHit.sqrMagnitude > 0.01f) forward = toHit.normalized;
+                }
+                int songBeams = Math.Min(count, BeamPoolSize);
+                for (int i = 0; i < songBeams; i++)
+                {
+                    fx.Cycle = (fx.Cycle + 1) % fx.Beams.Length;
+                    FireBeam(fx.Beams[fx.Cycle], fx.Prefab, position, forward, roll);
+                }
+                if (IsAlive(fx.Muzzle)) fx.Muzzle.Play(position, forward, roll);
+                if (remote.Guns[hand] != null) remote.Guns[hand].FireStart = Time.time;
+                return;
+            }
+
             // What the shot meets (Gun.Fire's miss branch): this player's thrown guns get pushed, and
             // the nearest thrown gun or platform bounces the beam (menu glass doesn't, see FindRicochet).
             // v2.51: this player's own guns are judged where the shooter saw them (rewound by the
@@ -2120,6 +2442,17 @@ namespace ExScoringMod
             if (IsAlive(fx.Muzzle)) fx.Muzzle.Play(position, forward, roll);
             PlayBeamDust(local, hand, position, forward);
             if (remote.Guns[hand] != null) remote.Guns[hand].FireStart = Time.time; // the model's fire animation (UpdateGun)
+        }
+
+        /// <summary>Puts a watched in-song player's beams and muzzle flash on SongOnlyLayer (once: they are rebuilt with the avatar).</summary>
+        private static void SongLayerShotFx(ShotFx fx)
+        {
+            for (int i = 0; i < fx.Beams.Length; i++)
+            {
+                GunBeam beam = fx.Beams[i];
+                if (IsAlive(beam) && beam.gameObject.layer != SongOnlyLayer) SetLayerRecursive(beam.gameObject, SongOnlyLayer);
+            }
+            if (IsAlive(fx.Muzzle) && fx.Muzzle.gameObject.layer != SongOnlyLayer) SetLayerRecursive(fx.Muzzle.gameObject, SongOnlyLayer);
         }
 
         /// <summary>Gun.Fire's placement of a pooled beam, then GunBeam.Fire.</summary>
@@ -2794,7 +3127,7 @@ namespace ExScoringMod
                 if (!localShot) found |= TryDisc(disc, Vector3.zero, up, position, forward, "my platform", ref best);
                 foreach (Remote remote in remotes.Values)
                 {
-                    if (remote.Root == null || !remote.Root.activeSelf) continue;
+                    if (remote.Root == null || !remote.Root.activeSelf || remote.InSong) continue;
                     if (remote.Disc == null || !remote.Disc.gameObject.activeInHierarchy) continue;
                     if (remote.Fade != null && remote.Fade.Swapped) continue;
                     found |= TryDisc(disc, remote.Root.transform.position, up, position, forward, remote.UserId + "'s platform", ref best);
@@ -2866,7 +3199,7 @@ namespace ExScoringMod
             bool synced = false;
             foreach (Remote remote in remotes.Values)
             {
-                if (remote.Root == null || !remote.Root.activeSelf) continue;
+                if (remote.Root == null || !remote.Root.activeSelf || remote.InSong) continue;
                 for (int h = 0; h < 2; h++)
                 {
                     if (!RemoteGunThrown(remote, h)) continue;
@@ -3574,6 +3907,7 @@ namespace ExScoringMod
             remote.Disc = null;
             remote.NameHeadset = remote.NameSpectator = null;
             remote.AppliedName = null;
+            remote.SongLook = false;
             remote.BodyInit = false;
             remote.HeadshotStart = -1f;
             remote.HeadshotRenderers = null; // destroyed with the root
@@ -3678,6 +4012,7 @@ namespace ExScoringMod
                 ResetDiscShade(remote);
                 if (remote.Disc != null) UnityEngine.Object.Destroy(remote.Disc.gameObject);
                 remote.Disc = CopyDisc(remote.Root);
+                remote.SongLook = false; // v2.53: an in-song avatar's new disc gets the song look again
             }
         }
 
@@ -5642,6 +5977,7 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] remote shots: rebounds={ricochetsShown} thrownGunHits={thrownGunHits} particle={(particleCallFailed ? "failed" : (particleCreateAndPlay != null ? "found" : "not looked up"))} thrown L={IsThrown(localGunL)} R={IsThrown(localGunR)}");
             sb.AppendLine($"[MpPresence] gun hit tests (v2.51): radius={ShotHitRadius * 100f} cm rewoundHits={rewoundHits} graze={grazeHits} swept={sweptHits} liveFallback={liveFallbackTests} history L={ownGunHistory[0].Count} R={ownGunHistory[1].Count}");
             sb.AppendLine($"[MpPresence] solo gun hit test: {(SoloGunHitTest ? "ON" : "off")} fakeLatency={SoloFakeLatencyMs} ms push={SoloGunHitPush} shots={soloTested} oldHits={soloOldHits} newHits={soloNewHits} (exact {soloNewExact}) pending={soloShots.Count}");
+            sb.AppendLine($"[MpPresence] spectate (v2.53): connection={MpSession.SpectateEnabled} allow={Config.AllowSpectators} watchers={MpSession.WatcherCount} songPoseFrames={songPoseFrames}");
             sb.AppendLine($"[MpPresence] sending: {MpSession.PoseRateHz} Hz ({(MpSession.PoseRateEnabled ? "server" : "default")}), my shots L={localShots[0]} R={localShots[1]}, pull L={PullJson(localGunL)} R={PullJson(localGunR)}");
             bool knuckles = UsingKnuckles();
             sb.AppendLine($"[MpPresence] hands: knuckles={knuckles} handAnim L={JsonDump(HandAnimJson(localKataL, 0, knuckles))} R={JsonDump(HandAnimJson(localKataR, 1, knuckles))} fingers L={JsonDump(FingersJson(localKataL, knuckles))} R={JsonDump(FingersJson(localKataR, knuckles))}");
@@ -5900,7 +6236,7 @@ namespace ExScoringMod
             isHead = false;
             foreach (Remote remote in remotes.Values)
             {
-                if (remote.Root == null || !remote.Root.activeSelf) continue;
+                if (remote.Root == null || !remote.Root.activeSelf || remote.InSong) continue;
                 if (!t.IsChildOf(remote.Root.transform)) continue;
                 isHead = remote.Head != null && t.IsChildOf(remote.Head);
                 return remote;
@@ -5925,7 +6261,7 @@ namespace ExScoringMod
             }
 
             if (!remotes.TryGetValue(headshot.target, out Remote remote)) return;
-            if (remote.Root == null || !remote.Root.activeSelf || remote.Head == null || !remote.Head.gameObject.activeSelf) return;
+            if (remote.Root == null || !remote.Root.activeSelf || remote.InSong || remote.Head == null || !remote.Head.gameObject.activeSelf) return;
             PlayRemoteHeadshot(remote);
         }
 

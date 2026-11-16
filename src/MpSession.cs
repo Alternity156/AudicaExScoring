@@ -54,6 +54,8 @@ namespace ExScoringMod
         private const string CosmeticsFeature = "cosmetics";
         /// <summary>The v2.45 feature name: shots on other players' thrown guns. Only granted with "presence".</summary>
         private const string GunHitFeature = "gunHit";
+        /// <summary>The v2.53 feature name: watching a player during a song. Only granted with "presence".</summary>
+        private const string SpectateFeature = "spectate";
 
         /// <summary>Pose rate without "poseRate" (a v2.39 server), as in v2.39.</summary>
         public const int DefaultPoseRateHz = 15;
@@ -114,6 +116,19 @@ namespace ExScoringMod
         /// older server (which would answer gunHit with BAD_MESSAGE) and after a disconnect.
         /// </summary>
         public static bool GunHitEnabled { get; private set; }
+
+        /// <summary>
+        /// True when the last welcome listed "spectate" (v2.53): watch may be sent, watchers arrives,
+        /// and a watched player's poses are relayed during a song. False with a v2.52 or older
+        /// server and after a disconnect.
+        /// </summary>
+        public static bool SpectateEnabled { get; private set; }
+
+        /// <summary>How many players are watching this player right now (v2.53, from watchers). 0 outside a lobby.</summary>
+        public static int WatcherCount => InLobby ? watcherCount : 0;
+        private static int watcherCount;
+        /// <summary>lobbyId|target of the last watch sent on this connection, null when none was.</summary>
+        private static string lastSentWatchKey;
 
         /// <summary>
         /// True when the last welcome listed "cosmetics" (v2.44): setCosmetics may be sent and other
@@ -226,6 +241,15 @@ namespace ExScoringMod
         /// gun's owner; point is in that gun's local space, dir a world direction.
         /// </summary>
         public static event Action<MpGunHit> OnGunHit;
+
+        /// <summary>The number of players watching this player changed (v2.53).</summary>
+        public static event Action<int> OnWatchers;
+
+        /// <summary>A player this client is watching says what they are playing (v2.53).</summary>
+        public static event Action<MpSpectateInfo> OnSpectateInfo;
+
+        /// <summary>Results of a player this client is watching: hits, misses, sustains (v2.53).</summary>
+        public static event Action<MpSpectateEvents> OnSpectateEvents;
 
         /// <summary>
         /// setCosmetics was refused (v2.44): UNKNOWN_PACKAGE / PACKAGE_BLOCKED (with error.package),
@@ -713,6 +737,48 @@ namespace ExScoringMod
             });
         }
 
+        /// <summary>
+        /// Who this player is watching (v2.53), or null for nobody. Call it as often as you like: a
+        /// watch goes out only when the target differs from the last one sent for this lobby on this
+        /// connection (so it is sent again by itself after a reconnect or in a new lobby). Fire-and-
+        /// forget, never queued: nothing is sent unless connected, in a lobby and with "spectate" on.
+        /// </summary>
+        public static void SetWatch(string targetUserId)
+        {
+            if (!IsConnected || !SpectateEnabled || !InLobby) return;
+            if (targetUserId == MyUserId) targetUserId = null;
+
+            string key = Lobby.lobbyId + "|" + (targetUserId ?? "");
+            if (key == lastSentWatchKey) return;
+            if (targetUserId == null && lastSentWatchKey == null) return; // nothing to stop
+            lastSentWatchKey = key;
+
+            Log($"-> watch {targetUserId ?? "nobody"}");
+            SendFireAndForget("watch", new JObject { ["target"] = targetUserId != null ? (JToken)targetUserId : JValue.CreateNull() });
+        }
+
+        /// <summary>
+        /// What this player is playing and their settings (v2.53), for the players watching them.
+        /// Fire-and-forget, no reqId, never queued: dropped unless connected, in a lobby and with
+        /// "spectate" on. The caller only sends it in a song while watched, every few seconds.
+        /// </summary>
+        public static void SendSpectateInfo(JObject info)
+        {
+            if (info == null || !IsConnected || !SpectateEnabled || !InLobby) return;
+            SendFireAndForget("spectateInfo", info);
+        }
+
+        /// <summary>
+        /// What happened to this player's targets since the last batch (v2.53), for the players
+        /// watching them. Fire-and-forget, no reqId, never queued: dropped unless connected, in a
+        /// lobby and with "spectate" on. The caller only sends it in a song while watched.
+        /// </summary>
+        public static void SendSpectateEvents(JObject batch)
+        {
+            if (batch == null || !IsConnected || !SpectateEnabled || !InLobby) return;
+            SendFireAndForget("spectateEvents", batch);
+        }
+
         // ── Match (19.5) ──
 
         /// <summary>The song is loaded and holding before playback.</summary>
@@ -796,7 +862,7 @@ namespace ExScoringMod
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("[Mp] ===== MpSession =====");
-            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} cosmetics={CosmeticsEnabled} assets={AssetsEnabled} seat={MySeat}");
+            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} spectate={SpectateEnabled} watchers={WatcherCount} cosmetics={CosmeticsEnabled} assets={AssetsEnabled} seat={MySeat}");
             sb.AppendLine($"[Mp] cosmetics: wanted={wantedCosmeticsKey ?? "none"} sent={(wantedCosmeticsKey != null && wantedCosmeticsKey == lastSentCosmeticsKey ? "yes" : "no")}");
             sb.AppendLine($"[Mp] clock: offset={ClockOffsetMs} ms, lastRtt={LastRttMs} ms, bestRtt={BestRttMs} ms, samples={clockSamples.Count}, serverNow={ServerNowMs}");
             sb.AppendLine($"[Mp] pending requests={pendingRequests.Count}, queued={queuedRequests.Count}, location=\"{currentLocation}\" browsing={currentBrowsingSongId ?? "none"}");
@@ -886,11 +952,11 @@ namespace ExScoringMod
                 ["modVersion"] = ExScoring.BuildInfo.Version,
                 ["platform"] = helloPlatform,
                 ["guestName"] = helloGuestName,
-                ["features"] = new JArray(PresenceFeature, PoseRateFeature, HeadshotFeature, CosmeticsFeature, GunHitFeature)
+                ["features"] = new JArray(PresenceFeature, PoseRateFeature, HeadshotFeature, CosmeticsFeature, GunHitFeature, SpectateFeature)
             };
             if (!string.IsNullOrEmpty(resumeToken)) hello["resumeToken"] = resumeToken;
 
-            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}, {PoseRateFeature}, {HeadshotFeature}, {CosmeticsFeature}, {GunHitFeature}])");
+            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}, {PoseRateFeature}, {HeadshotFeature}, {CosmeticsFeature}, {GunHitFeature}, {SpectateFeature}])");
             MpClient.Send(hello.ToString(Formatting.None));
         }
 
@@ -1010,6 +1076,18 @@ namespace ExScoringMod
                     HandleGunHit(message);
                     break;
 
+                case "watchers":
+                    HandleWatchers(message);
+                    break;
+
+                case "spectateInfo":
+                    HandleSpectateInfo(message);
+                    break;
+
+                case "spectateEvents":
+                    HandleSpectateEvents(message);
+                    break;
+
                 case "ok":
                     break;
 
@@ -1063,6 +1141,9 @@ namespace ExScoringMod
             PoseRateEnabled = false;
             HeadshotEnabled = false;
             GunHitEnabled = false;
+            SpectateEnabled = false;
+            watcherCount = 0;
+            lastSentWatchKey = null;
             CosmeticsEnabled = false;
             AssetsEnabled = false;
             AssetToken = null;
@@ -1095,6 +1176,10 @@ namespace ExScoringMod
             HeadshotEnabled = PresenceEnabled && Array.IndexOf(welcome.features, HeadshotFeature) >= 0;
             // "gunHit" only counts with "presence" too (v2.45).
             GunHitEnabled = PresenceEnabled && Array.IndexOf(welcome.features, GunHitFeature) >= 0;
+            // "spectate" only counts with "presence" too (v2.53). The server sends watchers again after a resume.
+            SpectateEnabled = PresenceEnabled && Array.IndexOf(welcome.features, SpectateFeature) >= 0;
+            watcherCount = 0;
+            lastSentWatchKey = null; // the watch is sent again on this connection
             // "cosmetics" only counts with "presence" too (v2.44); assets need the server's storage and a token.
             CosmeticsEnabled = PresenceEnabled && Array.IndexOf(welcome.features, CosmeticsFeature) >= 0;
             AssetToken = CosmeticsEnabled && welcome.assetsEnabled == true && !string.IsNullOrEmpty(welcome.assetToken) ? welcome.assetToken : null;
@@ -1111,7 +1196,7 @@ namespace ExScoringMod
             MpClient.MarkWelcomed();
             nextPingAtMs = 0; // ping right away for a real clock sample
 
-            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz" : "off (" + PoseRateHz + " Hz)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} cosmetics={CosmeticsEnabled} assets={AssetsEnabled}");
+            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz" : "off (" + PoseRateHz + " Hz)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} spectate={SpectateEnabled} watchers={WatcherCount} cosmetics={CosmeticsEnabled} assets={AssetsEnabled}");
 
             if (welcome.lobby != null)
             {
@@ -1166,6 +1251,68 @@ namespace ExScoringMod
             }
             Log($"   headshot: {headshot.shooter ?? "?"} -> {headshot.target}{(headshot.target == MyUserId ? " (me)" : "")}");
             SafeInvoke(OnHeadshot, headshot, "OnHeadshot");
+        }
+
+        /// <summary>watchers (v2.53): the players watching this player. Ignored without "spectate" on this connection.</summary>
+        private static void HandleWatchers(JObject message)
+        {
+            MpWatchers watchers;
+            try
+            {
+                watchers = message.ToObject<MpWatchers>(MpJson.Serializer);
+            }
+            catch (Exception ex)
+            {
+                Log($"   watchers unreadable, ignored: {ex.Message}");
+                return;
+            }
+            if (!SpectateEnabled)
+            {
+                Log("   watchers ignored: this connection doesn't have spectate");
+                return;
+            }
+
+            int count = watchers != null && watchers.watchers != null ? watchers.watchers.Length : 0;
+            if (count == watcherCount) return;
+            watcherCount = count;
+            Log($"   watchers: {count}");
+            SafeInvoke(OnWatchers, count, "OnWatchers");
+        }
+
+        /// <summary>spectateEvents (v2.53): a watched player's results. Ignored without "spectate", a userId or any event.</summary>
+        private static void HandleSpectateEvents(JObject message)
+        {
+            MpSpectateEvents batch;
+            try
+            {
+                batch = message.ToObject<MpSpectateEvents>(MpJson.Serializer);
+            }
+            catch (Exception ex)
+            {
+                Log($"   spectateEvents unreadable, ignored: {ex.Message}");
+                return;
+            }
+            if (!SpectateEnabled || batch == null || string.IsNullOrEmpty(batch.userId) || batch.userId == MyUserId) return;
+            if (batch.events == null || batch.events.Length == 0) return;
+            SafeInvoke(OnSpectateEvents, batch, "OnSpectateEvents");
+        }
+
+        /// <summary>spectateInfo (v2.53): what a watched player is playing. Ignored without "spectate", a userId or a song id.</summary>
+        private static void HandleSpectateInfo(JObject message)
+        {
+            MpSpectateInfo info;
+            try
+            {
+                info = message.ToObject<MpSpectateInfo>(MpJson.Serializer);
+            }
+            catch (Exception ex)
+            {
+                Log($"   spectateInfo unreadable, ignored: {ex.Message}");
+                return;
+            }
+            if (!SpectateEnabled || info == null || string.IsNullOrEmpty(info.userId) || info.userId == MyUserId) return;
+            if (info.song == null || string.IsNullOrEmpty(info.song.songId)) return;
+            SafeInvoke(OnSpectateInfo, info, "OnSpectateInfo");
         }
 
         /// <summary>
@@ -1290,6 +1437,8 @@ namespace ExScoringMod
 
             Log($"   left lobby {Lobby.code} ({reason})");
             Lobby = null;
+            watcherCount = 0;
+            lastSentWatchKey = null;
             scoringModeSentForLobbyId = null;
             lastSentSongStatusKey = null;
             lastSentLocationKey = null;

@@ -133,7 +133,22 @@ namespace ExScoringMod
                 () => Config.ShowCustomAvatars,
                 v => Config.UpdateShowCustomAvatars(v),
                 "Shows the other players' custom heads, bodies and guns, downloading them when needed. Off = those show as the default models. Yours are still shared");
-            OptionsMenuClone.AddRow(showCustom);
+            var allowSpectators = OptionsMenuClone.CreateToggle(1, "Allow Spectators",
+                () => Config.AllowSpectators,
+                v => Config.UpdateAllowSpectators(v),
+                "Lets the other players in your lobby watch you play through their spectator window. Off = nothing is shared while you're in a song");
+            OptionsMenuClone.AddRow(showCustom, allowSpectators);
+
+            var spectatorAudio = OptionsMenuClone.CreateToggle(0, "Spectator Audio Over Previews",
+                () => Config.SpectatorAudioOverPreviews,
+                v => Config.UpdateSpectatorAudioOverPreviews(v),
+                "While the spectator window plays a watched player's song, song previews are silenced so only that song is heard. Off = a song preview lowers the watched player's song instead");
+            var spectatorVolume = OptionsMenuClone.CreateSlider(1, "Spectator Volume",
+                () => Config.SpectatorVolume,
+                v => Config.UpdateSpectatorVolume(v),
+                0f, 100f, 5f, 100f, "N0",
+                "Volume of a watched player's song in the spectator window, in % of the song preview level");
+            OptionsMenuClone.AddRow(spectatorAudio, spectatorVolume);
         }
 
         // ── Online Play (lobby) category ──
@@ -143,7 +158,7 @@ namespace ExScoringMod
             codeLabel = null;
 
             // The settings (Enable Online Play, Show Other Players, Show Player Names, Auto-Download Missing Songs, Headshot Effects/Sounds, Fade Blocking Platforms, Dim Unready Platforms,
-            // Lobby Song Preview/Volume, Show Custom Avatars)
+            // Lobby Song Preview/Volume, Show Custom Avatars, Allow Spectators)
             // live only in the song list's Options > Multiplayer (BuildSettings).
             if (!Config.EnableOnlinePlay)
             {

@@ -515,6 +515,11 @@ namespace ExScoringMod
             AvatarPreview.Tick();
             MpGameplay.Tick();
             LobbyPanel.Tick();
+            SpectatorDebug.Tick();
+            SpectatorWindow.Tick();
+            SpectatorSong.Tick();
+            SpectatorTargets.Tick();
+            SpectatorSounds.Tick();
             LobbyLaunchButton.Tick();
             LobbySongList.Tick();
             OnlinePlayButton.Tick();

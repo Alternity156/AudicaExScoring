@@ -202,6 +202,78 @@ namespace ExScoringMod
         public string assetToken;
     }
 
+    /// <summary>watchers (v2.53): who is watching this player right now (connected "spectate" clients). Empty = nobody.</summary>
+    public class MpWatchers
+    {
+        public string[] watchers;
+    }
+
+    /// <summary>
+    /// spectateInfo (v2.53): what a watched player is playing and the settings a watcher needs to
+    /// draw it the same way. Sent by the watched player's mod while they are in a song and
+    /// watched, relayed by the server to their watchers with userId filled in.
+    /// </summary>
+    public class MpSpectateInfo
+    {
+        /// <summary>The player this is about (set by the server; null in what the mod sends).</summary>
+        public string userId;
+        /// <summary>songId, difficulty (KataConfig.Difficulty name), title, artist, mapper. maudicaId unused.</summary>
+        public MpSongRef song;
+        public MpSpectateSettings settings;
+    }
+
+    /// <summary>The watched player's own settings (v2.53). Relayed as sent; every field may be missing.</summary>
+    public class MpSpectateSettings
+    {
+        /// <summary>PlayerPreferences.TargetSpeedMultiplier as in effect for this song.</summary>
+        public float? targetSpeed;
+        /// <summary>PlayerPreferences.MeleeSpeedMultiplier as in effect for this song.</summary>
+        public float? meleeSpeed;
+        /// <summary>PlayerPreferences.PlayerHeightInches: how high their melee targets sit.</summary>
+        public float? playerHeight;
+    }
+
+    /// <summary>
+    /// spectateEvents (v2.53): what happened to a watched player's targets since their last batch.
+    /// Sent by the watched player's mod, relayed by the server to their watchers with userId filled in.
+    /// </summary>
+    public class MpSpectateEvents
+    {
+        /// <summary>The player this is about (set by the server; null in what the mod sends).</summary>
+        public string userId;
+        public MpSpectateEvent[] events;
+    }
+
+    /// <summary>One result (v2.53).</summary>
+    public class MpSpectateEvent
+    {
+        /// <summary>The cue's index as the watched player's game has it (SongCues.Cue.index). Not used to find the cue: a chart loaded outside a song doesn't carry it.</summary>
+        public int i;
+        /// <summary>The cue's own tick and pitch: together they say which cue it is on any copy of the chart.</summary>
+        public int ct;
+        public int cp;
+        /// <summary>"hit" | "miss" | "holdDone" (a sustain held to its end) | "holdBroken" (a sustain let go) | "popup" (a text popup; no cue).</summary>
+        public string k;
+        /// <summary>The song position in ticks when it happened.</summary>
+        public double tick;
+        /// <summary>hit: the hand that did it, as Target.TargetHandType (1 = right, 2 = left).</summary>
+        public int hand;
+        /// <summary>hit: true for a shot, false for a melee hit.</summary>
+        public bool shot;
+        /// <summary>hit by a shot: where the beam met the target, in the player's play space [x, y, z]. popup: where it is.</summary>
+        public float[] p;
+        /// <summary>popup: which one, "score" | "early" | "late".</summary>
+        public string pk;
+        /// <summary>popup: its text as shown (the game's points, or the EX judgement text with its tags), and the second line (the multiplier) when there is one.</summary>
+        public string text;
+        public string extra;
+        /// <summary>popup: the text is rich text (tags are to be read, not shown).</summary>
+        public bool rich;
+        /// <summary>popup: its rotation [x, y, z, w] and scale [x, y, z] in the player's play space.</summary>
+        public float[] q;
+        public float[] s;
+    }
+
     /// <summary>presenceConfig (v2.40, 19.13.3): an admin changed the pose rate.</summary>
     public class MpPresenceConfig
     {
@@ -238,6 +310,10 @@ namespace ExScoringMod
         /// <summary>v2.42 (19.15): [thumb, index, middle, ring, pinky] curls, 0..1 (finger tracking only), or null.</summary>
         public float[] lFingers;
         public float[] rFingers;
+        /// <summary>v2.53: this player is in a song and the recipient is watching them (only then are they listed while playing).</summary>
+        public bool inSong;
+        /// <summary>v2.53: the song position in ticks when the pose was sampled in a song, else null.</summary>
+        public double? songTick;
     }
 
     /// <summary>

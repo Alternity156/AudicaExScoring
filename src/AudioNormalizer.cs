@@ -224,6 +224,8 @@ namespace ExScoringMod
                     if (preview != null && h == preview.mSoundHandle)
                     {
                         gain *= Preview.Factor(h, preview.mCurrentSong);
+                        // Spectator Audio Over Previews: silent while the spectator window plays a watched player's song.
+                        gain *= 1f - SpectatorSong.PreviewMute;
                         return;
                     }
 

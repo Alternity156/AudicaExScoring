@@ -134,6 +134,9 @@ namespace ExScoringMod
         public static bool AutoDownloadSongs;
         public static bool HeadshotEffects;
         public static bool HeadshotSounds;
+        public static bool AllowSpectators;
+        public static bool SpectatorAudioOverPreviews;
+        public static float SpectatorVolume; // 0..100 %, of the song preview level
         public static bool LobbySongPreview;
         // Lobby song preview volume, 0..10 like Music Level. Below 0 = never set: follows the
         // current Music Level (see GetLobbySongPreviewVolume) until the player moves the slider.
@@ -268,6 +271,9 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(AutoDownloadSongs), true, "In an online lobby, automatically downloads the selected song and the players' suggestions you don't have, when they're on Maudica");
             MelonPrefs.RegisterBool(Category, nameof(HeadshotEffects), true, "Shows the headshot effect when you're shot in the head, and on other players when they are. Your shots still count for the others while this is off");
             MelonPrefs.RegisterBool(Category, nameof(HeadshotSounds), true, "Plays the headshot sound when another player is shot in the head (only while Headshot Effects is on)");
+            MelonPrefs.RegisterBool(Category, nameof(AllowSpectators), true, "Lets the other players in your lobby watch you play through their spectator window. Off = nothing is shared while you're in a song");
+            MelonPrefs.RegisterBool(Category, nameof(SpectatorAudioOverPreviews), true, "While the spectator window plays a watched player's song, song previews are silenced so only that song is heard. Off = a song preview lowers the watched player's song instead");
+            MelonPrefs.RegisterFloat(Category, nameof(SpectatorVolume), 100f, "Volume of a watched player's song in the spectator window, in % of the song preview level [0,100,5,100]");
             MelonPrefs.RegisterBool(Category, nameof(LobbySongPreview), true, "In an online lobby, plays the song the host selected in the menus outside the song list, instead of the menu music");
             // Empty description: shown and changed only in Options > Multiplayer (its -1 "follow Music Level"
             // default doesn't fit a [min,max,step,default] range).
@@ -377,6 +383,9 @@ namespace ExScoringMod
             AutoDownloadSongs = MelonPrefs.GetBool(Category, nameof(AutoDownloadSongs));
             HeadshotEffects = MelonPrefs.GetBool(Category, nameof(HeadshotEffects));
             HeadshotSounds = MelonPrefs.GetBool(Category, nameof(HeadshotSounds));
+            AllowSpectators = MelonPrefs.GetBool(Category, nameof(AllowSpectators));
+            SpectatorAudioOverPreviews = MelonPrefs.GetBool(Category, nameof(SpectatorAudioOverPreviews));
+            SpectatorVolume = Mathf.Clamp(MelonPrefs.GetFloat(Category, nameof(SpectatorVolume)), 0f, 100f);
             LobbySongPreview = MelonPrefs.GetBool(Category, nameof(LobbySongPreview));
             LobbySongPreviewVolume = MelonPrefs.GetFloat(Category, nameof(LobbySongPreviewVolume));
             if (LobbySongPreviewVolume > 10f) LobbySongPreviewVolume = 10f;
@@ -450,6 +459,29 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(HeadshotSounds), value);
             HeadshotSounds = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateAllowSpectators(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(AllowSpectators), value);
+            AllowSpectators = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateSpectatorVolume(float value)
+        {
+            if (value < 0f) value = 0f;
+            if (value > 100f) value = 100f;
+            MelonPrefs.SetFloat(Category, nameof(SpectatorVolume), value);
+            SpectatorVolume = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateSpectatorAudioOverPreviews(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(SpectatorAudioOverPreviews), value);
+            SpectatorAudioOverPreviews = value;
             MelonPrefs.SaveConfig();
         }
 

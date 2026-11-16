@@ -290,6 +290,7 @@ namespace ExScoringMod
 
             string songId = selected.songId;
             if (songId == downloadingSongId) return; // the download reports its own progress
+            if (SpectatorSong.IsDownloading(songId)) return; // the spectator window is fetching it: checked again when it's done
 
             if (songId != statusSongId)
             {

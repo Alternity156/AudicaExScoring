@@ -39,6 +39,11 @@ namespace ExScoringMod
     /// 2026-11-10), so the environment music can't get a separate volume: native AudioAmbience.Update
     /// sets its gain every frame (preview ducking), and that call is scaled instead (ShellGainPatch).
     ///
+    /// While the spectator window plays a watched player's song (SpectatorSong.MenuDuck, 0..1),
+    /// all menu music is lowered by that much: the environment music through ShellGainPatch, the
+    /// Tutorial/Random track through its own gain (it keeps running silently), and the Now Playing
+    /// label is hidden.
+    ///
     /// Config.MenuMusic: 0 = Environment (native), 1..5 = arena 1..5, 6 = Tutorial, 7 = Random Song.
     /// </summary>
     internal static class MenuMusic
@@ -234,7 +239,7 @@ namespace ExScoringMod
                 {
                     AudioAmbience ambience = AudioAmbience.I;
                     if (ambience == null || h != ambience.mShellMusicHandle) return;
-                    gain *= VolumeFactor;
+                    gain *= VolumeFactor * (1f - SpectatorSong.MenuDuck);
                 }
                 catch (Exception ex)
                 {
@@ -342,13 +347,14 @@ namespace ExScoringMod
 
                     float baseGain = preview != null ? preview.gain : 0.4f;
                     float previewLevel = PreviewLevel(preview);
-                    Hmx.Audio.Sound.SetGain(handle, baseGain * VolumeFactor * fade * (1f - previewLevel));
+                    float spectatorDuck = SpectatorSong.MenuDuck; // the spectator window is playing a watched player's song
+                    Hmx.Audio.Sound.SetGain(handle, baseGain * VolumeFactor * fade * (1f - previewLevel) * (1f - spectatorDuck));
 
                     // Keep the environment music silent while a menu track is the selected music.
                     if (wanted != Mode.None && ambience != null && ambience.mShellMusicHandle != 0)
                         Hmx.Audio.Sound.SetGain(ambience.mShellMusicHandle, 0f);
 
-                    if (mode == Mode.Random && wanted == Mode.Random && previewLevel <= 0f)
+                    if (mode == Mode.Random && wanted == Mode.Random && previewLevel <= 0f && spectatorDuck <= 0f)
                         NowPlayingLabel.Show(song);
                     else
                         NowPlayingLabel.Hide();
