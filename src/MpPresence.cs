@@ -1756,8 +1756,11 @@ namespace ExScoringMod
 
                 int seat = player != null ? player.seat : 0;
                 if (player == null && IsDebugFake(remote)) seat = (Math.Max(0, mySeat) + 1) % Spots.Length; // the spot after this player's
-                remote.Root.transform.position = LayoutOffset(seat, mySeat);
-                remote.Root.transform.rotation = Quaternion.identity;
+                Vector3 rootPosition = LayoutOffset(seat, mySeat);
+                Quaternion rootRotation = Quaternion.identity;
+                SpectatorDiorama.Place(remote.Root.transform, ref rootPosition, ref rootRotation); // no-op unless a diorama is shown for this avatar
+                remote.Root.transform.position = rootPosition;
+                remote.Root.transform.rotation = rootRotation;
 
                 ApplyColors(remote, player);
 
@@ -2398,11 +2401,14 @@ namespace ExScoringMod
                     Vector3 toHit = hitPoint - position;
                     if (toHit.sqrMagnitude > 0.01f) forward = toHit.normalized;
                 }
+                // Shown as a spectator diorama: the beams (made under KataConfig, outside the avatar
+                // root) are shrunk with it.
+                float dioramaScale = SpectatorDiorama.ScaleOf(remote.Root != null ? remote.Root.transform : null);
                 int songBeams = Math.Min(count, BeamPoolSize);
                 for (int i = 0; i < songBeams; i++)
                 {
                     fx.Cycle = (fx.Cycle + 1) % fx.Beams.Length;
-                    FireBeam(fx.Beams[fx.Cycle], fx.Prefab, position, forward, roll);
+                    FireBeam(fx.Beams[fx.Cycle], fx.Prefab, position, forward, roll, dioramaScale);
                 }
                 if (IsAlive(fx.Muzzle)) fx.Muzzle.Play(position, forward, roll);
                 if (remote.Guns[hand] != null) remote.Guns[hand].FireStart = Time.time;
@@ -2455,8 +2461,13 @@ namespace ExScoringMod
             if (IsAlive(fx.Muzzle) && fx.Muzzle.gameObject.layer != SongOnlyLayer) SetLayerRecursive(fx.Muzzle.gameObject, SongOnlyLayer);
         }
 
-        /// <summary>Gun.Fire's placement of a pooled beam, then GunBeam.Fire.</summary>
-        private static void FireBeam(GunBeam beam, GunBeam prefab, Vector3 position, Vector3 forward, float roll)
+        /// <summary>
+        /// Gun.Fire's placement of a pooled beam, then GunBeam.Fire. Scale: the spectator diorama's (1
+        /// otherwise), on the beam's size only. GunBeam.speed is per beam length (Gun.Fire's rebound
+        /// cut keeps speed x length), so a shorter beam already moves slower in metres; scaling the
+        /// speed too made it last 1 / scale times as long.
+        /// </summary>
+        private static void FireBeam(GunBeam beam, GunBeam prefab, Vector3 position, Vector3 forward, float roll, float scale = 1f)
         {
             if (!IsAlive(beam)) return;
             Transform t = beam.transform;
@@ -2464,7 +2475,7 @@ namespace ExScoringMod
             t.forward = forward;
             Vector3 local = t.localEulerAngles;
             t.localRotation = Quaternion.Euler(local.x, local.y, roll);
-            t.localScale = prefab.transform.localScale;
+            t.localScale = prefab.transform.localScale * scale;
             beam.speed = prefab.speed;
             beam.Fire();
         }

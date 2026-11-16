@@ -1265,7 +1265,10 @@ namespace ExScoringMod
                     Vector3 to = held.TargetTransform.position;
                     SustainBeam native = beam.Beam;
                     if (native.start != null) native.start.position = from;
-                    if (native.startForward != null) native.startForward.position = from + aim * 2f;
+                    // 2 m ahead of the gun, natively; shrunk with a spectator diorama, or the curve
+                    // overshoots the (nearer) target and folds back to it.
+                    float ahead = 2f * SpectatorDiorama.ScaleOf(SpectatorWindow.ShownWatchedRoot);
+                    if (native.startForward != null) native.startForward.position = from + aim * ahead;
                     if (native.middle != null) native.middle.position = from + (to - from) * 0.4f;
                     if (native.end != null) native.end.position = to;
                     if (!beam.Root.activeSelf) beam.Root.SetActive(true);

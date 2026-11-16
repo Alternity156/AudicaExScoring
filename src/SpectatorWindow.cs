@@ -87,6 +87,24 @@ namespace ExScoringMod
     /// Their targets (SpectatorTargets, which reads ShownWatchedRoot) are drawn on layer 31 too,
     /// in the watched player's play space.
     ///
+    /// Diorama mode (2026-11-16): the 3D button right of + switches the window to a diorama: the
+    /// watched player's song, shrunk (SpectatorDiorama), in front of this player, seen in the headset
+    /// and on the game's spectator camera. The frame, picture and shot blocker are hidden and the
+    /// window's camera is off; the window stays open (ShownWatchedId / ShownWatchedRoot still drive
+    /// the song, audio and targets). The title and the buttons (all under Controls) go just below the
+    /// watched player's platform, turned (yaw only) to face the headset; there the mode button reads
+    /// 2D and switches back. The diorama is shown only while the watched player is in a song (their
+    /// avatar on SongOnlyLayer) and their song is installed here; otherwise the controls wait at the
+    /// diorama's spot.
+    ///   Placing: the diorama's spot is the centre of their target sphere (the SpawnerDome); it
+    ///   always faces the menus (+z) and stays upright. The grip pressed while a gun points into that
+    ///   sphere (radius DomeRadius x scale) grabs it: the centre then keeps its offset in the gun's
+    ///   space (it swings with the wrist like the window) but never turns. First time: DioramaAhead m
+    ///   in front of the headset toward the menus, DioramaHeight m up.
+    ///   Size: - and + step the diorama's scale by SizeStepFactor around DioramaBaseScale (min
+    ///   SizeStepMin steps), separately from the window's size.
+    ///   Saved (PrefsCategory): PrefsMode, PrefsDioramaCentre, PrefsDioramaScale.
+    ///
     /// Testing alone: SpectatorDebug's replay adds a fake in-song player to the list (no server needed).
     ///
     /// Not in this phase: targets and beams during a song, scenery, post-processing, other
@@ -166,6 +184,18 @@ namespace ExScoringMod
         private const string PrefsCategory = "ExScoringSpectatorWindow";
         private const string PrefsPose = "WindowPose";
         private const string PrefsScale = "WindowScale";
+        private const string PrefsMode = "Mode";                     // "window" or "diorama"
+        private const string PrefsDioramaCentre = "DioramaCentre";   // "x,y,z", the sphere's centre
+        private const string PrefsDioramaScale = "DioramaScale";
+
+        // Diorama mode (see the summary).
+        private const float DioramaBaseScale = 0.05f;                // dome radius 15 m -> 0.75 m
+        private const float DioramaAhead = 1.2f;                     // first spot: metres in front of the headset (+z)
+        private const float DioramaHeight = 1.0f;                    // and metres above the floor
+        private const float DomeRadius = 15f;                        // SpectatorTargets: the targets' sphere
+        private static readonly Vector3 DomeLocal = new Vector3(0f, -1.5f, 6f); // SpawnerDome from the play space's root
+        private const float ControlsBelowPlatform = 0.12f;           // the controls (title just above the button row) this far below their platform
+        private const float ModeLabelFontSize = 0.3f;                // "3D" / "2D"
 
         // ── State ────────────────────────────────────────────────────────────
         private static bool open;            // the player wants the window
@@ -192,6 +222,16 @@ namespace ExScoringMod
         private static GunButton nextButton;
 
         private static int sizeStep;                     // 0 = base size
+        private static Transform controls;               // title + buttons: with the window, or under the diorama
+        private static bool dioramaMode;
+        private static int dioramaStep;                  // 0 = DioramaBaseScale
+        private static Vector3 dioramaCentre;
+        private static bool hasDioramaCentre;
+        private static GameObject modeObject;
+        private static GunButton modeButton;
+        private static TextMeshPro modeLabel;
+        private static Vector3 modeOffset;
+        private static float nextTargetsLookup;
         private static GameObject frameObject, pictureObject;
         private static BoxCollider blockerBox;
         private static GameObject minusObject, plusObject;
@@ -250,9 +290,14 @@ namespace ExScoringMod
         }
 
         private static float SizeScale => Mathf.Pow(SizeStepFactor, sizeStep);
+        private static float DioramaScale => DioramaBaseScale * Mathf.Pow(SizeStepFactor, dioramaStep);
+        private static int CurrentStep => dioramaMode ? dioramaStep : sizeStep;
         private static float CurrentWidth => WindowWidth * SizeScale;
         private static float CurrentHeight => WindowHeight * SizeScale;
-        private static Vector3 NextButtonPosition => new Vector3(NextButtonX, -(CurrentHeight * 0.5f) - NextButtonBelow, NextButtonZ);
+        // In diorama mode the controls are laid out as under a window of no height (title just above
+        // the row), and the whole group is placed below the platform (UpdateDioramaControls).
+        private static float LayoutHeight => dioramaMode ? 0f : CurrentHeight;
+        private static Vector3 NextButtonPosition => new Vector3(NextButtonX, -(LayoutHeight * 0.5f) - NextButtonBelow, NextButtonZ);
 
         // ── Tick ─────────────────────────────────────────────────────────────
 
@@ -284,6 +329,7 @@ namespace ExScoringMod
                 bool show = available && open && !buildFailed;
                 if (!show)
                 {
+                    SpectatorDiorama.Hide();
                     if (root != null && root.activeSelf)
                     {
                         EndGrab(true);
@@ -312,6 +358,7 @@ namespace ExScoringMod
 
                 UpdateCamera();
                 UpdateGrab();
+                UpdateDiorama();
             }
             catch (Exception ex)
             {
@@ -469,7 +516,7 @@ namespace ExScoringMod
 
         private static bool EnsureBuilt()
         {
-            if (root != null && windowCamera != null && title != null) return true; // Unity-null: rebuilt if destroyed
+            if (root != null && windowCamera != null && title != null && controls != null) return true; // Unity-null: rebuilt if destroyed
 
             Destroy();
 
@@ -493,6 +540,13 @@ namespace ExScoringMod
                 root.transform.localScale = Vector3.one;
                 LoadPose();
                 LoadScale();
+                LoadDiorama();
+
+                // Title and buttons: with the window (identity), or moved under the diorama.
+                GameObject controlsObject = new GameObject("Controls");
+                controlsObject.layer = WindowLayer;
+                controlsObject.transform.SetParent(root.transform, false);
+                controls = controlsObject.transform;
 
                 // Render target
                 texture = new RenderTexture(TextureWidth, TextureHeight, 24);
@@ -548,7 +602,7 @@ namespace ExScoringMod
                 // Title, growing upward from the frame's top edge.
                 GameObject titleObject = new GameObject("Title");
                 titleObject.layer = WindowLayer;
-                titleObject.transform.SetParent(root.transform, false);
+                titleObject.transform.SetParent(controls, false);
                 title = titleObject.AddComponent<TextMeshPro>();
                 title.fontSize = TitleFontSize;
                 title.alignment = TextAlignmentOptions.Bottom;
@@ -563,9 +617,9 @@ namespace ExScoringMod
                 title.rectTransform.sizeDelta = new Vector2(WindowWidth, 0.1f);
                 titleObject.transform.localPosition = new Vector3(0f, WindowHeight * 0.5f + FrameBorder + TitleGap, -0.002f);
                 lastTitle = null;
-                ApplySize();
+                ApplyMode();
 
-                Log("built");
+                Log("built" + (dioramaMode ? " (diorama mode)" : ""));
                 return true;
             }
             catch (Exception ex)
@@ -793,9 +847,11 @@ namespace ExScoringMod
             {
                 minusButton.mShellPage = page;
                 plusButton.mShellPage = page;
+                if (modeButton != null) modeButton.mShellPage = page;
             }
-            minusButton.SetInteractable(sizeStep > SizeStepMin);
+            minusButton.SetInteractable(CurrentStep > SizeStepMin);
             plusButton.SetInteractable(true);
+            if (modeButton != null) modeButton.SetInteractable(true);
         }
 
         // ── Size ─────────────────────────────────────────────────────────────
@@ -807,22 +863,35 @@ namespace ExScoringMod
             if (pictureObject != null) pictureObject.transform.localScale = new Vector3(w, h, 1f);
             if (frameObject != null) frameObject.transform.localScale = new Vector3(w + FrameBorder * 2f, h + FrameBorder * 2f, 1f);
             if (blockerBox != null) blockerBox.size = new Vector3(w + FrameBorder * 2f, h + FrameBorder * 2f, 0.004f);
+            float layoutH = LayoutHeight;
             if (title != null)
             {
-                title.rectTransform.sizeDelta = new Vector2(w, 0.1f);
-                title.transform.localPosition = new Vector3(0f, h * 0.5f + FrameBorder + TitleGap, -0.002f);
+                title.rectTransform.sizeDelta = new Vector2(dioramaMode ? WindowWidth : w, 0.1f);
+                title.transform.localPosition = new Vector3(0f, layoutH * 0.5f + FrameBorder + TitleGap, -0.002f);
             }
             Vector3 next = NextButtonPosition;
             if (nextObject != null) nextObject.transform.localPosition = next;
             if (minusObject != null) minusObject.transform.localPosition = next + minusOffset;
             if (plusObject != null) plusObject.transform.localPosition = next + plusOffset;
+            if (modeObject != null) modeObject.transform.localPosition = next + modeOffset;
         }
 
         private static void OnMinusShot() => ChangeSize(-1);
         private static void OnPlusShot() => ChangeSize(+1);
 
+        /// <summary>- and +: the window's size, or in diorama mode the diorama's scale.</summary>
         private static void ChangeSize(int delta)
         {
+            if (dioramaMode)
+            {
+                int dStep = Mathf.Max(dioramaStep + delta, SizeStepMin);
+                if (dStep == dioramaStep) return;
+                dioramaStep = dStep;
+                SaveDiorama();
+                if (minusButton != null) minusButton.SetInteractable(dioramaStep > SizeStepMin);
+                Log($"diorama step {dioramaStep} (scale {DioramaScale:0.###})");
+                return;
+            }
             int step = Mathf.Max(sizeStep + delta, SizeStepMin);
             if (step == sizeStep) return;
             sizeStep = step;
@@ -830,6 +899,95 @@ namespace ExScoringMod
             SaveScale();
             if (minusButton != null) minusButton.SetInteractable(sizeStep > SizeStepMin);
             Log($"size step {sizeStep} ({SizeScale:0.##}x)");
+        }
+
+        // ── Diorama mode ─────────────────────────────────────────────────────
+
+        private static void OnModeShot()
+        {
+            EndGrab(true);
+            dioramaMode = !dioramaMode;
+            if (dioramaMode && !hasDioramaCentre) dioramaCentre = DefaultDioramaCentre();
+            hasDioramaCentre = true;
+            ApplyMode();
+            SaveDiorama();
+            UpdateButtons();
+            Log(dioramaMode ? $"diorama mode (centre ({dioramaCentre.x:0.##}, {dioramaCentre.y:0.##}, {dioramaCentre.z:0.##}), scale {DioramaScale:0.###})" : "window mode");
+        }
+
+        private static Vector3 DefaultDioramaCentre()
+        {
+            Camera head = Camera.main;
+            Vector3 p = head != null ? head.transform.position : Vector3.zero;
+            return new Vector3(p.x, DioramaHeight, p.z + DioramaAhead);
+        }
+
+        /// <summary>Shows or hides the window's own parts for the mode, and lays the controls out for it.</summary>
+        private static void ApplyMode()
+        {
+            bool windowParts = !dioramaMode;
+            if (frameObject != null && frameObject.activeSelf != windowParts) frameObject.SetActive(windowParts);
+            if (pictureObject != null && pictureObject.activeSelf != windowParts) pictureObject.SetActive(windowParts);
+            if (blockerBox != null && blockerBox.gameObject.activeSelf != windowParts) blockerBox.gameObject.SetActive(windowParts);
+            if (windowCamera != null && windowCamera.enabled != windowParts) windowCamera.enabled = windowParts;
+            if (modeLabel != null) modeLabel.text = dioramaMode ? "2D" : "3D";
+            if (controls != null && !dioramaMode)
+            {
+                controls.localPosition = Vector3.zero;
+                controls.localRotation = Quaternion.identity;
+            }
+            if (!dioramaMode) SpectatorDiorama.Hide();
+            ApplySize();
+        }
+
+        /// <summary>
+        /// Every frame while the window is shown. Diorama mode: the diorama shown at its spot while
+        /// the watched player is in a song here (else hidden), and the controls under its platform.
+        /// </summary>
+        private static void UpdateDiorama()
+        {
+            if (!dioramaMode)
+            {
+                SpectatorDiorama.Hide();
+                return;
+            }
+
+            float scale = DioramaScale;
+            Transform head = HeadOf(watchedId);
+            bool inSong = head != null && head.gameObject.layer == MpPresence.SongOnlyLayer && SpectatorSong.ViewAllowed(watchedId);
+            if (inSong)
+            {
+                bool lookup = Time.unscaledTime >= nextTargetsLookup;
+                if (lookup) nextTargetsLookup = Time.unscaledTime + StateRefreshSeconds;
+                SpectatorDiorama.Show(watchedRoot, dioramaCentre, scale, lookup);
+            }
+            else SpectatorDiorama.Hide();
+
+            // Controls: below their platform (the play space's root), turned to face the headset.
+            if (controls == null) return;
+            Vector3 platform = dioramaCentre - DomeLocal * scale;
+            Vector3 position = platform + Vector3.down * ControlsBelowPlatform;
+            controls.position = position;
+            Camera cam = Camera.main;
+            if (cam != null)
+            {
+                Vector3 away = position - cam.transform.position; // the controls' front (local -Z) faces the viewer
+                away.y = 0f;
+                if (away.sqrMagnitude > 1e-6f) controls.rotation = Quaternion.LookRotation(away, Vector3.up);
+            }
+        }
+
+        /// <summary>The gun's firepoint ray into the diorama's sphere (radius DomeRadius x scale around its centre).</summary>
+        private static bool PointsAtDiorama(Gun gun)
+        {
+            if (!dioramaMode) return false;
+            Transform firepoint = gun.firepoint;
+            if (firepoint == null) firepoint = gun.transform;
+            float radius = DomeRadius * DioramaScale;
+            Vector3 toCentre = dioramaCentre - firepoint.position;
+            float along = Vector3.Dot(toCentre, firepoint.forward);
+            if (along <= 0f) return toCentre.sqrMagnitude <= radius * radius; // inside it, pointing away
+            return (toCentre - firepoint.forward * along).sqrMagnitude <= radius * radius;
         }
 
         /// <summary>The square "reload" button of the customization menu's slider (the prefab, else a scene copy).</summary>
@@ -862,7 +1020,8 @@ namespace ExScoringMod
 
             if (minusObject != null) GameObject.Destroy(minusObject);
             if (plusObject != null) GameObject.Destroy(plusObject);
-            minusObject = plusObject = null; minusButton = plusButton = null;
+            if (modeObject != null) GameObject.Destroy(modeObject);
+            minusObject = plusObject = modeObject = null; minusButton = plusButton = modeButton = null; modeLabel = null;
 
             GameObject source = FindSizeButtonSource(out Transform sliderRoot, out string from);
             if (source == null)
@@ -903,10 +1062,20 @@ namespace ExScoringMod
             }
 
             minusOffset = PlaceRightOf(minusObject, nextRight, centerY, nextPos, out float minusRight);
-            plusOffset = PlaceRightOf(plusObject, minusRight, centerY, nextPos, out _);
+            plusOffset = PlaceRightOf(plusObject, minusRight, centerY, nextPos, out float plusRight);
+
+            // The mode button: the same square, right of +.
+            modeObject = CreateSizeButton(source, "ModeButton", dioramaMode ? "2D" : "3D", OnModeShot, scale, rotation, out modeButton);
+            if (modeObject != null)
+            {
+                modeOffset = PlaceRightOf(modeObject, plusRight, centerY, nextPos, out _);
+                Transform label = modeObject.transform.Find("SizeLabel");
+                modeLabel = label != null ? label.GetComponent<TextMeshPro>() : null;
+                if (modeLabel != null) modeLabel.fontSize = ModeLabelFontSize;
+            }
             ApplySize();
 
-            Log($"size buttons created (copied from {from})");
+            Log($"size buttons created (copied from {from}){(modeObject != null ? ", with the 3D/2D button" : ", no 3D/2D button")}");
             return true;
         }
 
@@ -916,7 +1085,7 @@ namespace ExScoringMod
                                                    Vector3 scale, Quaternion rotation, out GunButton gunButton)
         {
             gunButton = null;
-            GameObject button = GameObject.Instantiate(source, root.transform);
+            GameObject button = GameObject.Instantiate(source, controls);
             button.name = name;
             button.transform.localPosition = Vector3.zero;
             button.transform.localRotation = rotation;
@@ -953,10 +1122,10 @@ namespace ExScoringMod
             Transform icon = button.transform.Find(SquareButtonIcon);
             if (icon != null) icon.gameObject.SetActive(false);
 
-            // The label lives under the window (scale 1) and is moved onto the button by PlaceRightOf.
+            // The label lives under the controls (scale 1) and is moved onto the button by PlaceRightOf.
             GameObject labelObject = new GameObject("SizeLabel");
             labelObject.layer = WindowLayer;
-            labelObject.transform.SetParent(root.transform, false);
+            labelObject.transform.SetParent(controls, false);
             TextMeshPro tmp = labelObject.AddComponent<TextMeshPro>();
             LobbyPanel.ApplyGameFont(tmp);
             tmp.text = label;
@@ -987,7 +1156,7 @@ namespace ExScoringMod
             Transform label = button.transform.Find("SizeLabel");
             if (label != null)
             {
-                label.SetParent(root.transform, false);
+                label.SetParent(controls, false);
                 label.localRotation = Quaternion.identity;
                 label.localScale = Vector3.one;
                 label.localPosition = new Vector3(center.x, center.y, nextPos.z - 0.004f);
@@ -999,7 +1168,7 @@ namespace ExScoringMod
         }
 
         /// <summary>
-        /// The shootable area's box in the window's local space: the colliders on the GunButton objects
+        /// The shootable area's box in the controls' local space: the colliders on the GunButton objects
         /// only (Box and Mesh). Not every collider: the glow planes (FakeBloom, FakeHighlightBloom)
         /// carry large MeshColliders too.
         /// </summary>
@@ -1030,7 +1199,7 @@ namespace ExScoringMod
             for (int i = 0; i < 8; i++)
             {
                 Vector3 corner = c + new Vector3((i & 1) == 0 ? -e.x : e.x, (i & 2) == 0 ? -e.y : e.y, (i & 4) == 0 ? -e.z : e.z);
-                Vector3 p = root.transform.InverseTransformPoint(t.TransformPoint(corner));
+                Vector3 p = controls.InverseTransformPoint(t.TransformPoint(corner));
                 if (!any) { bounds = new Bounds(p, Vector3.zero); any = true; }
                 else bounds.Encapsulate(p);
             }
@@ -1056,7 +1225,7 @@ namespace ExScoringMod
 
             nextObject = button.gameObject;
             nextObject.name = "NextPlayerButton";
-            nextObject.transform.SetParent(root.transform, false);
+            nextObject.transform.SetParent(controls, false);
             nextObject.transform.localPosition = NextButtonPosition;
             nextObject.transform.localRotation = Quaternion.identity;
             nextObject.transform.localScale = ButtonScale;
@@ -1144,7 +1313,7 @@ namespace ExScoringMod
             {
                 if (gun == null || root == null || !root.activeSelf) return false;
                 if (grabHand >= 0 && (grabHand == 0 ? gunL : gunR) == gun) return true;
-                return PointsAtWindow(gun);
+                return dioramaMode ? PointsAtDiorama(gun) : PointsAtWindow(gun);
             }
             catch
             {
@@ -1182,14 +1351,20 @@ namespace ExScoringMod
                         continue;
                     }
                     Transform g = gun.transform;
+                    if (dioramaMode)
+                    {
+                        // The centre keeps its place in the gun's space; the diorama never turns.
+                        dioramaCentre = g.position + g.rotation * grabLocalPos;
+                        continue;
+                    }
                     root.transform.position = g.position + g.rotation * grabLocalPos;
                     root.transform.rotation = g.rotation * grabLocalRot;
                 }
-                else if (grabHand < 0 && pressed && PointsAtWindow(gun))
+                else if (grabHand < 0 && pressed && (dioramaMode ? PointsAtDiorama(gun) : PointsAtWindow(gun)))
                 {
                     Transform g = gun.transform;
                     Quaternion inverse = Quaternion.Inverse(g.rotation);
-                    grabLocalPos = inverse * (root.transform.position - g.position);
+                    grabLocalPos = inverse * ((dioramaMode ? dioramaCentre : root.transform.position) - g.position);
                     grabLocalRot = inverse * root.transform.rotation;
                     grabHand = h;
                 }
@@ -1200,7 +1375,9 @@ namespace ExScoringMod
         {
             if (grabHand < 0) return;
             grabHand = -1;
-            if (save) SavePose();
+            if (!save) return;
+            if (dioramaMode) SaveDiorama();
+            else SavePose();
         }
 
         /// <summary>The gun's firepoint ray against the window's rectangle (frame included), from either side.</summary>
@@ -1230,6 +1407,74 @@ namespace ExScoringMod
             prefsRegistered = true;
             MelonPrefs.RegisterString(PrefsCategory, PrefsPose, "", "Spectator window position (set by dragging it in game)");
             MelonPrefs.RegisterFloat(PrefsCategory, PrefsScale, 1f, "Spectator window size (set with its - and + buttons)");
+            MelonPrefs.RegisterString(PrefsCategory, PrefsMode, "window", "Spectator view: window or diorama (set with its 3D / 2D button)");
+            MelonPrefs.RegisterString(PrefsCategory, PrefsDioramaCentre, "", "Spectator diorama position (set by dragging it in game)");
+            MelonPrefs.RegisterFloat(PrefsCategory, PrefsDioramaScale, DioramaBaseScale, "Spectator diorama scale (set with its - and + buttons)");
+        }
+
+        /// <summary>Read on every build: the mode, the diorama's centre (when saved) and its scale, snapped to a step.</summary>
+        private static void LoadDiorama()
+        {
+            try
+            {
+                EnsurePrefs();
+                dioramaMode = MelonPrefs.GetString(PrefsCategory, PrefsMode) == "diorama";
+
+                float scale = MelonPrefs.GetFloat(PrefsCategory, PrefsDioramaScale);
+                if (float.IsNaN(scale) || float.IsInfinity(scale) || scale <= 0f) scale = DioramaBaseScale;
+                dioramaStep = Mathf.Max(Mathf.RoundToInt(Mathf.Log(scale / DioramaBaseScale) / Mathf.Log(SizeStepFactor)), SizeStepMin);
+
+                hasDioramaCentre = false;
+                string saved = MelonPrefs.GetString(PrefsCategory, PrefsDioramaCentre);
+                if (!string.IsNullOrEmpty(saved))
+                {
+                    string[] parts = saved.Split(',');
+                    if (parts.Length == 3
+                        && float.TryParse(parts[0], NumberStyles.Float, CultureInfo.InvariantCulture, out float x)
+                        && float.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out float y)
+                        && float.TryParse(parts[2], NumberStyles.Float, CultureInfo.InvariantCulture, out float z)
+                        && !float.IsNaN(x + y + z) && !float.IsInfinity(x + y + z))
+                    {
+                        dioramaCentre = new Vector3(x, y, z);
+                        hasDioramaCentre = true;
+                    }
+                }
+                if (dioramaMode && !hasDioramaCentre)
+                {
+                    dioramaCentre = DefaultDioramaCentre();
+                    hasDioramaCentre = true;
+                }
+            }
+            catch (Exception ex)
+            {
+                dioramaMode = false;
+                dioramaStep = 0;
+                Log($"diorama settings load failed: {ex.Message}");
+            }
+        }
+
+        private static void SaveDiorama()
+        {
+            try
+            {
+                EnsurePrefs();
+                MelonPrefs.SetString(PrefsCategory, PrefsMode, dioramaMode ? "diorama" : "window");
+                MelonPrefs.SetFloat(PrefsCategory, PrefsDioramaScale, DioramaScale);
+                if (hasDioramaCentre)
+                {
+                    MelonPrefs.SetString(PrefsCategory, PrefsDioramaCentre, string.Join(",", new[]
+                    {
+                        dioramaCentre.x.ToString("0.####", CultureInfo.InvariantCulture),
+                        dioramaCentre.y.ToString("0.####", CultureInfo.InvariantCulture),
+                        dioramaCentre.z.ToString("0.####", CultureInfo.InvariantCulture)
+                    }));
+                }
+                MelonPrefs.SaveConfig();
+            }
+            catch (Exception ex)
+            {
+                Log($"diorama settings save failed: {ex.Message}");
+            }
         }
 
         /// <summary>Read on every build: the saved string is the single source for where the window goes.</summary>
@@ -1320,7 +1565,7 @@ namespace ExScoringMod
             }
         }
 
-        /// <summary>Puts the window back at its default place and size (from the UnityExplorer console) and saves that.</summary>
+        /// <summary>Puts the window and the diorama back at their default place and size (from the UnityExplorer console) and saves that.</summary>
         public static void ResetPose()
         {
             if (root == null) return;
@@ -1328,15 +1573,20 @@ namespace ExScoringMod
             root.transform.position = DefaultPosition;
             root.transform.eulerAngles = DefaultRotation;
             sizeStep = 0;
+            dioramaStep = 0;
+            dioramaCentre = DefaultDioramaCentre();
+            hasDioramaCentre = true;
             ApplySize();
             SavePose();
             SaveScale();
+            SaveDiorama();
         }
 
         // ── Cleanup / debug ──────────────────────────────────────────────────
 
         private static void Destroy()
         {
+            SpectatorDiorama.Hide();
             try
             {
                 if (windowCamera != null && !windowCamera.WasCollected) windowCamera.targetTexture = null;
@@ -1354,6 +1604,7 @@ namespace ExScoringMod
             nextObject = null; nextButton = null;
             frameObject = null; pictureObject = null; blockerBox = null;
             minusObject = null; plusObject = null; minusButton = null; plusButton = null;
+            modeObject = null; modeButton = null; modeLabel = null; controls = null;
             cameraConfigured = false; hasCameraPose = false; grabHand = -1; lastTitle = null;
         }
 
@@ -1366,7 +1617,8 @@ namespace ExScoringMod
             MelonLogger.Log($"  root={(root != null ? (root.activeSelf ? "active" : "inactive") : "null")} opener={(openerObject != null ? "built" : "null")} next={(nextObject != null ? "built" : "null")}");
             if (root != null && !root.WasCollected)
                 MelonLogger.Log($"  window pos={root.transform.position} rot={root.transform.eulerAngles} size={CurrentWidth:0.###}x{CurrentHeight:0.###} (step {sizeStep}) grabHand={grabHand}");
-            MelonLogger.Log($"  size buttons: {(minusObject != null && plusObject != null ? "built" : (sizeButtonsFailed ? "failed" : "null"))}");
+            MelonLogger.Log($"  size buttons: {(minusObject != null && plusObject != null ? "built" : (sizeButtonsFailed ? "failed" : "null"))} mode button: {(modeObject != null ? "built" : "null")}");
+            MelonLogger.Log($"  mode={(dioramaMode ? "diorama" : "window")} dioramaStep={dioramaStep} scale={DioramaScale:0.###} centre=({dioramaCentre.x:0.##}, {dioramaCentre.y:0.##}, {dioramaCentre.z:0.##}) saved={hasDioramaCentre}");
             if (windowCamera != null && !windowCamera.WasCollected)
                 MelonLogger.Log($"  camera pos={windowCamera.transform.position} rot={windowCamera.transform.eulerAngles} fov={windowCamera.fieldOfView} " +
                     $"mask=0x{windowCamera.cullingMask:X8} clear={windowCamera.clearFlags} configured={cameraConfigured} hasPose={hasCameraPose}");

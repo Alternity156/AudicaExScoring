@@ -535,6 +535,7 @@ namespace ExScoringMod
         public override void OnLateUpdate()
         {
             MpPresence.LateTick();
+            SpectatorDiorama.LateTick(); // after MpPresence: the diorama's line widths and cameras
             VirtualSongList.Sync();
             ScrollIndicator.Tick();
             EnforceLaunchPanelBlank();

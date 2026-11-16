@@ -325,6 +325,7 @@
     <Compile Include="src\SongSearchMenu.cs" />
     <Compile Include="src\SongTimelineGraph.cs" />
     <Compile Include="src\SpectatorDebug.cs" />
+    <Compile Include="src\SpectatorDiorama.cs" />
     <Compile Include="src\SpectatorEvents.cs" />
     <Compile Include="src\SpectatorPopups.cs" />
     <Compile Include="src\SpectatorSong.cs" />

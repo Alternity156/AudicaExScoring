@@ -41,8 +41,12 @@ namespace ExScoringMod
     ///     2026-11-14: a seek a second piles up and the sound never settles; native AudioDriver
     ///     tracks a pending seek the same way), so:
     ///      - one seek when the sound starts or the gap is over SeekThresholdMs, aimed SeekLeadMs
-    ///        ahead, and no other until it has settled (gap under SeekSettledMs) or
-    ///        SeekTimeoutSeconds have passed;
+    ///        ahead, and no other until it has settled (gap under SeekSettledMs); a seek that hasn't
+    ///        settled after SeekTimeoutSeconds, or the watched player going back more than
+    ///        RestartBackMs (their song restarted, the debug replay looped), stops the sound and a
+    ///        new one is started. Seeking the old one back from its end never settled (log
+    ///        2026-11-16: about 2.7 s off after every seek until the game closed); a fresh start's
+    ///        first seek does;
     ///      - the rest of the gap is closed with the playback speed (Sound.SetSpeed, what practice
     ///        mode calls every frame on the song): 1 + gap / SpeedGainMs, within CatchUpSpeed while
     ///        out of sync and FineSpeed once in sync, exactly 1 inside SpeedDeadbandMs;
@@ -98,7 +102,8 @@ namespace ExScoringMod
         private const double SeekThresholdMs = 1000;     // a gap this big is seeked, not caught up with speed
         private const double SeekLeadMs = 300;           // a seek lands about this late (log 2026-11-14)
         private const double SeekSettledMs = 700;        // a pending seek is done once the gap is under this
-        private const float SeekTimeoutSeconds = 5f;     // a seek that never settles is given up on (and tried again)
+        private const float SeekTimeoutSeconds = 5f;     // a seek that never settles: the sound is started again
+        private const double RestartBackMs = 5000;       // the watched player this far behind the sound (song restarted, replay looped): started again
         private const double SpeedGainMs = 1000;         // speed = 1 + gap / this: a 30 ms gap plays 3% faster
         private const double CatchUpSpeed = 0.15;        // most the speed differs from 1 while out of sync (silent)
         private const double FineSpeed = 0.03;           // and while in sync (heard)
@@ -724,6 +729,12 @@ namespace ExScoringMod
                 double gap = wantMs - Hmx.Audio.Sound.GetTimelineMs(handle);
                 lastGap = gap;
 
+                if (gap < -RestartBackMs)
+                {
+                    StopSound($"the watched player went back {-gap / 1000:0.0} s: starting it again");
+                    return; // a new sound starts next frame, fade and gain with it
+                }
+
                 if (seekPending)
                 {
                     if (Math.Abs(gap) < SeekSettledMs)
@@ -736,6 +747,8 @@ namespace ExScoringMod
                     {
                         seekPending = false;
                         Log($"seek didn't settle in {SeekTimeoutSeconds:0} s (still {gap:0} ms off)");
+                        StopSound("a seek didn't settle: starting it again");
+                        return;
                     }
                 }
 
