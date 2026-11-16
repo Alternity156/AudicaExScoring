@@ -537,6 +537,11 @@ namespace ExScoringMod
 
             SelectForLaunch(data, difficulty);
 
+            // The song list's Options categories and the Song Settings page deactivate
+            // ShellPage_Launch, so FindObjectOfType<LaunchPanel> below can't see it and the
+            // launch gives up. Close them first: both restore the launch page.
+            if (menuState == MenuState.State.SongPage) CloseMenusForMatch(matchId);
+
             bool navigated = menuState != MenuState.State.SongPage;
             if (navigated)
             {
@@ -684,6 +689,39 @@ namespace ExScoringMod
             catch (Exception e)
             {
                 Log("Going to the main menu failed: " + e.Message);
+            }
+        }
+
+        /// <summary>
+        /// Closes the song page's menus that hide the launch page (Song Settings, the song
+        /// list's Options level and its category panel) so a match launch can reach LaunchPanel.
+        /// </summary>
+        private static void CloseMenusForMatch(string matchId)
+        {
+            try
+            {
+                if (PerSongOptionsPage.IsActive)
+                {
+                    Log($"matchPrepare {matchId}: closing the Song Settings page.");
+                }
+                PerSongOptionsPage.CloseIfOpen();
+            }
+            catch (Exception e)
+            {
+                Log($"matchPrepare {matchId}: closing Song Settings failed: {e.Message}");
+            }
+
+            try
+            {
+                if (FolderRowManager.InGlobalOptions)
+                {
+                    Log($"matchPrepare {matchId}: leaving the Options menu.");
+                    FolderRowManager.NavBack(); // GlobalOptions.HidePanel re-activates the launch page
+                }
+            }
+            catch (Exception e)
+            {
+                Log($"matchPrepare {matchId}: leaving Options failed: {e.Message}");
             }
         }
 

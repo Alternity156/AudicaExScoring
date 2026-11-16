@@ -1053,9 +1053,19 @@ namespace ExScoringMod
             DebugLog.Log($"[Options] waiting hideAnim length {len:N2}s before disabling launch page");
             yield return new WaitForSeconds(len);
 
+            // Closed (HidePanel / ForceTeardown, e.g. a match launch leaving Options) while the
+            // hide animation played: don't switch the launch page back off.
+            if (!panelShown || activeCategory == null)
+            {
+                DebugLog.Log("[Options] panel closed during hideAnim, not disabling launch page");
+                yield break;
+            }
+
             if (launchPage != null) launchPage.SetActive(false);
             yield return null;
-            DrawCategory(cat);
+            if (!panelShown || activeCategory == null) yield break;
+            // Draw the category showing now: another one may have been shot during the animation.
+            DrawCategory(activeCategory);
             DebugLog.Log("[Options] launch page disabled, category shown");
         }
 
