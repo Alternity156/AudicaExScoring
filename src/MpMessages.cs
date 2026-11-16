@@ -74,6 +74,12 @@ namespace ExScoringMod
         /// and always null for connections without "cosmetics". Null means defaults.
         /// </summary>
         public MpCosmeticsState cosmetics;
+        /// <summary>
+        /// How many times this player's suggestion got played in this lobby (v2.54), counted by
+        /// the server so everyone, late joiners included, sees the same number. Kept per userId
+        /// for the lobby's life. Null from an older server (LobbyPanel then counts locally).
+        /// </summary>
+        public int? picks;
     }
 
     /// <summary>PlayerState.cosmetics (v2.44): four independent slots.</summary>

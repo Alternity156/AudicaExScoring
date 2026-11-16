@@ -720,7 +720,9 @@ namespace ExScoringMod
                 line.Append(p.isHost ? "<color=#ffd24d>*</color> " : "  ");
                 line.Append(Name(p));
 
-                int picks = PickCounter.Get(p.userId);
+                // The server's count (v2.54) is the same for everyone; an older server sends
+                // none, so fall back to this client's own count.
+                int picks = p.picks ?? PickCounter.Get(p.userId);
                 if (picks > 0) line.Append(" <color=#a0a0a0>(").Append(picks).Append(")</color>");
 
                 if (!p.connected)
@@ -906,6 +908,8 @@ namespace ExScoringMod
         // ── Pick counter ──
 
         /// <summary>
+        /// Fallback for servers older than v2.54, which don't send PlayerState.picks; when the
+        /// server sends it, the panel shows the server's number instead (same for everyone).
         /// Client-side count of how many times each player's suggestion got played in this lobby,
         /// shown as a grey "(n)" after their name. Counted at matchPrepare: the players whose
         /// current songChoice has the match's songId (difficulty ignored) are found, and only the
