@@ -1015,6 +1015,42 @@ namespace ExScoringMod
             }
         }
 
+        // Matches each sprite tag in native LaurelWrap's output, plus a <color> wrapper this method
+        // may already have put around it, so re-wrapping never stacks tags.
+        private static readonly System.Text.RegularExpressions.Regex laurelSpriteRegex =
+            new System.Text.RegularExpressions.Regex("(?:<color=#[0-9A-Fa-f]{6}>)?(<sprite[^>]*>)(?:</color>)?");
+
+        /// <summary>
+        /// Native LaurelWrap(nickname, true), with the laurel sprites tinted the colour of the run's
+        /// worst judgement — the player's own Options > Colors value via GetJudgementColor, not the
+        /// default. The server sends worstJudgement on every leaderboard entry (ApiContract.md
+        /// v2.37); null/unknown falls back to Fantastic, same as the website's wreath. Reuses
+        /// native's own sprite tags rather than hardcoding them, adding tint=1 so TMP applies the
+        /// colour (tested in UnityExplorer: the laurel sprite tints cleanly).
+        /// </summary>
+        private static string FullComboLaurelWrap(string nickname, string worstJudgement)
+        {
+            string wrapped = LeaderboardDisplay.LaurelWrap(nickname, true);
+            if (string.IsNullOrEmpty(wrapped)) return nickname;
+
+            Judgement judgement;
+            if (string.IsNullOrEmpty(worstJudgement) || !Enum.TryParse(worstJudgement, out judgement)
+                || judgement == Judgement.Miss || judgement == Judgement.OK)
+            {
+                if (!string.IsNullOrEmpty(worstJudgement))
+                    DebugLog.Log($"[ExScoring] FullComboLaurelWrap: unrecognized worstJudgement '{worstJudgement}' for nickname={nickname}, using Fantastic.");
+                judgement = Judgement.Fantastic;
+            }
+
+            string hex = ColorUtility.ToHtmlStringRGB(GetJudgementColor(judgement));
+            return laurelSpriteRegex.Replace(wrapped, m =>
+            {
+                string tag = m.Groups[1].Value;
+                if (!tag.Contains("tint")) tag = tag.Substring(0, tag.Length - 1) + " tint=1>";
+                return "<color=#" + hex + ">" + tag + "</color>";
+            });
+        }
+
         private static void ApplyLeaderboardEntryToRow(LeaderboardRow row, LeaderboardApiEntry entry)
         {
             int slot = row.gameObject.GetInstanceID();
@@ -1024,7 +1060,9 @@ namespace ExScoringMod
             if (row.username != null)
             {
                 string nickname = string.IsNullOrEmpty(entry.nickname) ? "???" : entry.nickname;
-                row.username.text = LeaderboardDisplay.LaurelWrap(nickname, entry.fullCombo);
+                row.username.text = entry.fullCombo
+                    ? FullComboLaurelWrap(nickname, entry.worstJudgement)
+                    : LeaderboardDisplay.LaurelWrap(nickname, false);
             }
 
             if (row.score != null) row.score.text = $"{entry.judgementPercent:0.00}%";

@@ -127,6 +127,14 @@ namespace ExScoringMod
             public RunSubmitGrade grade;
             public long unixTimestamp;
             public bool fullCombo;
+
+            /// <summary>
+            /// Worst judgement of the entry's best run (ApiContract.md v2.37, Section 3.1): one of
+            /// "Impeccable"/"Fantastic"/"Excellent"/"Great"/"Good", or null if unknown. Used to tint
+            /// the Full Combo laurels on the row (see FullComboLaurelWrap in ExLeaderboardDisplay.cs).
+            /// </summary>
+            public string worstJudgement;
+
             public bool isRequester;
 
             /// <summary>
