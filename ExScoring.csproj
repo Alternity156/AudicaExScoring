@@ -255,6 +255,7 @@
     <Compile Include="src\MpPresence.cs" />
     <Compile Include="src\MpResultHold.cs" />
     <Compile Include="src\MpSession.cs" />
+    <Compile Include="src\MpSongChangeSound.cs" />
     <Compile Include="src\NowPlayingLabel.cs" />
     <Compile Include="src\OfficialLoudness.cs" />
     <Compile Include="src\OnlinePlayButton.cs" />

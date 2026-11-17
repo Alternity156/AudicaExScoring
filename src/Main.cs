@@ -107,6 +107,7 @@ namespace ExScoringMod
             ChainSustain.Init();
             OnlinePlayMenu.Init();
             LobbySongList.Init();
+            MpSongChangeSound.Init();
 
             // Check if AuthorableModifiers is installed
             if (MelonHandler.Mods.Any(it => it.Assembly.GetName().Name == "AuthorableModifiers"))

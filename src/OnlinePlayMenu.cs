@@ -149,6 +149,12 @@ namespace ExScoringMod
                 0f, 100f, 5f, 100f, "N0",
                 "Volume of a watched player's song in the spectator window, in % of the song preview level");
             OptionsMenuClone.AddRow(spectatorAudio, spectatorVolume);
+
+            var songChangeSound = OptionsMenuClone.CreateToggle(0, "Song Change Sound",
+                () => Config.SongChangeSound,
+                v => Config.UpdateSongChangeSound(v),
+                "In a lobby, plays a sound when the host selects a different song");
+            OptionsMenuClone.AddRow(songChangeSound);
         }
 
         // ── Online Play (lobby) category ──
@@ -158,7 +164,7 @@ namespace ExScoringMod
             codeLabel = null;
 
             // The settings (Enable Online Play, Show Other Players, Show Player Names, Auto-Download Missing Songs, Headshot Effects/Sounds, Fade Blocking Platforms, Dim Unready Platforms,
-            // Lobby Song Preview/Volume, Show Custom Avatars, Allow Spectators)
+            // Lobby Song Preview/Volume, Show Custom Avatars, Allow Spectators, Song Change Sound)
             // live only in the song list's Options > Multiplayer (BuildSettings).
             if (!Config.EnableOnlinePlay)
             {
