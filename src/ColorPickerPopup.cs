@@ -15,50 +15,102 @@ namespace ExScoringMod
     /// The native picker is a single hue strip (HSVToRGB(pos, 1, 1)), so it can only produce fully
     /// saturated, full-brightness colours. This popup instantiates the prefab several times, strips the
     /// ShootableColorSelector component off each copy (before its Start() runs, so it never hooks the
-    /// button or touches TargetColorSetter) and drives the copies' GunButtons with our own callbacks:
+    /// button or touches TargetColorSetter) and drives the copies' GunButtons with our own callbacks.
     ///
-    ///   - Hue strip      : native look (Kata/ColorStrip shader). Shoot to set the hue.
-    ///   - S/V square     : same prefab scaled square, Quad re-textured with a generated Texture2D.
-    ///                      X = saturation, Y = brightness. Shoot to set both.
-    ///   - Original swatch: shows the starting colour. Shoot to CANCEL (revert + close).
-    ///   - New swatch     : shows the picked colour (or the hovered one, live). Shoot to CONFIRM.
-    ///   - Markers        : small quads showing the current hue / S-V point.
+    /// Layout:
+    ///
+    ///              [ Title, e.g. "Left Hand Color" ]
+    ///   [════════════════ hue strip ════════════════]
+    ///    ┌──────────┐      Before    After
+    ///    │  shade   │     [██████][██████]    display only
+    ///    │  square  │     [Cancel][Apply ]
+    ///    │          │     [   Default    ]    hidden when no default is given
+    ///    └──────────┘
+    ///    Shoot the strip to pick a color, the square to pick its shade
+    ///
+    ///   - Hue strip    : native look (Kata/ColorStrip shader). Shoot to set the hue.
+    ///   - Shade square : same prefab scaled square, Quad re-textured with a generated Texture2D.
+    ///                    X = saturation, Y = brightness. Shoot to set both.
+    ///   - Before/After : display-only swatches (their GunButton is disabled). After shows the picked
+    ///                    colour, or the aimed-at one while aiming at the strip / square.
+    ///   - Markers      : solid marker = current pick, grey ghost marker = where the aim is.
+    ///   - Buttons      : Cancel (revert + close), Apply (confirm + close), Default (sets the slot's
+    ///                    default colour as the current pick; Apply still needed). They brighten on aim.
     ///
     /// Placement reuses the search keyboard's position/tilt settings.
     /// </summary>
     public static class ColorPickerPopup
     {
+        // ── Defaults (Audica's native gun colours) ─────────────────────────────────────────────
+        public static readonly Color DefaultLeftHandColor = new Color(0f, 0.665f, 1f, 1f);
+        public static readonly Color DefaultRightHandColor = new Color(1f, 0.467f, 0f, 1f);
+        public static readonly Color DefaultEitherHandColor = Color.white;
+
         // ── Prefab geometry (from the UnityExplorer dump of ColorSelector) ─────────────────────
         // Quad child: localPosition (-0.04, -0.88, -0.01), localScale (17.27, 3.33, 1).
         private static readonly Vector3 PrefabQuadOffset = new Vector3(-0.04f, -0.88f, 0f);
         private static readonly Vector2 PrefabQuadSize = new Vector2(17.27f, 3.33f);
 
         // ── Layout, in popup-local prefab units (before the popup's overall scale) ─────────────
+        private static readonly Vector3 TitleCenter = new Vector3(0f, 7.6f, 0f);
+
         private static readonly Vector3 HueStripCenter = new Vector3(0f, 4.5f, 0f);
         private static readonly Vector2 HueStripSize = new Vector2(17.27f, 3.33f);
 
+        // Spans x -8.5..-0.5, y -6.75..1.25.
         private static readonly Vector3 SVSquareCenter = new Vector3(-4.5f, -2.75f, 0f);
         private static readonly Vector2 SVSquareSize = new Vector2(8f, 8f);
 
-        // Right column: "Old" label, Old swatch, "New" label, New swatch.
-        private static readonly Vector3 OldLabelCenter = new Vector3(5f, 1f, 0f);
-        private static readonly Vector3 OriginalSwatchCenter = new Vector3(5f, -0.75f, 0f);
-        private static readonly Vector3 NewLabelCenter = new Vector3(5f, -2.6f, 0f);
-        private static readonly Vector3 NewSwatchCenter = new Vector3(5f, -4.25f, 0f);
-        private static readonly Vector2 SwatchSize = new Vector2(5f, 2.5f);
+        // Right column spans x 0.75..8.45: two half-width columns centred at 2.65 and 6.55.
+        private const float LeftColX = 2.65f;
+        private const float RightColX = 6.55f;
+        private const float ColumnCenterX = 4.6f;
+
+        private static readonly Vector3 BeforeLabelCenter = new Vector3(LeftColX, 0.75f, 0f);
+        private static readonly Vector3 AfterLabelCenter = new Vector3(RightColX, 0.75f, 0f);
+        private static readonly Vector3 BeforeSwatchCenter = new Vector3(LeftColX, -1.0f, 0f);
+        private static readonly Vector3 AfterSwatchCenter = new Vector3(RightColX, -1.0f, 0f);
+        private static readonly Vector2 SwatchSize = new Vector2(3.8f, 2.4f); // the pair touches in the middle
+
+        private static readonly Vector3 CancelButtonCenter = new Vector3(LeftColX, -3.55f, 0f);
+        private static readonly Vector3 ApplyButtonCenter = new Vector3(RightColX, -3.55f, 0f);
+        private static readonly Vector2 HalfButtonSize = new Vector2(3.7f, 1.7f);
+
+        private static readonly Vector3 DefaultButtonCenter = new Vector3(ColumnCenterX, -5.85f, 0f);
+        private static readonly Vector2 WideButtonSize = new Vector2(7.6f, 1.4f);
+
+        private static readonly Vector3 HintCenter = new Vector3(0f, -8.0f, 0f);
 
         // Labels are cloned from OptionsMenu.buttonPrefab's "label" TextMeshPro (native font/style).
         // Uniform localScale of the labels (popup-local), tuned in UnityExplorer.
-        private const float LabelScale = 1.25f;
+        private const float TitleScale = 1.5f;
+        private const float SwatchLabelScale = 1.1f;
+        private const float ButtonLabelScale = 1.0f;
+        private const float HintScale = 0.85f;
         private const float LabelZ = -0.15f;
 
         private const float MarkerZ = -0.15f;          // in front of the quads (they face -Z)
+        private const float GhostMarkerZ = -0.1f;      // just behind the real marker
         private const int SVTextureSize = 64;
-        private const float HoverHoldSeconds = 0.1f;   // hover preview lingers this long after aim leaves
+        private const float HoverHoldSeconds = 0.1f;   // hover feedback lingers this long after aim leaves
 
         // Display-only dimming of the two swatches to tame the game's bloom. The colour returned /
         // saved is never dimmed — only what the swatch quads show.
         private const float SwatchDisplayFactor = 0.9f;
+
+        // Button colours (same family as the song list's Create / Delete rows).
+        private static readonly Color CancelColor = new Color(0.30f, 0.10f, 0.10f);
+        private static readonly Color CancelHoverColor = new Color(0.55f, 0.18f, 0.18f);
+        private static readonly Color ApplyColor = new Color(0.10f, 0.28f, 0.14f);
+        private static readonly Color ApplyHoverColor = new Color(0.18f, 0.50f, 0.25f);
+        private static readonly Color DefaultColor = new Color(0.20f, 0.20f, 0.24f);
+        private static readonly Color DefaultHoverColor = new Color(0.36f, 0.36f, 0.42f);
+
+        private static readonly Color GhostOuterColor = new Color(0.6f, 0.6f, 0.6f);
+        private static readonly Color GhostInnerColor = new Color(0.15f, 0.15f, 0.15f);
+
+        private const string DefaultTitle = "Pick a Color";
+        private const string HintText = "Shoot the strip to pick a color, the square to pick its shade";
 
         // Uniform scale of the popup root (world scale, since it sits at the scene root).
         private const float PopupScale = 0.1f;
@@ -69,22 +121,31 @@ namespace ExScoringMod
             public GameObject go;
             public Transform quad;
             public MeshRenderer quadRenderer;
-            public GunButton button;
+            public GunButton button;      // null for display-only pieces
+            public Material material;     // buttons and swatches: their own Unlit/Color material
+            public Color baseColor;       // buttons: idle colour
+            public Color hoverColor;      // buttons: aimed-at colour
+            public GameObject label;      // buttons: their text (a root child, so it's toggled with the piece)
+            public float lastHoverTime = -999f;
         }
 
         private static GameObject root;
         private static Piece hueStrip;
         private static Piece svSquare;
-        private static Piece originalSwatch;
-        private static Piece newSwatch;
+        private static Piece beforeSwatch;
+        private static Piece afterSwatch;
+        private static Piece cancelButton;
+        private static Piece applyButton;
+        private static Piece defaultButton;
         private static Transform hueMarker;
         private static Transform svMarker;
+        private static Transform hueGhost;
+        private static Transform svGhost;
+        private static TMPro.TextMeshPro titleText;
 
         private static Texture2D svTexture;
         private static Il2CppStructArray<Color> svPixels;
         private static Material svMaterial;
-        private static Material originalMaterial;
-        private static Material newMaterial;
 
         // Keep the managed delegates alive for as long as the Il2Cpp side references them.
         private static readonly List<Delegate> keepAlive = new List<Delegate>();
@@ -92,8 +153,13 @@ namespace ExScoringMod
         private static float hue, sat, val;
         private static float lastBuiltHue = -1f;
         private static Color originalColor;
+        private static Color? defaultColor;
+
+        // Live preview of the aimed-at colour (After swatch) and the ghost markers.
         private static Color hoverColor;
         private static float lastHoverTime = -999f;
+        private static Vector2 hueHoverUV, svHoverUV;
+        private static float hueHoverTime = -999f, svHoverTime = -999f;
 
         private static Action<Color> onChangedCb;
         private static Action<Color> onDoneCb;
@@ -109,11 +175,13 @@ namespace ExScoringMod
         // ══════════════════════════════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// Generic picker. onChanged fires on every committed pick (hue strip or S/V square shot),
-        /// onDone when the New swatch is shot, onCancel when the Original swatch is shot (or the
-        /// popup is closed from outside via CancelIfOpen).
+        /// Generic picker. onChanged fires on every committed pick (hue strip, shade square or
+        /// Default), onDone when Apply is shot, onCancel when Cancel is shot (or the popup is closed
+        /// from outside via CancelIfOpen). title is shown above the picker; defaultColor, when
+        /// given, enables the Default button.
         /// </summary>
-        public static void Show(Color initial, Action<Color> onChanged, Action<Color> onDone, Action onCancel)
+        public static void Show(Color initial, Action<Color> onChanged, Action<Color> onDone, Action onCancel,
+            string title = null, Color? defaultColor = null)
         {
             if (IsOpen) CancelIfOpen(); // close any previous session cleanly first
 
@@ -121,21 +189,27 @@ namespace ExScoringMod
             if (root == null) return;
 
             originalColor = initial;
+            ColorPickerPopup.defaultColor = defaultColor;
             Color.RGBToHSV(initial, out hue, out sat, out val);
             onChangedCb = onChanged;
             onDoneCb = onDone;
             onCancelCb = onCancel;
-            lastHoverTime = -999f;
+            ResetHover();
+
+            if (titleText != null) titleText.text = string.IsNullOrEmpty(title) ? DefaultTitle : title;
+            SetPieceActive(defaultButton, defaultColor.HasValue);
 
             ApplyTransform();
             root.SetActive(true);
             SetButtonsInteractable();
 
-            if (originalMaterial != null) originalMaterial.color = SwatchDisplay(originalColor);
+            if (beforeSwatch != null) beforeSwatch.material.color = SwatchDisplay(originalColor);
+            foreach (var b in new[] { cancelButton, applyButton, defaultButton })
+                if (b != null) b.material.color = b.baseColor;
             RefreshVisuals(true);
 
             tickRoutine = MelonCoroutines.Start(Tick());
-            DebugLog.Log("[ColorPicker] shown");
+            DebugLog.Log("[ColorPicker] shown: " + (title ?? DefaultTitle));
         }
 
         /// <summary>
@@ -153,22 +227,23 @@ namespace ExScoringMod
                 return;
             }
 
+            bool left = hand == Target.TargetHandType.Left;
             Color origLeft = KataConfig.I.leftHandColor;
             Color origRight = KataConfig.I.rightHandColor;
-            Color initial = hand == Target.TargetHandType.Left ? origLeft : origRight;
+            Color initial = left ? origLeft : origRight;
 
             Show(initial,
                 c =>
                 {
-                    Color l = hand == Target.TargetHandType.Left ? c : KataConfig.I.leftHandColor;
-                    Color r = hand == Target.TargetHandType.Right ? c : KataConfig.I.rightHandColor;
+                    Color l = left ? c : KataConfig.I.leftHandColor;
+                    Color r = !left ? c : KataConfig.I.rightHandColor;
                     SetHandColors(l, r, true);
                     onChanged?.Invoke(c);
                 },
                 c =>
                 {
-                    Color l = hand == Target.TargetHandType.Left ? c : KataConfig.I.leftHandColor;
-                    Color r = hand == Target.TargetHandType.Right ? c : KataConfig.I.rightHandColor;
+                    Color l = left ? c : KataConfig.I.leftHandColor;
+                    Color r = !left ? c : KataConfig.I.rightHandColor;
                     SetHandColors(l, r, false);
                     onClosed?.Invoke();
                 },
@@ -179,7 +254,9 @@ namespace ExScoringMod
                     SetHandColors(origLeft, origRight, true);
                     SetHandColors(origLeft, origRight, false);
                     onClosed?.Invoke();
-                });
+                },
+                left ? "Left Hand Color" : "Right Hand Color",
+                left ? DefaultLeftHandColor : DefaultRightHandColor);
         }
 
         /// <summary>
@@ -211,7 +288,9 @@ namespace ExScoringMod
                     ExScoring.EitherHandColorOverride = null;
                     ExScoring.RefreshEitherHandColors();
                     onClosed?.Invoke();
-                });
+                },
+                "Either Hand Color",
+                DefaultEitherHandColor);
         }
 
         /// <summary>Closes the popup as a cancel, if it's open. Safe to call any time.</summary>
@@ -270,6 +349,7 @@ namespace ExScoringMod
             }
 
             keepAlive.Clear();
+            titleText = null;
 
             root = new GameObject("ExScoring_ColorPicker");
             root.SetActive(false); // children's Awake/Start wait until Show — lets us strip components first
@@ -278,11 +358,15 @@ namespace ExScoringMod
             root.transform.localScale = new Vector3(PopupScale, PopupScale, PopupScale);
             DebugLog.Log("[ColorPicker] building, scale " + PopupScale.ToString("F3"));
 
-            // Hue strip — keeps the native Kata/ColorStrip material.
-            hueStrip = CreatePiece(prefab, "HueStrip", HueStripCenter, HueStripSize, OnHueHit, OnHueHover);
+            Transform labelSource = menu.buttonPrefab != null ? menu.buttonPrefab.transform.Find("label") : null;
+            if (labelSource == null)
+                MelonLogger.Log("[ColorPicker] buttonPrefab label not found; text labels skipped");
 
-            // S/V square — re-textured Quad.
-            svSquare = CreatePiece(prefab, "SVSquare", SVSquareCenter, SVSquareSize, OnSVHit, OnSVHover);
+            // Hue strip — keeps the native Kata/ColorStrip material.
+            hueStrip = CreatePiece(prefab, "HueStrip", HueStripCenter, HueStripSize, true, OnHueHit, OnHueHover);
+
+            // Shade square — re-textured Quad.
+            svSquare = CreatePiece(prefab, "SVSquare", SVSquareCenter, SVSquareSize, true, OnSVHit, OnSVHover);
             svTexture = new Texture2D(SVTextureSize, SVTextureSize, TextureFormat.RGBA32, false);
             svTexture.wrapMode = TextureWrapMode.Clamp;
             svTexture.filterMode = FilterMode.Bilinear;
@@ -291,39 +375,56 @@ namespace ExScoringMod
             svMaterial.mainTexture = svTexture;
             if (svSquare != null) svSquare.quadRenderer.material = svMaterial;
 
-            // Swatches — plain colour.
-            originalSwatch = CreatePiece(prefab, "OriginalSwatch", OriginalSwatchCenter, SwatchSize, OnOriginalHit, null);
-            originalMaterial = new Material(unlitColor);
-            if (originalSwatch != null) originalSwatch.quadRenderer.material = originalMaterial;
+            // Before / After swatches — display only.
+            beforeSwatch = CreatePiece(prefab, "BeforeSwatch", BeforeSwatchCenter, SwatchSize, false, null, null);
+            afterSwatch = CreatePiece(prefab, "AfterSwatch", AfterSwatchCenter, SwatchSize, false, null, null);
+            foreach (var s in new[] { beforeSwatch, afterSwatch })
+            {
+                if (s == null) continue;
+                s.material = new Material(unlitColor);
+                s.quadRenderer.material = s.material;
+            }
 
-            newSwatch = CreatePiece(prefab, "NewSwatch", NewSwatchCenter, SwatchSize, OnNewHit, null);
-            newMaterial = new Material(unlitColor);
-            if (newSwatch != null) newSwatch.quadRenderer.material = newMaterial;
+            // Buttons.
+            cancelButton = CreateButton(prefab, labelSource, unlitColor, "CancelButton", "Cancel",
+                CancelButtonCenter, HalfButtonSize, CancelColor, CancelHoverColor, OnCancelHit);
+            applyButton = CreateButton(prefab, labelSource, unlitColor, "ApplyButton", "Apply",
+                ApplyButtonCenter, HalfButtonSize, ApplyColor, ApplyHoverColor, OnApplyHit);
+            defaultButton = CreateButton(prefab, labelSource, unlitColor, "DefaultButton", "Default",
+                DefaultButtonCenter, WideButtonSize, DefaultColor, DefaultHoverColor, OnDefaultHit);
 
-            // "Old" / "New" labels above the swatches.
-            Transform labelSource = menu.buttonPrefab != null ? menu.buttonPrefab.transform.Find("label") : null;
+            // Text.
             if (labelSource != null)
             {
-                CreateLabel(labelSource, "OldLabel", "Old", OldLabelCenter);
-                CreateLabel(labelSource, "NewLabel", "New", NewLabelCenter);
-            }
-            else
-            {
-                MelonLogger.Log("[ColorPicker] buttonPrefab label not found; swatch labels skipped");
+                var title = CreateLabel(labelSource, "Title", DefaultTitle, TitleCenter, TitleScale);
+                if (title != null) titleText = title.GetComponent<TMPro.TextMeshPro>();
+                CreateLabel(labelSource, "BeforeLabel", "Before", BeforeLabelCenter, SwatchLabelScale);
+                CreateLabel(labelSource, "AfterLabel", "After", AfterLabelCenter, SwatchLabelScale);
+                CreateLabel(labelSource, "Hint", HintText, HintCenter, HintScale);
             }
 
             // Markers — reuse the prefab's own Quad mesh (no collider, so they never block shots).
+            // Ghosts first so the real markers draw over them when they overlap.
             Transform quadSource = hueStrip != null ? hueStrip.quad : null;
             if (quadSource != null)
             {
-                hueMarker = CreateMarker(quadSource, unlitColor, "HueMarker", new Vector2(0.35f, 3.9f), new Vector2(0.15f, 3.5f));
-                svMarker = CreateMarker(quadSource, unlitColor, "SVMarker", new Vector2(0.7f, 0.7f), new Vector2(0.4f, 0.4f));
+                hueGhost = CreateMarker(quadSource, unlitColor, "HueGhost", new Vector2(0.3f, 3.7f), new Vector2(0.12f, 3.4f), GhostOuterColor, GhostInnerColor);
+                svGhost = CreateMarker(quadSource, unlitColor, "SVGhost", new Vector2(0.6f, 0.6f), new Vector2(0.34f, 0.34f), GhostOuterColor, GhostInnerColor);
+                hueMarker = CreateMarker(quadSource, unlitColor, "HueMarker", new Vector2(0.35f, 3.9f), new Vector2(0.15f, 3.5f), Color.white, Color.black);
+                svMarker = CreateMarker(quadSource, unlitColor, "SVMarker", new Vector2(0.7f, 0.7f), new Vector2(0.4f, 0.4f), Color.white, Color.black);
+                hueGhost.gameObject.SetActive(false);
+                svGhost.gameObject.SetActive(false);
             }
 
             lastBuiltHue = -1f;
         }
 
-        private static Piece CreatePiece(GameObject prefab, string name, Vector3 center, Vector2 size,
+        /// <summary>
+        /// One copy of the prefab with its visible Quad centred on 'center' and sized 'size'.
+        /// shootable=false disables the copy's Button child, so the piece is display only (no
+        /// collider to catch shots, no hover haptics).
+        /// </summary>
+        private static Piece CreatePiece(GameObject prefab, string name, Vector3 center, Vector2 size, bool shootable,
             Action<Vector3, Gun> onHit, Action<Vector3, Gun> onHover)
         {
             GameObject go = GameObject.Instantiate(prefab, root.transform, false);
@@ -344,12 +445,18 @@ namespace ExScoringMod
             if (piece.quad != null) piece.quadRenderer = piece.quad.GetComponent<MeshRenderer>();
 
             Transform buttonT = go.transform.Find("Button");
-            if (buttonT != null) piece.button = buttonT.GetComponent<GunButton>();
+            if (buttonT != null && shootable) piece.button = buttonT.GetComponent<GunButton>();
 
-            if (piece.quad == null || piece.quadRenderer == null || piece.button == null)
+            if (piece.quad == null || piece.quadRenderer == null || buttonT == null || (shootable && piece.button == null))
             {
-                MelonLogger.Log($"[ColorPicker] {name}: prefab layout unexpected (quad={piece.quad != null}, button={piece.button != null})");
+                MelonLogger.Log($"[ColorPicker] {name}: prefab layout unexpected (quad={piece.quad != null}, button={buttonT != null})");
                 return null;
+            }
+
+            if (!shootable)
+            {
+                buttonT.gameObject.SetActive(false);
+                return piece;
             }
 
             GunButton gb = piece.button;
@@ -373,7 +480,31 @@ namespace ExScoringMod
             return piece;
         }
 
-        private static Transform CreateMarker(Transform quadSource, Shader shader, string name, Vector2 outerSize, Vector2 innerSize)
+        /// <summary>A flat coloured button with a centred label that brightens while aimed at.</summary>
+        private static Piece CreateButton(GameObject prefab, Transform labelSource, Shader shader, string name, string text,
+            Vector3 center, Vector2 size, Color baseColor, Color hoverColor, Action onShot)
+        {
+            Piece piece = null;
+            Action<Vector3, Gun> hit = (pos, gun) => { if (IsOpen) onShot(); };
+            Action<Vector3, Gun> hover = (pos, gun) => { if (piece != null) piece.lastHoverTime = Time.time; };
+
+            piece = CreatePiece(prefab, name, center, size, true, hit, hover);
+            if (piece == null) return null;
+
+            piece.baseColor = baseColor;
+            piece.hoverColor = hoverColor;
+            piece.material = new Material(shader);
+            piece.material.color = baseColor;
+            piece.quadRenderer.material = piece.material;
+
+            if (labelSource != null)
+                piece.label = CreateLabel(labelSource, name + "Label", text, center, ButtonLabelScale);
+
+            return piece;
+        }
+
+        private static Transform CreateMarker(Transform quadSource, Shader shader, string name, Vector2 outerSize, Vector2 innerSize,
+            Color outerColor, Color innerColor)
         {
             var marker = new GameObject(name).transform;
             marker.SetParent(root.transform, false);
@@ -383,7 +514,7 @@ namespace ExScoringMod
             outer.transform.localPosition = Vector3.zero;
             outer.transform.localRotation = Quaternion.identity;
             outer.transform.localScale = new Vector3(outerSize.x, outerSize.y, 1f);
-            var outerMat = new Material(shader); outerMat.color = Color.white;
+            var outerMat = new Material(shader); outerMat.color = outerColor;
             outer.GetComponent<MeshRenderer>().material = outerMat;
 
             var inner = GameObject.Instantiate(quadSource.gameObject, marker, false);
@@ -391,13 +522,13 @@ namespace ExScoringMod
             inner.transform.localPosition = new Vector3(0f, 0f, -0.02f);
             inner.transform.localRotation = Quaternion.identity;
             inner.transform.localScale = new Vector3(innerSize.x, innerSize.y, 1f);
-            var innerMat = new Material(shader); innerMat.color = Color.black;
+            var innerMat = new Material(shader); innerMat.color = innerColor;
             inner.GetComponent<MeshRenderer>().material = innerMat;
 
             return marker;
         }
 
-        private static void CreateLabel(Transform source, string name, string text, Vector3 center)
+        private static GameObject CreateLabel(Transform source, string name, string text, Vector3 center, float scale)
         {
             GameObject go = GameObject.Instantiate(source.gameObject, root.transform, false);
             go.name = name;
@@ -408,10 +539,10 @@ namespace ExScoringMod
 
             go.transform.localPosition = new Vector3(center.x, center.y, LabelZ);
             go.transform.localRotation = Quaternion.identity;
-            go.transform.localScale = new Vector3(LabelScale, LabelScale, LabelScale);
+            go.transform.localScale = new Vector3(scale, scale, scale);
 
             var tmp = go.GetComponent<TMPro.TextMeshPro>();
-            if (tmp == null) return;
+            if (tmp == null) return go;
             tmp.text = text;
             tmp.alignment = TMPro.TextAlignmentOptions.Center;
             tmp.enableWordWrapping = false;
@@ -423,11 +554,12 @@ namespace ExScoringMod
                 rt.pivot = new Vector2(0.5f, 0.5f);
                 rt.localPosition = new Vector3(center.x, center.y, LabelZ);
             }
+            return go;
         }
 
         private static void SetButtonsInteractable()
         {
-            foreach (var p in new[] { hueStrip, svSquare, originalSwatch, newSwatch })
+            foreach (var p in new[] { hueStrip, svSquare, cancelButton, applyButton, defaultButton })
                 if (p != null && p.button != null) p.button.SetInteractable(true);
         }
 
@@ -453,6 +585,8 @@ namespace ExScoringMod
         {
             if (!IsOpen || hueStrip == null) return;
             float h = QuadUV(hueStrip, pos).x;
+            hueHoverUV = new Vector2(h, 0.5f);
+            hueHoverTime = Time.time;
             SetHover(Color.HSVToRGB(h, sat, val));
         }
 
@@ -469,24 +603,32 @@ namespace ExScoringMod
         {
             if (!IsOpen || svSquare == null) return;
             Vector2 uv = QuadUV(svSquare, pos);
+            svHoverUV = uv;
+            svHoverTime = Time.time;
             SetHover(Color.HSVToRGB(hue, uv.x, uv.y));
         }
 
-        private static void OnOriginalHit(Vector3 pos, Gun gun)
+        private static void OnCancelHit()
         {
-            if (!IsOpen) return;
             DebugLog.Log("[ColorPicker] cancel");
             CancelIfOpen();
         }
 
-        private static void OnNewHit(Vector3 pos, Gun gun)
+        private static void OnApplyHit()
         {
-            if (!IsOpen) return;
             Color c = CurrentColor;
             var cb = onDoneCb;
-            DebugLog.Log("[ColorPicker] confirm " + FormatColor(c));
+            DebugLog.Log("[ColorPicker] apply " + FormatColor(c));
             Close();
             cb?.Invoke(c);
+        }
+
+        private static void OnDefaultHit()
+        {
+            if (!defaultColor.HasValue) return;
+            Color.RGBToHSV(defaultColor.Value, out hue, out sat, out val);
+            DebugLog.Log("[ColorPicker] default " + FormatColor(defaultColor.Value));
+            Commit();
         }
 
         private static void SetHover(Color c)
@@ -495,9 +637,21 @@ namespace ExScoringMod
             lastHoverTime = Time.time;
         }
 
+        private static void ResetHover()
+        {
+            lastHoverTime = -999f;
+            hueHoverTime = -999f;
+            svHoverTime = -999f;
+            foreach (var b in new[] { cancelButton, applyButton, defaultButton })
+                if (b != null) b.lastHoverTime = -999f;
+        }
+
         private static void Commit()
         {
-            lastHoverTime = -999f; // show the committed colour immediately
+            // Show the committed colour and hide the ghosts immediately.
+            lastHoverTime = -999f;
+            hueHoverTime = -999f;
+            svHoverTime = -999f;
             RefreshVisuals(false);
             onChangedCb?.Invoke(CurrentColor);
         }
@@ -511,12 +665,12 @@ namespace ExScoringMod
             if (force || !Mathf.Approximately(hue, lastBuiltHue))
                 RebuildSVTexture();
 
-            if (newMaterial != null) newMaterial.color = SwatchDisplay(CurrentColor);
+            if (afterSwatch != null) afterSwatch.material.color = SwatchDisplay(CurrentColor);
 
             if (hueMarker != null && hueStrip != null)
-                PlaceMarker(hueMarker, hueStrip, new Vector2(hue, 0.5f));
+                PlaceMarker(hueMarker, hueStrip, new Vector2(hue, 0.5f), MarkerZ);
             if (svMarker != null && svSquare != null)
-                PlaceMarker(svMarker, svSquare, new Vector2(sat, val));
+                PlaceMarker(svMarker, svSquare, new Vector2(sat, val), MarkerZ);
         }
 
         private static void RebuildSVTexture()
@@ -537,24 +691,48 @@ namespace ExScoringMod
             lastBuiltHue = hue;
         }
 
-        private static void PlaceMarker(Transform marker, Piece piece, Vector2 uv)
+        private static void PlaceMarker(Transform marker, Piece piece, Vector2 uv, float z)
         {
             Vector3 world = piece.quad.TransformPoint(new Vector3(uv.x - 0.5f, uv.y - 0.5f, 0f));
             marker.position = world;
             Vector3 lp = marker.localPosition;
-            marker.localPosition = new Vector3(lp.x, lp.y, MarkerZ);
+            marker.localPosition = new Vector3(lp.x, lp.y, z);
             marker.localRotation = Quaternion.identity;
+        }
+
+        private static void UpdateGhost(Transform ghost, Piece piece, Vector2 uv, bool visible)
+        {
+            if (ghost == null || piece == null) return;
+            if (ghost.gameObject.activeSelf != visible) ghost.gameObject.SetActive(visible);
+            if (visible) PlaceMarker(ghost, piece, uv, GhostMarkerZ);
+        }
+
+        private static void UpdateButtonTint(Piece b, float now)
+        {
+            if (b == null || b.material == null) return;
+            bool hovered = now - b.lastHoverTime <= HoverHoldSeconds;
+            b.material.color = hovered ? b.hoverColor : b.baseColor;
         }
 
         private static IEnumerator Tick()
         {
             while (IsOpen)
             {
-                if (newMaterial != null)
+                float now = Time.time;
+
+                if (afterSwatch != null)
                 {
-                    bool hovering = Time.time - lastHoverTime <= HoverHoldSeconds;
-                    newMaterial.color = SwatchDisplay(hovering ? hoverColor : CurrentColor);
+                    bool hovering = now - lastHoverTime <= HoverHoldSeconds;
+                    afterSwatch.material.color = SwatchDisplay(hovering ? hoverColor : CurrentColor);
                 }
+
+                UpdateGhost(hueGhost, hueStrip, hueHoverUV, now - hueHoverTime <= HoverHoldSeconds);
+                UpdateGhost(svGhost, svSquare, svHoverUV, now - svHoverTime <= HoverHoldSeconds);
+
+                UpdateButtonTint(cancelButton, now);
+                UpdateButtonTint(applyButton, now);
+                UpdateButtonTint(defaultButton, now);
+
                 yield return null;
             }
             tickRoutine = null;
@@ -570,7 +748,16 @@ namespace ExScoringMod
             onChangedCb = null;
             onDoneCb = null;
             onCancelCb = null;
+            if (hueGhost != null) hueGhost.gameObject.SetActive(false);
+            if (svGhost != null) svGhost.gameObject.SetActive(false);
             if (root != null) root.SetActive(false);
+        }
+
+        private static void SetPieceActive(Piece p, bool active)
+        {
+            if (p == null) return;
+            if (p.go != null && p.go.activeSelf != active) p.go.SetActive(active);
+            if (p.label != null && p.label.activeSelf != active) p.label.SetActive(active);
         }
 
         private static void SetHandColors(Color left, Color right, bool simpleChange)

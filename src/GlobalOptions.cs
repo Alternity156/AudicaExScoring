@@ -49,9 +49,10 @@ namespace ExScoringMod
         // Shooting a row opens ColorPickerPopup.
         private const string ColorsCategoryId = "opt_colors";
 
-        // Audica's default gun colours (used by Reset Targets).
-        private static readonly Color DefaultLeftHandColor = new Color(0f, 0.665f, 1f, 1f);
-        private static readonly Color DefaultRightHandColor = new Color(1f, 0.467f, 0f, 1f);
+        // Audica's default gun colours (used by Reset Targets) live in ColorPickerPopup, which also
+        // uses them for its Default button.
+        private static Color DefaultLeftHandColor => ColorPickerPopup.DefaultLeftHandColor;
+        private static Color DefaultRightHandColor => ColorPickerPopup.DefaultRightHandColor;
 
         private static readonly Dictionary<ColorSetting, GameObject> colorSettingRows = new Dictionary<ColorSetting, GameObject>();
 
@@ -101,7 +102,7 @@ namespace ExScoringMod
             GameObject row = OptionsMenuClone.CreateToggle(col, setting.Label,
                 () => true,
                 v => OpenColorSettingPicker(setting),
-                "Opens the colour picker for " + setting.Label + ". Shoot the bottom-right swatch to confirm, the top-right one to cancel");
+                "Opens the color picker for " + setting.Label);
             colorSettingRows[setting] = row;
             TintCheckmark(row, setting.Value);
             return row;
@@ -142,7 +143,9 @@ namespace ExScoringMod
                     setting.Value = original;
                     TintColorSettingRow(setting);
                     OnColorSettingChanged(setting);
-                });
+                },
+                setting.Label + " Color",
+                setting.Default);
         }
 
         private static void TintColorSettingRow(ColorSetting setting)
@@ -513,17 +516,17 @@ namespace ExScoringMod
                 leftHandColorRow = OptionsMenuClone.CreateToggle(0, "Left Hand",
                     () => true,
                     v => OpenHandColorPicker(Target.TargetHandType.Left),
-                    "Opens the colour picker for the left hand. Shoot the bottom-right swatch to confirm, the top-right one to cancel");
+                    "Opens the color picker for the left hand");
                 rightHandColorRow = OptionsMenuClone.CreateToggle(1, "Right Hand",
                     () => true,
                     v => OpenHandColorPicker(Target.TargetHandType.Right),
-                    "Opens the colour picker for the right hand. Shoot the bottom-right swatch to confirm, the top-right one to cancel");
+                    "Opens the color picker for the right hand");
                 OptionsMenuClone.AddRow(leftHandColorRow, rightHandColorRow);
 
                 eitherHandColorRow = OptionsMenuClone.CreateToggle(0, "Either Hand",
                     () => true,
                     v => OpenEitherHandColorPicker(),
-                    "Opens the colour picker for either-hand targets (melee included). Only applied in-game when Override Either Hand Color is on");
+                    "Opens the color picker for either-hand targets (melee included). Only applied in-game when Override Either Hand Color is on");
                 var overrideEitherToggle = OptionsMenuClone.CreateToggle(1, "Override Either Hand Color",
                     () => Config.OverrideMeleeColor,
                     v => { Config.UpdateOverrideMeleeColor(v); ExScoring.RefreshEitherHandColors(); },
