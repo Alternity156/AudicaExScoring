@@ -551,31 +551,37 @@ namespace ExScoringMod
             {
                 if (!Enum.TryParse(difficultyStr, out KataConfig.Difficulty difficulty)) return info;
 
-                var songData = SongList.I.GetSong(songId);
-                if (songData == null) return info;
-
-                var cues = SongCues.GetCues(songData, difficulty);
-                if (cues == null) return info;
-
-                // Confirmed via live testing: a cold GetCues() call (i.e. outside an active
-                // gameplay session, like from this history screen) returns cues whose chainNext
-                // is never populated — it's only assigned as a side effect of HookUpChains,
-                // which normally only runs during gameplay setup. Without calling it here first,
-                // every Chain cue's chainNext reads null, not just true tails, which silently
-                // resolves every ambiguous cue as a tail instead of just the real one (and would
-                // inflate the whole-chart max the same way).
-                SongCues.HookUpChains(cues);
-
+                // songId may be a community map leaderboard ID (runs on a map are saved under it):
+                // WithChartFor loads that map's chart, or the song's own chart for a songID even
+                // while one of its maps is selected.
                 float max = 0f;
-                foreach (SongCues.Cue cue in cues)
+                bool loaded = false;
+                CommunityMapManager.WithChartFor(songId, songData =>
                 {
-                    if (cue.behavior == Target.TargetBehavior.Chain)
-                    {
-                        lookup[cue.tick] = cue.chainNext == null;
-                    }
+                    var cues = SongCues.GetCues(songData, difficulty);
+                    if (cues == null) return;
 
-                    max += GetMaxJudgementScoreForCue(cue);
-                }
+                    // Confirmed via live testing: a cold GetCues() call (i.e. outside an active
+                    // gameplay session, like from this history screen) returns cues whose chainNext
+                    // is never populated — it's only assigned as a side effect of HookUpChains,
+                    // which normally only runs during gameplay setup. Without calling it here first,
+                    // every Chain cue's chainNext reads null, not just true tails, which silently
+                    // resolves every ambiguous cue as a tail instead of just the real one (and would
+                    // inflate the whole-chart max the same way).
+                    SongCues.HookUpChains(cues);
+
+                    foreach (SongCues.Cue cue in cues)
+                    {
+                        if (cue.behavior == Target.TargetBehavior.Chain)
+                        {
+                            lookup[cue.tick] = cue.chainNext == null;
+                        }
+
+                        max += GetMaxJudgementScoreForCue(cue);
+                    }
+                    loaded = true;
+                });
+                if (!loaded) return info;
 
                 info.chainTailLookup = lookup;
                 info.maxJudgementScore = max;

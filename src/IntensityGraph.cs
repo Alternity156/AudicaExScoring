@@ -165,9 +165,14 @@ namespace ExScoringMod
 
             KataConfig.Difficulty difficulty = KataConfig.I.GetDifficulty();
 
+            // A community map and its parent song share selectedSong but not the chart, so the
+            // rebuild check goes by the selected row key. (CreateIntensityGraph / CreateHeatmap
+            // still take the parent songID: with the map selected, GetCues returns the map's cues.)
+            string builtKey = CommunityMapManager.SelectedViewKey(selectedSong);
+
             // Skip redundant rebuilds: same song + difficulty and the graph still exists.
             if (intensityGraphObject != null
-                && selectedSong == lastBuiltSongId
+                && builtKey == lastBuiltSongId
                 && difficulty == lastBuiltDifficulty)
                 return;
 
@@ -185,7 +190,7 @@ namespace ExScoringMod
 
             RefreshHeatmap();
 
-            lastBuiltSongId = selectedSong;
+            lastBuiltSongId = builtKey;
             lastBuiltDifficulty = difficulty;
         }
     }

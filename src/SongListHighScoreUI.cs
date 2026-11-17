@@ -312,12 +312,23 @@ namespace ExScoringMod
         /// </summary>
         public static void RefreshAllVisibleSongRowScores()
         {
-            int viewCount = VirtualSongList.CurrentViewSongIDs.Count;
+            int viewCount = VirtualSongList.CurrentViewSongIDs.Count + VirtualSongList.CurrentViewMapKeys.Count;
             int boundCount = 0;
 
             foreach (string songId in VirtualSongList.CurrentViewSongIDs)
             {
                 SongSelectItem item = VirtualSongList.GetBoundItem(songId);
+                if (item != null)
+                {
+                    boundCount++;
+                    item.UpdateHighScoreInfo();
+                }
+            }
+
+            // Community map rows (kept out of CurrentViewSongIDs).
+            foreach (string mapKey in VirtualSongList.CurrentViewMapKeys)
+            {
+                SongSelectItem item = VirtualSongList.GetBoundItem(mapKey);
                 if (item != null)
                 {
                     boundCount++;
@@ -388,6 +399,17 @@ namespace ExScoringMod
 
                 string songId = __instance.mSongData.songID;
                 KataConfig.Difficulty difficulty = KataConfig.I.GetDifficulty();
+
+                // A community map row shows that map's own best (always Expert — one chart only).
+                string mapPath = VirtualSongList.MapPathForItem(__instance);
+                if (mapPath != null)
+                {
+                    string mapId = CommunityMapManager.LeaderboardIdForPath(mapPath);
+                    if (mapId == null) { HideSongRowScore(__instance); return false; } // ID not computable yet
+                    songId = mapId;
+                    difficulty = KataConfig.Difficulty.Expert;
+                }
+
                 string key = ExRowCacheKey(songId, difficulty);
 
                 if (exRowScoreCache.TryGetValue(key, out CachedExRowScore cached))
@@ -500,7 +522,10 @@ namespace ExScoringMod
             // lets us update it directly instead.
             SongSelectItem item = VirtualSongList.GetBoundItem(songId);
             if (item == null) yield break; // scrolled off-screen — next bind picks up the warm cache
-            if (KataConfig.I.GetDifficulty() != difficulty) yield break; // displaying difficulty changed mid-lookup
+            // Displaying difficulty changed mid-lookup. Community map rows always show Expert,
+            // whatever the list's difficulty, so the check doesn't apply to them.
+            bool isMapRow = VirtualSongList.MapPathForItem(item) != null;
+            if (!isMapRow && KataConfig.I.GetDifficulty() != difficulty) yield break;
 
             if (exRowScoreCache.TryGetValue(key, out CachedExRowScore cached))
                 ApplySongRowScore(item, cached);

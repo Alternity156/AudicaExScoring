@@ -252,18 +252,19 @@ namespace ExScoringMod
             {
                 if (string.IsNullOrEmpty(songId) || SongList.I == null) return 0f;
 
-                var songData = SongList.I.GetSong(songId);
-                if (songData == null) return 0f;
-
-                var cues = SongCues.GetCues(songData, difficulty);
-                if (cues == null) return 0f;
-
-                SongCues.HookUpChains(cues);
-
-                foreach (SongCues.Cue cue in cues)
+                // songId may be a community map leaderboard ID: WithChartFor loads that map's chart.
+                CommunityMapManager.WithChartFor(songId, songData =>
                 {
-                    maxJudgementScore += GetMaxJudgementScoreForCue(cue);
-                }
+                    var cues = SongCues.GetCues(songData, difficulty);
+                    if (cues == null) return;
+
+                    SongCues.HookUpChains(cues);
+
+                    foreach (SongCues.Cue cue in cues)
+                    {
+                        maxJudgementScore += GetMaxJudgementScoreForCue(cue);
+                    }
+                });
             }
             catch (Exception ex)
             {
@@ -306,7 +307,7 @@ namespace ExScoringMod
                 if (totalMaxPossibleJudgementScore < 0f)
                 {
                     totalMaxPossibleJudgementScore = selectedSongData != null
-                        ? GetMaxPossibleJudgementScore(selectedSongData.songID, KataConfig.I.GetDifficulty())
+                        ? GetMaxPossibleJudgementScore(CommunityMapManager.EffectiveSongID(selectedSongData.songID), KataConfig.I.GetDifficulty())
                         : 0f;
                 }
 

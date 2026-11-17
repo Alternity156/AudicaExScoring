@@ -103,9 +103,11 @@ namespace ExScoringMod
 
         /// <summary>
         /// Max possible EX score for the whole chart of songId at the given difficulty (was always
-        /// Expert regardless of what was selected). Main thread only (Il2Cpp). Returns 0 (never
-        /// throws) if the song isn't installed, has no chart at that difficulty, or anything else
-        /// goes wrong. No HookUpChains needed: GetMaxExScoreForCue never reads chainNext.
+        /// Expert regardless of what was selected). songId may also be a community map leaderboard
+        /// ID (CommunityMapManager.EffectiveSongID), which scores that map's chart. Main thread only
+        /// (Il2Cpp). Returns 0 (never throws) if the song isn't installed, has no chart at that
+        /// difficulty, or anything else goes wrong. No HookUpChains needed: GetMaxExScoreForCue
+        /// never reads chainNext.
         /// </summary>
         public static float GetMaxPossibleExScore(string songId, KataConfig.Difficulty difficulty)
         {
@@ -115,16 +117,16 @@ namespace ExScoringMod
             {
                 if (string.IsNullOrEmpty(songId) || SongList.I == null) return 0f;
 
-                var songData = SongList.I.GetSong(songId);
-                if (songData == null) return 0f;
-
-                var cues = SongCues.GetCues(songData, difficulty);
-                if (cues == null) return 0f;
-
-                foreach (SongCues.Cue cue in cues)
+                CommunityMapManager.WithChartFor(songId, songData =>
                 {
-                    maxExScore += GetMaxExScoreForCue(cue);
-                }
+                    var cues = SongCues.GetCues(songData, difficulty);
+                    if (cues == null) return;
+
+                    foreach (SongCues.Cue cue in cues)
+                    {
+                        maxExScore += GetMaxExScoreForCue(cue);
+                    }
+                });
             }
             catch (System.Exception ex)
             {

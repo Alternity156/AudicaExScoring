@@ -172,7 +172,8 @@ namespace ExScoringMod
                     return false;
                 }
 
-                string songId = selectedSongData.songID;
+                // A selected community map has its own leaderboard.
+                string songId = CommunityMapManager.EffectiveSongID(selectedSongData.songID);
                 string difficulty = KataConfig.I.GetDifficulty().ToString();
 
                 // Results screen of a multiplayer match: wait until everyone is done, so the

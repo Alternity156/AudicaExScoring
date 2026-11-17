@@ -381,7 +381,8 @@ namespace ExScoringMod
 
             launchPanelCenterArtistLabel.GetComponent<TextMeshPro>().text = songData.artist;
             launchPanelCenterTitleLabel.GetComponent<TextMeshPro>().text = songData.title;
-            launchPanelCenterMapperLabel.GetComponent<TextMeshPro>().text = songData.author;
+            // A selected community map shows its name instead of the song's own mapper.
+            launchPanelCenterMapperLabel.GetComponent<TextMeshPro>().text = CommunityMapManager.LaunchPanelMapperText() ?? songData.author;
             launchPanelCenterTempoLabel.GetComponent<TextMeshPro>().text = $"BPM: {GetTempoString(songData.tempos)}";
             launchPanelCenterTotalTargets.GetComponent<TextMeshPro>().text = GetCueStatsString(stats);
             launchPanelCenterTotalRightHandTargets.GetComponent<TextMeshPro>().text = GetRightHandCueStatsString(stats);
@@ -402,6 +403,10 @@ namespace ExScoringMod
             HideLaunchPanelElement(launchCenter, "Modifiers"); // capital: button w/ children
             HideLaunchPanelElement(launchCenter, "modifiers"); // lowercase: separate leaf object
             HideLaunchPanelElement(launchCenter, "MapperAlert");
+
+            // Community map: one chart only, so no difficulty buttons (restored for normal songs).
+            if (CommunityMapManager.IsActive) CommunityMapManager.EnforceLaunchPanel();
+            else CommunityMapManager.RestoreLaunchPanel();
 
             if (songDataLoaderInstalled)
                 AlbumArt.UpdateAlbumArt(songData.songID);
@@ -554,6 +559,10 @@ namespace ExScoringMod
         {
             if (SongDataHolder.I == null || SongDataHolder.I.songData == null) return;
 
+            // Hidden while a community map is selected (and GetCues ignores the difficulty then,
+            // so every button would read as available anyway).
+            if (CommunityMapManager.IsActive) return;
+
             string basePath = "menu/ShellPage_Launch/page/ShellPanel_Center/";
             string[] diffs = new string[] { "ChooseDiff_easy", "ChooseDiff_normal", "ChooseDiff_hard", "ChooseDiff_expert" };
             KataConfig.Difficulty[] difficulties = new KataConfig.Difficulty[] { KataConfig.Difficulty.Easy, KataConfig.Difficulty.Normal, KataConfig.Difficulty.Hard, KataConfig.Difficulty.Expert };
@@ -597,6 +606,18 @@ namespace ExScoringMod
             // intermittent rather than constant.
             SongList.SongData songData = selectedSongData ?? SongDataHolder.I?.songData;
             if (songData == null) return;
+
+            // A community map is a single chart, always played on Expert.
+            if (CommunityMapManager.IsActive)
+            {
+                if (KataConfig.I.mDifficulty != KataConfig.Difficulty.Expert)
+                {
+                    KataConfig.I.mDifficulty = KataConfig.Difficulty.Expert;
+                    UpdateDifficultyIndicator(KataConfig.Difficulty.Expert);
+                    RefreshIntensityGraph();
+                }
+                return;
+            }
 
             KataConfig.Difficulty[] difficulties = new KataConfig.Difficulty[] { KataConfig.Difficulty.Easy, KataConfig.Difficulty.Normal, KataConfig.Difficulty.Hard, KataConfig.Difficulty.Expert };
 
@@ -674,6 +695,10 @@ namespace ExScoringMod
                 UpdateDifficultyIndicator(diff);
                 lastIndicatorDifficulty = diff;
             }
+
+            // The game's LaunchPanel.OnEnable re-activates the difficulty buttons; keep them hidden
+            // while a community map is selected.
+            CommunityMapManager.EnforceLaunchPanel();
         }
 
         public static void ShowLaunchPanel()
@@ -728,7 +753,8 @@ namespace ExScoringMod
             }
 
             yield return null;
-            FolderRowManager.RevealAndSelect(selectedSong);
+            // A selected community map restores its own row, not the parent song's.
+            FolderRowManager.RevealAndSelect(CommunityMapManager.SelectedViewKey(selectedSong));
         }
     }
 }

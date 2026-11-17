@@ -11,6 +11,7 @@ namespace ExScoringMod
         private static GameObject favoriteButton;
         private static GameObject favoriteIndicator;
         private static bool favoriteButtonSetup = false;
+        private static bool favoriteHiddenForMap = false; // true while hidden for a community map
 
         /// <summary>
         /// Creates the favorite toggle button on the launch panel, below the practice mode button.
@@ -90,6 +91,26 @@ namespace ExScoringMod
         /// </summary>
         public static void UpdateFavoriteIndicator()
         {
+            // Favorites aren't supported for community maps yet (they're keyed by song, so the
+            // button would favorite the parent song): hide it while a map is selected, and only
+            // bring back what was hidden here.
+            if (favoriteButton != null)
+            {
+                if (CommunityMapManager.IsActive)
+                {
+                    if (favoriteButton.activeSelf)
+                    {
+                        favoriteButton.SetActive(false);
+                        favoriteHiddenForMap = true;
+                    }
+                }
+                else if (favoriteHiddenForMap)
+                {
+                    favoriteButton.SetActive(true);
+                    favoriteHiddenForMap = false;
+                }
+            }
+
             if (favoriteIndicator == null) return;
 
             bool isFav = selectedSong != null && FavoritesStore.IsFavorite(selectedSong);

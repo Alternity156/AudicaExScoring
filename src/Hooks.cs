@@ -123,6 +123,12 @@ namespace ExScoringMod
             {
                 DebugLog.Log($"SetState: {menuState} -> {state}");
 
+                // Backing out of the song list to the main menu drops a community map selection,
+                // so other modes (campaign, ...) never play the parent song with the map's chart.
+                // Returning from gameplay goes Launched -> SongPage and keeps it.
+                if (state == MenuState.State.MainPage && menuState == MenuState.State.SongPage)
+                    CommunityMapManager.Deselect();
+
                 // Online play: location, and quitSong when leaving a match song early.
                 try
                 {
@@ -606,8 +612,12 @@ namespace ExScoringMod
                 // Picking a song exits marathon setup and restores the launch panel.
                 MarathonSetup.CancelIfActive();
 
+                // Community map row → select that map (and force Expert); a normal row releases
+                // any map selection. Must run before anything below reads cues or the difficulty.
+                CommunityMapManager.OnSongSelected(__instance.mSongData, VirtualSongList.MapPathForItem(__instance));
+
                 selectedSong = __instance.mSongData.songID;
-                maxPossibleExScore = GetMaxPossibleExScore(selectedSong, KataConfig.I.GetDifficulty());
+                maxPossibleExScore = GetMaxPossibleExScore(CommunityMapManager.EffectiveSongID(selectedSong), KataConfig.I.GetDifficulty());
                 selectedSongData = __instance.mSongData;
 
                 // Selecting a song while the Song Settings page is open returns to the launch
@@ -630,7 +640,7 @@ namespace ExScoringMod
                     launchPanel.OnEnable();
 
                 UpdateLaunchPanelInfo();
-                UpdateSongSelectionIndicator(__instance, selectedSong);
+                UpdateSongSelectionIndicator(__instance, CommunityMapManager.SelectedViewKey(selectedSong));
                 // Light up any OTHER currently-bound row that also shows this songID (e.g. the
                 // song appears under both Song Requests/Search Results and its home folder).
                 VirtualSongList.RefreshSelectionIndicators();

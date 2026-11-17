@@ -47,10 +47,11 @@ namespace ExScoringMod
                 RunSubmitData submitData = new RunSubmitData
                 {
                     clientRunId = currentRunId,
-                    songId = selectedSongData.songID,
-                    songTitle = selectedSongData.title,
+                    // A community map has its own leaderboard ID, and "Title [map name]" as title.
+                    songId = CommunityMapManager.EffectiveSongID(selectedSongData.songID),
+                    songTitle = CommunityMapManager.EffectiveSongTitle(selectedSongData),
                     songArtist = selectedSongData.artist,
-                    songMapper = selectedSongData.author,
+                    songMapper = CommunityMapManager.EffectiveSongMapper(selectedSongData), // empty for a community map
                     difficulty = KataConfig.I.GetDifficulty().ToString(),
                     unixTimestamp = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
                     failed = failed,
@@ -656,46 +657,51 @@ namespace ExScoringMod
                     return;
                 }
 
-                var songData = SongList.I.GetSong(songId);
-                if (songData == null)
+                // songId may be a community map leaderboard ID: WithChartFor loads that map's chart
+                // (or the song's own chart for a songID, even while one of its maps is selected).
+                List<MapCueData> mapCues = new List<MapCueData>();
+                bool found = CommunityMapManager.WithChartFor(songId, songData =>
+                {
+                    var cues = SongCues.GetCues(songData, difficulty);
+                    if (cues == null) return;
+
+                    // Same cold-call caveat as RunDataRecalculator.BuildChainTailLookup: chainNext is
+                    // only populated as a side effect of HookUpChains, which normally only runs during
+                    // gameplay setup. Without it here, every Chain/ChainStart cue's chainNext reads null.
+                    SongCues.HookUpChains(cues);
+
+                    foreach (SongCues.Cue cue in cues)
+                    {
+                        bool isChainTail = (cue.behavior == Target.TargetBehavior.Chain || cue.behavior == Target.TargetBehavior.ChainStart)
+                            && cue.chainNext == null;
+                        // Chain sustains load as Chain (ChainSustain.cs); always a tail.
+                        if (ChainSustain.IsChainSustain(cue)) isChainTail = true;
+
+                        mapCues.Add(new MapCueData
+                        {
+                            index = cue.index,
+                            tick = cue.tick,
+                            tickLength = cue.tickLength,
+                            pitch = cue.pitch,
+                            velocity = cue.velocity,
+                            gridOffset = new Vector2Data(cue.gridOffset),
+                            zOffset = cue.zOffset,
+                            handType = cue.handType.ToString(),
+                            behavior = ChainSustain.GetChartBehaviorName(cue),
+                            overdriveSectionIndex = cue.overdriveSectionIndex,
+                            tickLookahead = cue.tickLookahead,
+                            slopBeforeTicks = cue.slopBeforeTicks,
+                            slopAfterTicks = cue.slopAfterTicks,
+                            finaleSequenceFinalNote = cue.finaleSequenceFinalNote,
+                            isChainTail = isChainTail
+                        });
+                    }
+                });
+
+                if (!found)
                 {
                     DebugLog.Log($"[ExScoring] UploadMapData: song '{songId}' not found, aborting.");
                     return;
-                }
-
-                var cues = SongCues.GetCues(songData, difficulty);
-
-                // Same cold-call caveat as RunDataRecalculator.BuildChainTailLookup: chainNext is
-                // only populated as a side effect of HookUpChains, which normally only runs during
-                // gameplay setup. Without it here, every Chain/ChainStart cue's chainNext reads null.
-                SongCues.HookUpChains(cues);
-
-                List<MapCueData> mapCues = new List<MapCueData>();
-                foreach (SongCues.Cue cue in cues)
-                {
-                    bool isChainTail = (cue.behavior == Target.TargetBehavior.Chain || cue.behavior == Target.TargetBehavior.ChainStart)
-                        && cue.chainNext == null;
-                    // Chain sustains load as Chain (ChainSustain.cs); always a tail.
-                    if (ChainSustain.IsChainSustain(cue)) isChainTail = true;
-
-                    mapCues.Add(new MapCueData
-                    {
-                        index = cue.index,
-                        tick = cue.tick,
-                        tickLength = cue.tickLength,
-                        pitch = cue.pitch,
-                        velocity = cue.velocity,
-                        gridOffset = new Vector2Data(cue.gridOffset),
-                        zOffset = cue.zOffset,
-                        handType = cue.handType.ToString(),
-                        behavior = ChainSustain.GetChartBehaviorName(cue),
-                        overdriveSectionIndex = cue.overdriveSectionIndex,
-                        tickLookahead = cue.tickLookahead,
-                        slopBeforeTicks = cue.slopBeforeTicks,
-                        slopAfterTicks = cue.slopAfterTicks,
-                        finaleSequenceFinalNote = cue.finaleSequenceFinalNote,
-                        isChainTail = isChainTail
-                    });
                 }
 
                 MapUploadRequest uploadData = new MapUploadRequest { cues = mapCues.ToArray() };

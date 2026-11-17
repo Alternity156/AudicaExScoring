@@ -26,7 +26,7 @@ namespace ExScoringMod
         {
             if (selectedSongData == null) return "";
 
-            string songId = selectedSongData.songID;
+            string songId = CommunityMapManager.EffectiveSongID(selectedSongData.songID); // community map → its own best
             KataConfig.Difficulty difficulty = KataConfig.I.GetDifficulty();
             string key = ExRowCacheKey(songId, difficulty);
 

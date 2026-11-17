@@ -13,6 +13,7 @@ namespace ExScoringMod
     internal static class AddPlaylistButton
     {
         private static GameObject playlistButton;
+        private static bool hiddenForMap = false; // true while hidden for a community map
 
         private static Vector3 playlistButtonMenuPosition = new Vector3(2.5f, 2.4f, 0f);
         private static Vector3 playlistButtonMenuScale = new Vector3(0.75f, 0.75f, 0.75f);
@@ -28,7 +29,7 @@ namespace ExScoringMod
             {
                 // Context-aware label (Add vs Remove) so song-page re-setup doesn't clobber it.
                 UpdateForSelection();
-                if (!MarathonSetup.Active) playlistButton.SetActive(true);
+                if (!MarathonSetup.Active && !CommunityMapManager.IsActive) playlistButton.SetActive(true);
                 return;
             }
 
@@ -73,6 +74,23 @@ namespace ExScoringMod
         public static void UpdateForSelection()
         {
             if (playlistButton == null) return;
+
+            // Playlists aren't supported for community maps yet (they store song files, so the
+            // button would add the parent song): hidden while a map is selected.
+            if (CommunityMapManager.IsActive)
+            {
+                if (playlistButton.activeSelf)
+                {
+                    playlistButton.SetActive(false);
+                    hiddenForMap = true;
+                }
+                return;
+            }
+            if (hiddenForMap)
+            {
+                hiddenForMap = false;
+                if (!MarathonSetup.Active) playlistButton.SetActive(true);
+            }
 
             // In the Song Requests folder, a request song turns this button into "Remove Request".
             if (SongFolderManager.openFolder == SongFolderManager.FolderSongRequests

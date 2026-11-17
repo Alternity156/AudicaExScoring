@@ -208,7 +208,10 @@ namespace ExScoringMod
             if (armedDeleteButton == instance && (song == null || song.songID != armedDeleteSongId))
                 DisarmDelete();
 
-            bool enabled = song != null && SongSearch.IsCustomSong(song.songID);
+            // A community map row selects its parent song; deleting from there would delete the
+            // song itself, not the map — so the launch-panel button is off while a map is selected.
+            bool enabled = song != null && SongSearch.IsCustomSong(song.songID)
+                && !(instance.location == ButtonUtils.ButtonLocation.Menu && CommunityMapManager.IsActive);
             instance.gunButton.SetInteractable(enabled);
             instance.text.alpha = enabled ? 1.0f : 0.25f;
         }

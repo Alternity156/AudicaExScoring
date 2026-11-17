@@ -37,7 +37,14 @@ namespace ExScoringMod
         public string titleOverride; // song: text shown instead of the song's own title (e.g. "Destiny (Suggested by Bob)")
         public bool disabled;     // action/downloadable: shown but not shootable
         public bool labelOnly;    // action: plain label (e.g. playlist title) — not dimmed, colliders off so the gun can't highlight or hit it
+        public string mapPath;    // song: community map file shown by this row (songID is the parent song), or null
         internal FolderStyle style; // header: folder.json customization (display name, image, text color), or null
+
+        /// <summary>
+        /// Identity of a song row in the view: the songID, or for a community map row
+        /// "cm:" + file path (several map rows share the same parent songID).
+        /// </summary>
+        public string Key => mapPath != null ? CommunityMapManager.ViewKeyPrefix + mapPath : songID;
 
         /// <summary>Default folder-header grey. Action rows override via their own color.</summary>
         public static Color FolderColor => ColorSettings.FolderOther.Value; // customisable (Options > Colors)
@@ -56,6 +63,13 @@ namespace ExScoringMod
         /// <summary>A song row whose title line reads <paramref name="titleOverride"/> instead of the song's title.</summary>
         public static ViewRow SongRow(string id, string titleOverride)
             => new ViewRow { kind = ViewRowKind.Song, songID = id, titleOverride = titleOverride };
+
+        /// <summary>
+        /// A community map row: binds the parent song's item (art, artist, preview) and shows
+        /// <paramref name="titleOverride"/> ("Title [map name]") as its title.
+        /// </summary>
+        public static ViewRow CommunityMapRow(string parentSongID, string mapPath, string titleOverride)
+            => new ViewRow { kind = ViewRowKind.Song, songID = parentSongID, mapPath = mapPath, titleOverride = titleOverride };
 
         /// <summary>An action-style row that can't be shot (e.g. a song that can't be downloaded).</summary>
         public static ViewRow DisabledRow(string label, Color color, string subLabel = null, string actionId = null)
@@ -225,10 +239,28 @@ namespace ExScoringMod
         // ── The view (shared source of truth) ────────────────────────────────
         private static readonly List<ViewRow> view = new List<ViewRow>();
         private static readonly List<string> viewSongIDs = new List<string>();
+        private static readonly List<string> viewMapKeys = new List<string>(); // community map rows' keys
         private static readonly Dictionary<string, int> songToViewIndex = new Dictionary<string, int>();
 
         public static IReadOnlyList<ViewRow> CurrentView => view;
         public static IReadOnlyList<string> CurrentViewSongIDs => viewSongIDs;
+
+        /// <summary>
+        /// Keys of the community map rows in the current view (kept out of CurrentViewSongIDs so
+        /// Random Song / auto-select only ever pick real songs).
+        /// </summary>
+        public static IReadOnlyList<string> CurrentViewMapKeys => viewMapKeys;
+
+        // Pooled SongSelectItem (instance id) -> community map path it currently shows. Set before
+        // Init() so patches running inside Init (UpdateHighScoreInfo) already see it.
+        private static readonly Dictionary<int, string> itemMapPaths = new Dictionary<int, string>();
+
+        /// <summary>The community map a bound song-list item shows, or null for a normal song row.</summary>
+        public static string MapPathForItem(SongSelectItem item)
+        {
+            if (item == null) return null;
+            return itemMapPaths.TryGetValue(item.GetInstanceID(), out string p) ? p : null;
+        }
 
         // ── Wraparound ring buffer ────────────────────────────────────────────
         // When Wrap Song List is on and the list is longer than one screen, the physical row
@@ -467,6 +499,7 @@ namespace ExScoringMod
 
             view.Clear();
             viewSongIDs.Clear();
+            viewMapKeys.Clear();
             songToViewIndex.Clear();
             for (int i = 0; i < rows.Count; i++)
                 view.Add(rows[i]);
@@ -499,8 +532,9 @@ namespace ExScoringMod
             {
                 if (view[i].kind == ViewRowKind.Song)
                 {
-                    songToViewIndex[view[i].songID] = i; // canonical index
-                    viewSongIDs.Add(view[i].songID);
+                    songToViewIndex[view[i].Key] = i; // canonical index
+                    if (view[i].mapPath == null) viewSongIDs.Add(view[i].songID);
+                    else viewMapKeys.Add(view[i].Key);
                 }
             }
 
@@ -663,7 +697,7 @@ namespace ExScoringMod
             switch (row.kind)
             {
                 case ViewRowKind.FolderHeader: return "H:" + row.folderName;
-                case ViewRowKind.Song: return string.IsNullOrEmpty(row.songID) ? null : "S:" + row.songID;
+                case ViewRowKind.Song: return string.IsNullOrEmpty(row.songID) ? null : "S:" + row.Key;
                 case ViewRowKind.DownloadableSong: return string.IsNullOrEmpty(row.songID) ? null : "D:" + row.songID;
                 case ViewRowKind.Action:
                     if (!string.IsNullOrEmpty(row.actionId)) return "A:" + row.actionId;
@@ -756,10 +790,18 @@ namespace ExScoringMod
                 if (songPool[i] != null) songPool[i].boundSong = null;
         }
 
-        /// <summary>The pooled SongSelectItem currently displaying songID, or null if off-screen.</summary>
+        /// <summary>
+        /// The pooled SongSelectItem currently displaying songID (or a row key), or null if
+        /// off-screen. A community map leaderboard ID also finds that map's row.
+        /// </summary>
         public static SongSelectItem GetBoundItem(string songID)
         {
             int idx = IndexOf(songID);
+            if (idx < 0 && !string.IsNullOrEmpty(songID) && CommunityMapManager.Count > 0)
+            {
+                string mapKey = CommunityMapManager.ViewKeyForLeaderboardId(songID);
+                if (mapKey != null) idx = IndexOf(mapKey);
+            }
             if (idx < 0) return null;
             if (!rowBindings.TryGetValue(idx + wrapBuffer, out Binding b) || b.isHeader) return null;
             return songPool[b.slot].ssi;
@@ -859,7 +901,9 @@ namespace ExScoringMod
 
         private static void SelectBoundItem(string songID, SongSelectItem item)
         {
-            ExScoring.selectedSong = songID;
+            // A community map row's key isn't a songID: track its parent song (the OnSelect
+            // postfix sets the map selection itself).
+            ExScoring.selectedSong = CommunityMapManager.ParentForViewKey(songID) ?? songID;
             ExScoring.isAutoSelecting = true;
             try
             {
@@ -1052,17 +1096,33 @@ namespace ExScoringMod
                 pi.go.transform.localRotation = Quaternion.identity;
                 pi.go.SetActive(true);
 
+                // Which community map (if any) this item shows — before Init, so the high-score
+                // patch running inside Init looks up the map's score instead of the parent's.
+                if (pi.ssi != null)
+                {
+                    int itemId = pi.ssi.GetInstanceID();
+                    if (row.mapPath != null) itemMapPaths[itemId] = row.mapPath;
+                    else itemMapPaths.Remove(itemId);
+                }
+
                 // Re-Init also when this item still shows another row's title override and this row
-                // doesn't want that same text (Init puts the song's own title back).
-                if (pi.boundSong != row.songID || (pi.appliedTitle != null && pi.appliedTitle != row.titleOverride))
+                // doesn't want that same text (Init puts the song's own title back). Keyed on the
+                // row key, so a parent song row and its community map rows never skip a rebind.
+                string rowKey = row.Key;
+                if (pi.boundSong != rowKey || (pi.appliedTitle != null && pi.appliedTitle != row.titleOverride))
                 {
                     if (pi.ssi != null) pi.ssi.Init(row.songID, songSelect);
-                    pi.boundSong = row.songID;
+                    pi.boundSong = rowKey;
                     pi.appliedTitle = null;
                 }
 
                 if (row.titleOverride != null && pi.appliedTitle != row.titleOverride)
                     ApplyTitleOverride(pi, row);
+
+                // Community map rows: Init shows the parent song's mapper, who didn't make the map.
+                // (A later normal row has a different key, so its Init puts the mapper back.)
+                if (row.mapPath != null && pi.ssi != null && pi.ssi.mapperLabel != null)
+                    pi.ssi.mapperLabel.text = "";
 
                 // SongSelectItem.Init registers the item into songSelect.mSongButtons. Since the
                 // game now builds an empty list and we own the display, keep our recycled pool
@@ -1250,9 +1310,10 @@ namespace ExScoringMod
         private static void ApplySongIndicator(SongPoolItem pi, ViewRow row)
         {
             if (pi.ssi == null) return;
-            if (SelectedActionId == null && row.songID == ExScoring.selectedSong)
+            string selectedKey = CommunityMapManager.SelectedViewKey(ExScoring.selectedSong);
+            if (SelectedActionId == null && row.Key == selectedKey)
             {
-                ExScoring.UpdateSongSelectionIndicator(pi.ssi, row.songID);
+                ExScoring.UpdateSongSelectionIndicator(pi.ssi, selectedKey);
             }
             else
             {

@@ -41,7 +41,8 @@ namespace ExScoringMod
                     return false;
                 }
 
-                string songId = SongDataHolder.I.songData.songID;
+                // A selected community map has its own runs.
+                string songId = CommunityMapManager.EffectiveSongID(SongDataHolder.I.songData.songID);
                 KataConfig.Difficulty difficulty = highScore.difficulty;
 
                 MelonCoroutines.Start(PopulateTopScoreCoroutine(songId, difficulty, item));

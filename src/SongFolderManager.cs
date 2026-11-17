@@ -19,6 +19,7 @@ namespace ExScoringMod
         public const string FolderSongRequests = "Song Requests";
         public const string FolderSongRequestHistory = "Song Request History";
         public const string FolderLatestMaudica = "Latest Maudica";
+        public const string FolderCommunityMaps = "Community Maps";
 
         /// <summary>Maps songID -> folder name.</summary>
         public static Dictionary<string, string> songFolderMap = new Dictionary<string, string>();
@@ -188,9 +189,13 @@ namespace ExScoringMod
                 }
             }
 
+            // Community map files are matched against the loaded songs, so rescan them here too.
+            CommunityMapManager.Rebuild();
+
             // Favorites (virtual) → Song Requests (virtual) → Song Request History (virtual, hidden while
             // empty — see FolderRowManager.BuildDefaultRootView) → Latest Maudica (virtual, web)
-            // → Audica → Audica DLC → Unsorted → custom subfolders
+            // → Audica → Audica DLC → Community Maps (virtual, when any are installed) → Unsorted
+            // → custom subfolders
             availableFolders.Add(FolderFavorites);
             if (SongRequestIntegration.IsPresent)
             {
@@ -200,6 +205,7 @@ namespace ExScoringMod
             availableFolders.Add(FolderLatestMaudica);
             if (hasAudica) availableFolders.Add(FolderAudica);
             if (hasAudicaDLC) availableFolders.Add(FolderAudicaDLC);
+            if (CommunityMapManager.Count > 0) availableFolders.Add(FolderCommunityMaps);
             if (hasCustom) availableFolders.Add(FolderCustom);
 
             // Pack folders sort by what's shown on the button (folder.json "name" if set, else the

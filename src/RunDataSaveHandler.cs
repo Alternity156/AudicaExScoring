@@ -56,10 +56,11 @@ namespace ExScoringMod
 
                 ScoreSaveData saveData = new ScoreSaveData
                 {
-                    songId = selectedSongData.songID,
-                    songTitle = selectedSongData.title,
+                    // A community map has its own leaderboard ID, and "Title [map name]" as title.
+                    songId = CommunityMapManager.EffectiveSongID(selectedSongData.songID),
+                    songTitle = CommunityMapManager.EffectiveSongTitle(selectedSongData),
                     songArtist = selectedSongData.artist,
-                    songMapper = selectedSongData.author,
+                    songMapper = CommunityMapManager.EffectiveSongMapper(selectedSongData), // empty for a community map
                     difficulty = KataConfig.I.GetDifficulty().ToString(),
                     scoringCalculation = Config.LinearCalculation ? "Linear" : "Audica",
                     platform = GetPlatformString(),

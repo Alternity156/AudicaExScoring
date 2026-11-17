@@ -165,7 +165,7 @@ namespace ExScoringMod
                 var songs = GetFolderSongs(folderName);
                 if (songs.Count > 0)
                 {
-                    string sel = ExScoring.selectedSong;
+                    string sel = CommunityMapManager.SelectedViewKey(ExScoring.selectedSong);
                     if (string.IsNullOrEmpty(sel) || !songs.Contains(sel))
                         VirtualSongList.SelectInView(songs[0]);
                 }
@@ -580,6 +580,12 @@ namespace ExScoringMod
         {
             List<ViewRow> rows = BuildSortedRootView();
 
+            // Community maps aren't songs of their own (no SongData), so the generated sort
+            // folders never contain them: keep their folder at the end of every sorted view.
+            // (The Default view lists it among availableFolders.)
+            if (currentSort != SortMode.Default)
+                AppendCommunityMapsFolder(rows);
+
             // Online play: the lobby's "Suggested Songs" folder, pinned at the top while in a lobby.
             try
             {
@@ -703,6 +709,11 @@ namespace ExScoringMod
                     rows.Add(ViewRow.Header(folder, LatestMaudica.results.Count, LatestMaudicaHeaderSubLabel(),
                              FolderColorFor(folder)));
                 }
+                else if (folder == SongFolderManager.FolderCommunityMaps)
+                {
+                    rows.Add(ViewRow.Header(folder, CommunityMapManager.Count, CommunityMapsHeaderSubLabel(),
+                             FolderColorFor(folder)));
+                }
                 else
                 {
                     int count =
@@ -726,6 +737,8 @@ namespace ExScoringMod
                         AppendSearchRows(rows);
                     else if (folder == SongFolderManager.FolderLatestMaudica)
                         AppendLatestMaudicaRows(rows);
+                    else if (folder == SongFolderManager.FolderCommunityMaps)
+                        AppendCommunityMapRows(rows);
                     else
                         foreach (string id in GetFolderSongs(folder))
                             rows.Add(ViewRow.SongRow(id));
@@ -737,6 +750,35 @@ namespace ExScoringMod
                 $"row0 = {(rows.Count > 0 ? rows[0].kind + " '" + (rows[0].label ?? rows[0].folderName) + "'" : "none")}");
 
             return rows;
+        }
+
+        // ── Community Maps folder ──────────────────────────────────────────────
+
+        /// <summary>Header second line: map count, and how many songs they cover.</summary>
+        private static string CommunityMapsHeaderSubLabel()
+        {
+            int maps = CommunityMapManager.Count;
+            var songs = new HashSet<string>();
+            foreach (var e in CommunityMapManager.Entries) songs.Add(e.parentSongID);
+            return $"{maps} map{(maps != 1 ? "s" : "")} for {songs.Count} song{(songs.Count != 1 ? "s" : "")}";
+        }
+
+        /// <summary>One row per community map: the parent song's item titled "Title [map name]".</summary>
+        private static void AppendCommunityMapRows(List<ViewRow> rows)
+        {
+            foreach (var e in CommunityMapManager.Entries)
+                rows.Add(ViewRow.CommunityMapRow(e.parentSongID, e.path, CommunityMapManager.RowTitle(e)));
+        }
+
+        /// <summary>The Community Maps folder header (and its rows when open), for the sorted views.</summary>
+        private static void AppendCommunityMapsFolder(List<ViewRow> rows)
+        {
+            if (CommunityMapManager.Count == 0) return;
+
+            string folder = SongFolderManager.FolderCommunityMaps;
+            rows.Add(ViewRow.Header(folder, CommunityMapManager.Count, CommunityMapsHeaderSubLabel(), FolderColorFor(folder)));
+            if (SongFolderManager.openFolder == folder)
+                AppendCommunityMapRows(rows);
         }
 
         /// <summary>
@@ -771,7 +813,7 @@ namespace ExScoringMod
                 if (FavoritesStore.IsFavorite(sd.songID)) favCount++;
             }
 
-            int maxFolder = favCount;
+            int maxFolder = Math.Max(favCount, CommunityMapManager.Count);
             foreach (var kv in counts) if (kv.Value > maxFolder) maxFolder = kv.Value;
 
             int headerRows = (SongFolderManager.availableFolders?.Count ?? 0) + 12; // folders + action-row slack
@@ -780,6 +822,10 @@ namespace ExScoringMod
 
         private static List<string> GetFolderSongs(string folder)
         {
+            // Row keys ("cm:<path>"), not songIDs — shown in every sort mode.
+            if (folder == SongFolderManager.FolderCommunityMaps)
+                return CommunityMapManager.ViewKeys();
+
             switch (currentSort)
             {
                 case SortMode.AToZ:
@@ -910,6 +956,10 @@ namespace ExScoringMod
         /// <summary>The folder a song lives in under the active sort (Default folder, letter, or star bucket).</summary>
         public static string CurrentFolderFor(string songID)
         {
+            // A community map row key lives in the Community Maps folder in every sort mode.
+            if (CommunityMapManager.IsViewKey(songID))
+                return CommunityMapManager.FindByViewKey(songID) != null ? SongFolderManager.FolderCommunityMaps : null;
+
             if (currentSort == SortMode.Default)
                 return SongFolderManager.GetFolder(songID);
 

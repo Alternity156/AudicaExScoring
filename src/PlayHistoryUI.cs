@@ -40,7 +40,8 @@ namespace ExScoringMod
 
                 if (SongDataHolder.I == null || SongDataHolder.I.songData == null) return;
 
-                string songId = SongDataHolder.I.songData.songID;
+                // A selected community map has its own runs.
+                string songId = CommunityMapManager.EffectiveSongID(SongDataHolder.I.songData.songID);
                 string difficulty = KataConfig.I.GetDifficulty().ToString();
 
                 MelonCoroutines.Start(PopulateHistoryCoroutine(__instance, songId, difficulty));
