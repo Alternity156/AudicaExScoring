@@ -243,7 +243,7 @@ namespace ExScoringMod
 
             string listId = string.IsNullOrEmpty(compareTotalListId) ? TotalLeaderboardListId : compareTotalListId;
             string difficulty = string.IsNullOrEmpty(compareTotalDifficulty)
-                ? KataConfig.I.GetDifficulty().ToString()
+                ? TotalLeaderboardDifficulty.ToString()
                 : compareTotalDifficulty;
 
             MenuState.SetState(MenuState.State.CompareScoresPage);

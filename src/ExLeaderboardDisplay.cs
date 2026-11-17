@@ -56,6 +56,23 @@ namespace ExScoringMod
             }
         }
 
+        /// <summary>
+        /// The difficulty the main-menu Total leaderboard shows: picked on its difficulty slider and
+        /// saved in Config, independent of the play difficulty (KataConfig). Expert by default, or
+        /// when the saved value doesn't parse.
+        /// </summary>
+        private static KataConfig.Difficulty TotalLeaderboardDifficulty
+        {
+            get
+            {
+                string saved = Config.TotalLeaderboardDifficulty;
+                if (!string.IsNullOrEmpty(saved) && Enum.TryParse(saved, out KataConfig.Difficulty d)
+                    && Enum.IsDefined(typeof(KataConfig.Difficulty), d))
+                    return d;
+                return KataConfig.Difficulty.Expert;
+            }
+        }
+
         // ApiContract.md section 4/4c `view` values the mod uses.
         private const string ViewTopParam = "top";
         private const string ViewFriendsParam = "friends";
@@ -269,11 +286,10 @@ namespace ExScoringMod
         /// Unlike the per-song path above, this never depends on selectedSongData — it always
         /// requests TotalLeaderboardListId's Total leaderboard (ApiContract.md section 4c) via the
         /// existing FetchTotalLeaderboard (ApiClient.cs), regardless of what song (if any) happens to
-        /// be selected. difficulty is still taken from KataConfig.I.GetDifficulty() even though the
-        /// main menu has no difficulty selector of its own — the API requires one per
-        /// (listId, difficulty) pair (difficulties are never combined into one Total), so this reuses
-        /// the same persistent global difficulty the per-song leaderboard already reads rather than
-        /// adding new state. `view` is "top", "friends" or "self" (see GetExLeaderboardView); an
+        /// be selected. difficulty comes from the panel's own difficulty slider
+        /// (TotalLeaderboardDifficulty), not the play difficulty — the API requires one per
+        /// (listId, difficulty) pair (difficulties are never combined into one Total).
+        /// `view` is "top", "friends" or "self" (see GetExLeaderboardView); an
         /// empty "self" response (player not ranked on this list yet) falls back to Top.
         /// </summary>
         private static void FetchAndPopulateTotalLeaderboard(LeaderboardDisplay display, string view)
@@ -309,7 +325,7 @@ namespace ExScoringMod
             // Captured once so the request, its logs and the compare scope all agree even if the
             // selection changes mid-fetch (a change also bumps the version, discarding this one).
             string listId = TotalLeaderboardListId;
-            string difficulty = KataConfig.I.GetDifficulty().ToString();
+            string difficulty = TotalLeaderboardDifficulty.ToString();
             int rowLimit = LeaderboardDisplay.kNumRows;
 
             DebugLog.Log($"[ExScoring] UpdateLeaderboard: EX total fetch #{requestVersion} starting listId={listId} difficulty={difficulty} rowLimit={rowLimit} view={view}");
@@ -617,6 +633,9 @@ namespace ExScoringMod
         {
             if (display == null || !display.totalLeaderboards || !Config.ExType) return;
 
+            // The difficulty slider lives and hides with the list slider.
+            EnsureTotalDifficultySlider(display);
+
             int displayId = display.GetInstanceID();
             if (songListSlider != null && songListSliderOwnerId == displayId)
             {
@@ -699,22 +718,190 @@ namespace ExScoringMod
         {
             public static void Postfix(OptionsMenuSlider __instance)
             {
-                if (songListSlider == null || __instance == null) return;
-                if (__instance.Pointer != songListSlider.Pointer) return;
-                if (__instance.label == null) return;
+                if (__instance == null || __instance.label == null) return;
 
-                string name = GetSelectedSongListDisplayName();
-                if (__instance.label.text != name) __instance.label.text = name;
+                string text;
+                if (songListSlider != null && __instance.Pointer == songListSlider.Pointer)
+                    text = GetSelectedSongListDisplayName();
+                else if (totalDifficultySlider != null && __instance.Pointer == totalDifficultySlider.Pointer)
+                    text = GetTotalDifficultyDisplayName();
+                else
+                    return;
+
+                if (__instance.label.text != text) __instance.label.text = text;
+
+                // Both Total sliders show a single name, so center it (the prefab's label is
+                // left-aligned for "name: value" options).
+                if (__instance.label.alignment != TMPro.TextAlignmentOptions.Center)
+                    __instance.label.alignment = TMPro.TextAlignmentOptions.Center;
             }
         }
 
         private static void HideSongListSlider(LeaderboardDisplay display)
         {
+            HideTotalDifficultySlider(display);
+
             if (display == null || songListSlider == null) return;
             if (songListSliderOwnerId != display.GetInstanceID()) return;
 
             songListSlider.gameObject.SetActive(false);
             DebugLog.Log("[ExScoring][Diag] HideSongListSlider: song-list slider hidden.");
+        }
+
+        // ── Difficulty slider (main-menu Total leaderboard) ───────────────────────────────────
+        // Same game slider as the song-list slider, placed under it. Picks which difficulty's Total
+        // leaderboard is shown (Config.TotalLeaderboardDifficulty, Expert by default) without
+        // touching the play difficulty. Plain label, like the list slider.
+
+        private const string TotalDifficultySliderName = "ExScoring_TotalDifficultySlider";
+
+        // Local transform under the extras button's parent (tuned live in UnityExplorer). Scale is
+        // shared with the list slider.
+        private static readonly Vector3 TotalDifficultySliderLocalPosition = new Vector3(0f, 4.75f, 0f);
+
+        private static readonly KataConfig.Difficulty[] TotalDifficulties =
+        {
+            KataConfig.Difficulty.Easy, KataConfig.Difficulty.Normal, KataConfig.Difficulty.Hard, KataConfig.Difficulty.Expert
+        };
+
+        private static OptionsMenuSlider totalDifficultySlider;
+        private static int totalDifficultySliderOwnerId;
+
+        private static int GetTotalDifficultyIndex()
+        {
+            int index = Array.IndexOf(TotalDifficulties, TotalLeaderboardDifficulty);
+            return index < 0 ? TotalDifficulties.Length - 1 : index;
+        }
+
+        /// <summary>The game's own name for the selected difficulty (falls back to the enum name).</summary>
+        private static string GetTotalDifficultyDisplayName()
+        {
+            KataConfig.Difficulty d = TotalLeaderboardDifficulty;
+            try
+            {
+                string name = KataConfig.GetDifficultyName(d);
+                if (!string.IsNullOrEmpty(name)) return name;
+            }
+            catch { }
+            return d.ToString();
+        }
+
+        /// <summary>
+        /// Slider AdjustAction: steps Easy → Normal → Hard → Expert (wrapping), saves it, and
+        /// refetches the Total leaderboard on the panel's current tab.
+        /// </summary>
+        private static void OnTotalDifficultySliderAdjusted(float amount)
+        {
+            int dir = amount > 0f ? 1 : (amount < 0f ? -1 : 0);
+            if (dir == 0) return;
+
+            int count = TotalDifficulties.Length;
+            int next = ((GetTotalDifficultyIndex() + dir) % count + count) % count;
+            KataConfig.Difficulty difficulty = TotalDifficulties[next];
+
+            Config.UpdateTotalLeaderboardDifficulty(difficulty.ToString());
+            DebugLog.Log($"[ExScoring] TotalDifficultySlider: selected difficulty={difficulty}.");
+
+            LeaderboardDisplay owner = FindTotalDifficultySliderOwner();
+            if (owner != null)
+                RefreshExTotalLeaderboard(owner);
+            else
+                DebugLog.Log("[ExScoring] TotalDifficultySlider: owning LeaderboardDisplay not found, skipping refresh.");
+        }
+
+        private static LeaderboardDisplay FindTotalDifficultySliderOwner()
+        {
+            var displays = UnityEngine.Object.FindObjectsOfType<LeaderboardDisplay>();
+            if (displays == null) return null;
+            for (int i = 0; i < displays.Length; i++)
+            {
+                LeaderboardDisplay d = displays[i];
+                if (d != null && d.GetInstanceID() == totalDifficultySliderOwnerId) return d;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Makes sure the difficulty slider exists on this Total leaderboard panel and is shown.
+        /// Idempotent; same lifecycle as EnsureSongListSlider (which calls it).
+        /// </summary>
+        private static void EnsureTotalDifficultySlider(LeaderboardDisplay display)
+        {
+            if (display == null || !display.totalLeaderboards || !Config.ExType) return;
+
+            int displayId = display.GetInstanceID();
+            if (totalDifficultySlider != null && totalDifficultySliderOwnerId == displayId)
+            {
+                totalDifficultySlider.gameObject.SetActive(true);
+                return;
+            }
+
+            if (display.extrasButton == null)
+            {
+                DebugLog.Log("[ExScoring] EnsureTotalDifficultySlider: extrasButton is NULL, cannot place the slider.");
+                return;
+            }
+
+            Transform extras = display.extrasButton.transform;
+            Transform parent = extras.parent;
+
+            if (parent != null)
+            {
+                Transform stale = parent.Find(TotalDifficultySliderName);
+                if (stale != null) GameObject.Destroy(stale.gameObject);
+            }
+
+            OptionsMenuSlider prefab = FindOptionsSliderPrefab();
+            if (prefab == null)
+            {
+                DebugLog.Log("[ExScoring] EnsureTotalDifficultySlider: OptionsMenu.sliderPrefab not found, cannot create the slider.");
+                return;
+            }
+
+            GameObject go = GameObject.Instantiate(prefab.gameObject, parent);
+            go.name = TotalDifficultySliderName;
+            go.transform.localPosition = TotalDifficultySliderLocalPosition;
+            go.transform.localRotation = extras.localRotation;
+            go.transform.localScale = SongListSliderLocalScale;
+
+            OptionsMenuSlider slider = go.GetComponent<OptionsMenuSlider>();
+            if (slider == null)
+            {
+                DebugLog.Log("[ExScoring] EnsureTotalDifficultySlider: instantiated prefab has no OptionsMenuSlider, destroying it.");
+                GameObject.Destroy(go);
+                return;
+            }
+
+            // Same setup as the list slider: the Update postfix replaces the label with the name.
+            slider.identifier = "";
+            slider.numberFormat = "0";
+            slider.AdjustAction = new Action<float>(OnTotalDifficultySliderAdjusted);
+            slider.GetValueAction = new Func<float>(() => GetTotalDifficultyIndex());
+            slider.GetDisplayAction = new Func<float, string>(_ => GetTotalDifficultyDisplayName());
+            slider.ResetToDefaultAction = null;
+
+            if (slider.resetToDefaultButton != null) slider.resetToDefaultButton.SetActive(false);
+            if (slider.help != null)
+            {
+                slider.help.forceDisable = true;
+                if (slider.help.gameObject != go) slider.help.gameObject.SetActive(false);
+            }
+
+            go.SetActive(true);
+
+            totalDifficultySlider = slider;
+            totalDifficultySliderOwnerId = displayId;
+
+            DebugLog.Log($"[ExScoring] EnsureTotalDifficultySlider: created under '{(parent != null ? parent.name : "<root>")}' at {go.transform.localPosition}, difficulty={TotalLeaderboardDifficulty}.");
+        }
+
+        private static void HideTotalDifficultySlider(LeaderboardDisplay display)
+        {
+            if (display == null || totalDifficultySlider == null) return;
+            if (totalDifficultySliderOwnerId != display.GetInstanceID()) return;
+
+            totalDifficultySlider.gameObject.SetActive(false);
+            DebugLog.Log("[ExScoring][Diag] HideTotalDifficultySlider: difficulty slider hidden.");
         }
 
         /// <summary>

@@ -124,6 +124,11 @@ namespace ExScoringMod
         // whenever this is empty or names a list the server no longer has.
         public static string TotalLeaderboardListId;
 
+        // Bookkeeping only, same pattern as TotalLeaderboardListId - the difficulty last picked on
+        // the main-menu Total leaderboard's difficulty slider (KataConfig.Difficulty name). Separate
+        // from the play difficulty. Defaults to Expert.
+        public static string TotalLeaderboardDifficulty;
+
         public static string onlinePlayHeader = "[Header]Online Play";
         public static bool EnableOnlinePlay;
         public static bool ShowOtherPlayers;
@@ -261,6 +266,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(EnableScoreUpload), false, "Automatically uploads runs to the online leaderboard after each song");
             MelonPrefs.RegisterBool(Category, nameof(ScoreUploadUserConfigured), false, "");
             MelonPrefs.RegisterString(Category, nameof(TotalLeaderboardListId), "", "");
+            MelonPrefs.RegisterString(Category, nameof(TotalLeaderboardDifficulty), "Expert", "");
 
             MelonPrefs.RegisterString(Category, nameof(onlinePlayHeader), "", "[Header]Online Play");
             MelonPrefs.RegisterBool(Category, nameof(EnableOnlinePlay), false, "Allows connecting to online play lobbies. Nothing connects while this is off");
@@ -375,6 +381,7 @@ namespace ExScoringMod
             EnableScoreUpload = MelonPrefs.GetBool(Category, nameof(EnableScoreUpload));
             ScoreUploadUserConfigured = MelonPrefs.GetBool(Category, nameof(ScoreUploadUserConfigured));
             TotalLeaderboardListId = MelonPrefs.GetString(Category, nameof(TotalLeaderboardListId));
+            TotalLeaderboardDifficulty = MelonPrefs.GetString(Category, nameof(TotalLeaderboardDifficulty));
 
             EnableOnlinePlay = MelonPrefs.GetBool(Category, nameof(EnableOnlinePlay));
             ShowOtherPlayers = MelonPrefs.GetBool(Category, nameof(ShowOtherPlayers));
@@ -813,6 +820,14 @@ namespace ExScoringMod
             value = value ?? "";
             MelonPrefs.SetString(Category, nameof(TotalLeaderboardListId), value);
             TotalLeaderboardListId = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateTotalLeaderboardDifficulty(string value)
+        {
+            value = string.IsNullOrEmpty(value) ? "Expert" : value;
+            MelonPrefs.SetString(Category, nameof(TotalLeaderboardDifficulty), value);
+            TotalLeaderboardDifficulty = value;
             MelonPrefs.SaveConfig();
         }
 
