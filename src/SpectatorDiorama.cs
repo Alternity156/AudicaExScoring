@@ -314,8 +314,15 @@ namespace ExScoringMod
                 GameObject targets = GameObject.Find(TargetsRootName);
                 if (targets != null)
                 {
-                    if (targets.transform.parent != avatar) targets.transform.SetParent(avatar, false);
-                    triedTargets = targets.transform;
+                    Transform t = targets.transform;
+                    if (t.parent != avatar) t.SetParent(avatar, false);
+                    // On the avatar's pose and scale only: a scale left on the root itself (from an
+                    // earlier diorama) would shrink the targets twice and pull the dome towards the
+                    // player.
+                    t.localPosition = Vector3.zero;
+                    t.localRotation = Quaternion.identity;
+                    t.localScale = Vector3.one;
+                    triedTargets = t;
                 }
             }
 
@@ -497,7 +504,16 @@ namespace ExScoringMod
             RestoreBeamLines();
             if (triedTargets != null && triedTargets.parent != null)
             {
-                triedTargets.SetParent(null, true);
+                // worldPositionStays false: with true, the diorama's scale would be baked into the
+                // root's own localScale, and the next player's targets would be drawn at scale²
+                // (smaller, and with the dome off the player). SpectatorTargets puts the root back on
+                // the watched player's pose next frame.
+                Vector3 pos = triedTargets.position;
+                Quaternion rot = triedTargets.rotation;
+                triedTargets.SetParent(null, false);
+                triedTargets.position = pos;
+                triedTargets.rotation = rot;
+                triedTargets.localScale = Vector3.one;
                 UnityEngine.Object.DontDestroyOnLoad(triedTargets.gameObject); // as SpectatorTargets made it
             }
             if (triedAvatar != null) triedAvatar.localScale = avatarScaleBefore;

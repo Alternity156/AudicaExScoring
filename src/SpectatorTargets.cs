@@ -315,6 +315,10 @@ namespace ExScoringMod
                 EnsureRoot();
                 root.transform.position = space.position;
                 root.transform.rotation = space.rotation;
+                // The root's own scale is always 1: under the avatar (diorama) it takes the avatar's
+                // scale, and on its own it is full size. A stray scale here shrank the targets and
+                // moved them off the player after a switch.
+                if (root.transform.localScale != Vector3.one) root.transform.localScale = Vector3.one;
 
                 ReadSettings(out float targetSpeed, out float meleeSpeedSetting, out float heightInches);
                 if (song != chartSong || SpectatorSong.Difficulty != chartDifficulty || cues.Count != chartCueCount
