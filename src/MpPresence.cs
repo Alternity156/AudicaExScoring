@@ -1380,6 +1380,7 @@ namespace ExScoringMod
         private static JToken PullJson(Gun gun)
         {
             if (gun == null) return JValue.CreateNull();
+            if (GunOutOfHand(gun)) return 0.0; // thrown: the game skips the pull too
             try
             {
                 float pull = gun.GetTriggerPullAmount();
@@ -1469,9 +1470,28 @@ namespace ExScoringMod
             return gun.transform.Find(GunPosePath) != null ? "mesh" : "thrown";
         }
 
+        /// <summary>
+        /// The gun is out of the hand (thrown, or flying back): Gun.IsUsingPhysics. The game still
+        /// registers trigger presses then (Gun.UpdateTrigger returns true) but the gun doesn't fire,
+        /// so nothing about the trigger is sent or counted while this is true.
+        /// </summary>
+        private static bool GunOutOfHand(Gun gun)
+        {
+            if (gun == null) return false;
+            try
+            {
+                return gun.IsUsingPhysics();
+            }
+            catch
+            {
+                return false;
+            }
+        }
+
         private static bool TriggerDown(Gun gun)
         {
             if (gun == null) return false;
+            if (GunOutOfHand(gun)) return false; // no gun in the hand to press
             try
             {
                 return gun.GetTriggerPullAmount() >= gun.GetTriggerThreshold();
@@ -2318,6 +2338,13 @@ namespace ExScoringMod
 
                 long rise = count - state.Baseline;
                 state.Baseline = count;
+                // Older clients count presses on a thrown gun too: the baseline moves on (so later
+                // shots stay in step) but nothing is shown while that gun is out of their hand.
+                if (rise > 0 && fire && RemoteGunThrown(remote, hand))
+                {
+                    Log($"{remote.UserId} {HandName(hand)} shot count +{rise} while the gun is thrown, ignored");
+                    return;
+                }
                 if (rise > 0) FireShots(remote, hand, (int)Math.Min(rise, MaxShotsPerJump), rise, fire, sample.T);
                 return;
             }
@@ -2325,7 +2352,7 @@ namespace ExScoringMod
             // No count: one shot per false -> true trigger change.
             state.HasBaseline = false;
             bool trigger = sample.Trigger(hand);
-            if (!baselineOnly && state.HasLastTrigger && !state.LastTrigger && trigger) FireShots(remote, hand, 1, 1, fire, sample.T);
+            if (!baselineOnly && state.HasLastTrigger && !state.LastTrigger && trigger && !(fire && RemoteGunThrown(remote, hand))) FireShots(remote, hand, 1, 1, fire, sample.T);
             state.LastTrigger = trigger;
             state.HasLastTrigger = true;
         }
@@ -6402,6 +6429,9 @@ namespace ExScoringMod
             private static void Postfix(Gun __instance, bool __result)
             {
                 if (!__result) return;
+                // A press while the gun is thrown registers but doesn't fire: no count, no
+                // headshot check, no queued shot (rebounds, gunHit).
+                if (GunOutOfHand(__instance)) return;
                 try
                 {
                     CountLocalShot(__instance);
