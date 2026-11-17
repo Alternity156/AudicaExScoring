@@ -642,6 +642,101 @@ namespace ExScoringMod
             scrollDirtiedByInput = false;
         }
 
+        // ── Scroll anchor (keep what's on screen in place across a rebuild) ────
+
+        /// <summary>
+        /// A snapshot of the rows currently on screen, taken before a rebuild, so the same rows can
+        /// be put back at the same screen position afterwards. Holds each visible row's identity
+        /// key and its (wrap-cycle-adjusted) canonical index at capture time.
+        /// </summary>
+        internal sealed class ScrollAnchor
+        {
+            public float scroll;      // canonical scroll at capture
+            public int viewCount;     // view.Count at capture (to resolve the wrap cycle)
+            public readonly List<string> keys = new List<string>();
+            public readonly List<int> indices = new List<int>(); // canonical, may be outside [0, viewCount) when wrapping
+        }
+
+        /// <summary>Stable identity of a row across rebuilds, or null if the row has none.</summary>
+        private static string RowKey(ViewRow row)
+        {
+            switch (row.kind)
+            {
+                case ViewRowKind.FolderHeader: return "H:" + row.folderName;
+                case ViewRowKind.Song: return string.IsNullOrEmpty(row.songID) ? null : "S:" + row.songID;
+                case ViewRowKind.DownloadableSong: return string.IsNullOrEmpty(row.songID) ? null : "D:" + row.songID;
+                case ViewRowKind.Action:
+                    if (!string.IsNullOrEmpty(row.actionId)) return "A:" + row.actionId;
+                    return string.IsNullOrEmpty(row.label) ? null : "L:" + row.label;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// Capture the rows currently on screen (top to bottom). Returns null when the list isn't
+        /// shown or is empty. Pair with <see cref="RestoreScrollAnchor"/> after SetView.
+        /// </summary>
+        public static ScrollAnchor CaptureScrollAnchor()
+        {
+            if (!active || scroller == null || view.Count == 0) return null;
+
+            var anchor = new ScrollAnchor { scroll = GetScroll(), viewCount = view.Count };
+            int n = view.Count;
+            int top = Mathf.FloorToInt(anchor.scroll);
+            int rows = Mathf.CeilToInt(scroller.displayCount) + 1;
+
+            for (int i = 0; i < rows; i++)
+            {
+                int idx = top + i;
+                if (wrapBuffer <= 0 && (idx < 0 || idx >= n)) continue; // no ghost copies when not wrapping
+                int m = ((idx % n) + n) % n;
+                string key = RowKey(view[m]);
+                if (key == null) continue;
+                anchor.keys.Add(key);
+                anchor.indices.Add(idx);
+            }
+            return anchor.keys.Count > 0 ? anchor : null;
+        }
+
+        /// <summary>
+        /// After a rebuild, find the first captured row that still exists and scroll so it sits at
+        /// the same screen position as before. Rows added or removed above the view (e.g. a new
+        /// lobby suggestion in the pinned Suggested Songs folder) then no longer shift what the
+        /// player is looking at. If none of the captured rows exist anymore, the scroll is left as
+        /// SetView put it (same canonical index).
+        /// </summary>
+        public static void RestoreScrollAnchor(ScrollAnchor anchor)
+        {
+            if (anchor == null || !active || scroller == null || view.Count == 0) return;
+
+            int newN = view.Count;
+            for (int k = 0; k < anchor.keys.Count; k++)
+            {
+                int oldIdx = anchor.indices[k];
+                int oldMod = ((oldIdx % anchor.viewCount) + anchor.viewCount) % anchor.viewCount;
+
+                // Nearest match to where it used to be (a song can be listed more than once).
+                int best = -1;
+                int bestDist = int.MaxValue;
+                for (int i = 0; i < newN; i++)
+                {
+                    if (RowKey(view[i]) != anchor.keys[k]) continue;
+                    int d = Math.Abs(i - oldMod);
+                    if (d < bestDist) { bestDist = d; best = i; }
+                }
+                if (best < 0) continue;
+
+                // Keep the same wrap cycle the row was on screen in (0 when not wrapping).
+                int cycle = (wrapBuffer > 0) ? Mathf.FloorToInt((float)oldIdx / anchor.viewCount) : 0;
+                int newIdx = cycle * newN + best;
+
+                float newScroll = anchor.scroll + (newIdx - oldIdx);
+                if (Mathf.Abs(newScroll - GetScroll()) > 0.001f)
+                    SetScroll(newScroll);
+                return;
+            }
+        }
+
         /// <summary>
         /// Clears every pooled row's remembered binding (SongPoolItem.boundSong), so the next time
         /// each slot binds — even to the exact same song as before — BindRow sees a mismatch and

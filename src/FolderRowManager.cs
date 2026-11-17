@@ -184,6 +184,21 @@ namespace ExScoringMod
                 VirtualSongList.RevealFolderIfNeeded(SongFolderManager.openFolder);
         }
 
+        /// <summary>
+        /// Rebuild the view without moving it: no reveal of the open folder, and the rows that were
+        /// on screen stay at the same screen position even if rows were added or removed above them.
+        /// Used for background updates the player didn't trigger (lobby suggestions changing, a
+        /// suggested song's lookup or download finishing), so browsing isn't yanked around.
+        /// </summary>
+        public static void RefreshListInPlace()
+        {
+            if (!VirtualSongList.IsActive) return; // list not currently shown
+            WireHandler();
+            var anchor = VirtualSongList.CaptureScrollAnchor();
+            Apply();
+            VirtualSongList.RestoreScrollAnchor(anchor);
+        }
+
         public static void RefreshFavorites() => RefreshList();
 
         // ── Playlist navigation (drill-in / back) ─────────────────────────────

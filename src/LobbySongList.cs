@@ -14,7 +14,7 @@ namespace ExScoringMod
     ///  - Not installed but found on Maudica: a downloadable row, like Song Requests / search.
     ///  - Not found: a red row that can't be shot, "(Unavailable to download)", with whatever info
     ///    the suggestion carries.
-    /// Rebuilt (FolderRowManager.RefreshList) when the suggestions change and when a Maudica lookup
+    /// Rebuilt (FolderRowManager.RefreshListInPlace, which keeps the scroll where it is) when the suggestions change and when a Maudica lookup
     /// or download finishes.
     ///
     /// The lobby's selected song gets its own row too, "Title (Selected by host)", while it's
@@ -234,7 +234,8 @@ namespace ExScoringMod
             if (ExScoring.menuState != MenuState.State.SongPage) return;
             try
             {
-                FolderRowManager.RefreshList();
+                // In place: a suggestion added/withdrawn elsewhere shouldn't scroll the player's list.
+                FolderRowManager.RefreshListInPlace();
             }
             catch (Exception ex)
             {
