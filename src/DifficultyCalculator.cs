@@ -84,18 +84,22 @@ namespace ExScoringMod
         private void EvaluateDifficulties(SongList.SongData songData)
         {
             var expertCues = SongCues.GetCues(songData, KataConfig.Difficulty.Expert);
+            if (expertCues != null) MapFlags.Store(songData.songID, KataConfig.Difficulty.Expert, expertCues); // song-row warning icons, reusing these parsed cues
             if (expertCues != null && expertCues.Length > 0)
                 this.expert = new CalculatedDifficulty(expertCues, songData);
 
             var advancedCues = SongCues.GetCues(songData, KataConfig.Difficulty.Hard);
+            if (advancedCues != null) MapFlags.Store(songData.songID, KataConfig.Difficulty.Hard, advancedCues); // song-row warning icons, reusing these parsed cues
             if (advancedCues != null && advancedCues.Length > 0)
                 this.advanced = new CalculatedDifficulty(advancedCues, songData);
 
             var standardCues = SongCues.GetCues(songData, KataConfig.Difficulty.Normal);
+            if (standardCues != null) MapFlags.Store(songData.songID, KataConfig.Difficulty.Normal, standardCues); // song-row warning icons, reusing these parsed cues
             if (standardCues != null && standardCues.Length > 0)
                 this.standard = new CalculatedDifficulty(standardCues, songData);
 
             var beginnerCues = SongCues.GetCues(songData, KataConfig.Difficulty.Easy);
+            if (beginnerCues != null) MapFlags.Store(songData.songID, KataConfig.Difficulty.Easy, beginnerCues); // song-row warning icons, reusing these parsed cues
             if (beginnerCues != null && beginnerCues.Length > 0)
                 this.beginner = new CalculatedDifficulty(beginnerCues, songData);
         }
