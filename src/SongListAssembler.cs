@@ -36,6 +36,14 @@ namespace ExScoringMod
                     // a separate, unrelated bug fix (see its own doc comment) — not part of
                     // the disk-cache system — so it still needs to run here regardless.
                     SongListAssembler.EnsureOfficialSongIDsRecognized();
+
+                    // The vanilla coroutine has no slot for the community map check, so run it
+                    // in the background once the list is loaded (new maps then rebuild the folders).
+                    if (SongList.sFirstTime && Config.AutoDownloadCommunityMaps)
+                    {
+                        SongList.OnSongListLoaded.On(new Action(() =>
+                            CommunityMapSync.StartBackgroundSync("song list loaded")));
+                    }
                     return true;
                 }
 
@@ -121,6 +129,32 @@ namespace ExScoringMod
                 }
                 if (!moved) break;
                 yield return precomputePhase.Current;
+            }
+
+            // ── Phase E: community maps (mod only) ──
+            // Downloads the maps for installed songs before the list is reported loaded, so they
+            // are on disk when the folders are built. Only on a full assemble (boot, song list
+            // reload), not on precompute-only passes. Waits at most CommunityMapSync.BootBudgetSeconds,
+            // then lets the rest finish in the background.
+            if (doFullAssemble && Config.AutoDownloadCommunityMaps)
+            {
+                IEnumerator mapPhase = CommunityMapSync.RunLoadingPhase(text =>
+                {
+                    CurrentStatusText = text;
+                    SongList.I.LoadingTag = text;
+                });
+                while (true)
+                {
+                    bool moved;
+                    try { moved = mapPhase.MoveNext(); }
+                    catch (Exception ex)
+                    {
+                        DebugLog.Log($"[SongListAssembler] Community map phase threw, skipping it: {ex}");
+                        break;
+                    }
+                    if (!moved) break;
+                    yield return mapPhase.Current;
+                }
             }
 
             // ── Phase D: finish (replaces cases 0xd-0xf) ──

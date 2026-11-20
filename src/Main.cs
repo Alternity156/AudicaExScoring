@@ -541,6 +541,7 @@ namespace ExScoringMod
             ScrollIndicator.Tick();
             EnforceLaunchPanelBlank();
             SyncDisplayingDifficulty();
+            CommunityMapUploadButton.Tick(); // after the difficulty buttons are hidden for a map
             MarathonSetup.Enforce();
         }
 

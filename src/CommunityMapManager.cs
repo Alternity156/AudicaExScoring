@@ -266,6 +266,21 @@ namespace ExScoringMod
             return "";
         }
 
+        /// <summary>
+        /// The selected map, when a run of <paramref name="songData"/> is being submitted under that
+        /// map's leaderboard ID (<paramref name="submittedSongId"/> = EffectiveSongID). Null for a
+        /// normal song, or when the map's ID couldn't be computed and the run went under the songID.
+        /// </summary>
+        public static Entry SubmittedMapFor(SongList.SongData songData, string submittedSongId)
+        {
+            if (songData == null || string.IsNullOrEmpty(submittedSongId)) return null;
+            Entry e = Selected;
+            if (e == null || e.parentSongID != songData.songID) return null;
+            if (submittedSongId == songData.songID) return null; // ID fell back to the parent's
+            if (!submittedSongId.StartsWith(e.parentSongID + "_", StringComparison.Ordinal)) return null;
+            return e;
+        }
+
         /// <summary>Leaderboard ID for a map file, or null if it can't be computed yet.</summary>
         public static string LeaderboardIdForPath(string path)
         {

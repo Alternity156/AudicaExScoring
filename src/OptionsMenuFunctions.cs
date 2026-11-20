@@ -85,6 +85,7 @@ namespace ExScoringMod
         public static float latestMaudicaPageSize;
         public static bool enableRunDataSaving;
         public static bool songCacheEnabled;
+        public static bool autoDownloadCommunityMaps;
         public static bool showStatsOnFail;
         public static bool saveFailedRunData;
         public static float exScorePopupSize;
@@ -369,6 +370,18 @@ namespace ExScoringMod
         {
             songCacheEnabled = value;
             Config.UpdateSongCacheEnabled(value);
+        }
+
+        public static void GetAutoDownloadCommunityMaps()
+        {
+            autoDownloadCommunityMaps = Config.AutoDownloadCommunityMaps;
+        }
+
+        public static void SetAutoDownloadCommunityMaps(bool value)
+        {
+            autoDownloadCommunityMaps = value;
+            Config.UpdateAutoDownloadCommunityMaps(value);
+            if (value) CommunityMapSync.StartBackgroundSync("setting turned on");
         }
 
         public static void GetSaveFailedRunData()

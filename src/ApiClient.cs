@@ -60,6 +60,16 @@ namespace ExScoringMod
                     exCues = slimCues
                 };
 
+                // Community map: tell the server which parent / map this leaderboard ID belongs to,
+                // so the website can list it under the Community difficulty (ApiContract v2.58).
+                CommunityMapManager.Entry mapEntry = CommunityMapManager.SubmittedMapFor(selectedSongData, submitData.songId);
+                if (mapEntry != null && submitData.difficulty == "Expert")
+                {
+                    submitData.isCommunityMap = true;
+                    submitData.parentSongId = mapEntry.parentSongID;
+                    submitData.communityMapName = mapEntry.name;
+                }
+
                 string json = JsonConvert.SerializeObject(submitData, runDataSerializerSettings);
                 byte[] gzipBody = GzipCompress(json);
 

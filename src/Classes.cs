@@ -89,6 +89,12 @@ namespace ExScoringMod
             public int pauseCount;
             public string platform;
             public ExCueSaveData[] exCues;
+
+            // Community map runs only (ApiContract v2.58, Section 3). Left null for normal songs,
+            // so the serializer (NullValueHandling.Ignore) leaves them out of the body.
+            public bool? isCommunityMap;
+            public string parentSongId;     // the parent's full songID
+            public string communityMapName; // file name minus "<parentOriginalSongID>_" and extension
         }
 
         /// <summary>

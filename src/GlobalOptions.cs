@@ -820,6 +820,7 @@ namespace ExScoringMod
                 OptionsMenuFunctions.GetMaxRunDataSizeMB();
                 OptionsMenuFunctions.GetSaveFailedRunData();
                 OptionsMenuFunctions.GetSongCacheEnabled();
+                OptionsMenuFunctions.GetAutoDownloadCommunityMaps();
                 OptionsMenuFunctions.GetLatestMaudicaPageSize();
 
                 var dataHeader = OptionsMenuClone.CreateHeader(0, "Run Data");
@@ -859,6 +860,18 @@ namespace ExScoringMod
                     () => SongCache.ClearAndRebuild(),
                     "Wipes the on-disk song cache. Every song will be freshly scanned on the next song list load");
                 OptionsMenuClone.AddRow(songCacheToggle, deleteCacheButton);
+
+                var communityMapsHeader = OptionsMenuClone.CreateHeader(0, "Community Maps");
+                OptionsMenuClone.AddRow(communityMapsHeader);
+
+                var autoDownloadMapsToggle = OptionsMenuClone.CreateToggle(0, "Auto Download",
+                    () => OptionsMenuFunctions.autoDownloadCommunityMaps,
+                    v => { OptionsMenuFunctions.autoDownloadCommunityMaps = v; OptionsMenuFunctions.SetAutoDownloadCommunityMaps(v); },
+                    "Downloads the community maps uploaded to AudicaEX for your installed songs while the song list loads");
+                var downloadMapsNowButton = OptionsMenuClone.CreateButton(1, "Check Now",
+                    () => CommunityMapSync.StartBackgroundSync("Check Now", true),
+                    "Looks for community maps you don't have yet and downloads them now");
+                OptionsMenuClone.AddRow(autoDownloadMapsToggle, downloadMapsNowButton);
 
                 var latestMaudicaHeader = OptionsMenuClone.CreateHeader(0, "Latest Maudica");
                 OptionsMenuClone.AddRow(latestMaudicaHeader);

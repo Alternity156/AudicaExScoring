@@ -74,6 +74,10 @@ namespace ExScoringMod
             SongSearch.Search(); // update search results with any new songs
             yield return null;
 
+            // Cached community maps whose song was just installed (downloads in the background,
+            // then rebuilds the folders itself).
+            CommunityMapSync.CheckPending("song list updated");
+
             KataConfig.I.CreateDebugText("Songs Loaded", new Vector3(0f, -1f, 5f), 5f, null, false, 0.2f);
         }
     }
