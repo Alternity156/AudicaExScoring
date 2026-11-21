@@ -26,8 +26,11 @@ namespace ExScoringMod
         // ── Tuning: icon placement on the song row (SongSelectItem local space; tune in UnityExplorer
         //    under <row>/MapFlagIcons) ──
         private static readonly Vector3 IconsLocalPosition = new Vector3(1.6f, 0f, -0.06f);
-        private const float IconSize = 0.32f;      // edge length of each square icon
-        private const float IconSpacing = 0.36f;   // centre-to-centre when both icons show (stacked vertically)
+        private const float IconSize = 0.32f;      // edge length of each square icon's mesh (before IconScale)
+        // Each icon keeps its own fixed slot, side by side, whether or not the other one shows.
+        private static readonly Vector3 MineIconLocalPosition = new Vector3(9f, 0f, 0f);
+        private static readonly Vector3 OffGridIconLocalPosition = new Vector3(11f, 0f, 0f);
+        private static readonly Vector3 IconScale = new Vector3(6f, 6f, 6f);
 
         // ── Tuning: colours ──
         private static readonly Color MineColor = Color.white;
@@ -238,20 +241,19 @@ namespace ExScoringMod
             Transform mine = container.transform.Find("Mine");
             Transform offGrid = container.transform.Find("OffGrid");
 
-            float top = (r.hasMines && r.offGrid) ? IconSpacing * 0.5f : 0f;
-            float bottom = (r.hasMines && r.offGrid) ? -IconSpacing * 0.5f : 0f;
-
             mine.gameObject.SetActive(r.hasMines);
             if (r.hasMines)
             {
-                mine.localPosition = new Vector3(0f, top, 0f);
+                mine.localPosition = MineIconLocalPosition;
+                mine.localScale = IconScale;
                 SetQuadColor(mine, r.minesCanHit ? MineHitColor : MineColor);
             }
 
             offGrid.gameObject.SetActive(r.offGrid);
             if (r.offGrid)
             {
-                offGrid.localPosition = new Vector3(0f, r.hasMines ? bottom : 0f, 0f);
+                offGrid.localPosition = OffGridIconLocalPosition;
+                offGrid.localScale = IconScale;
                 SetQuadColor(offGrid, OffGridColor(r.severity));
             }
         }
