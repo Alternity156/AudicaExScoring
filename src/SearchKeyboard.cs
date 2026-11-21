@@ -119,13 +119,13 @@ namespace ExScoringMod
 
         /// <summary>
         /// Closes the keyboard no matter which context opened it (song search, playlist creation,
-        /// lobby code entry) and clears every input-routing flag, so nothing is left stuck open.
+        /// lobby code entry, folder names in Edit Custom Folders) and clears every input-routing flag, so nothing is left stuck open.
         /// Called when a song launches. The typed search query is kept for the next search.
         /// </summary>
         public static void ForceClose()
         {
             bool wasOpen = IsVisible || ExScoring.shouldShowKeyboard || SongSearch.searchInProgress
-                           || PlaylistNav.Creating || OnlinePlayMenu.EnteringCode;
+                           || PlaylistNav.Creating || OnlinePlayMenu.EnteringCode || FolderEditMode.Typing;
             if (!wasOpen) return;
 
             try { if (PlaylistNav.Creating) PlaylistNav.CancelCreate(); }
@@ -133,6 +133,9 @@ namespace ExScoringMod
 
             try { if (OnlinePlayMenu.EnteringCode) OnlinePlayMenu.CancelCodeEntry(); }
             catch (System.Exception e) { DebugLog.Log("[SearchKeyboard] CancelCodeEntry failed: " + e); }
+
+            try { if (FolderEditMode.Typing) FolderEditMode.CancelTyping(); }
+            catch (System.Exception e) { DebugLog.Log("[SearchKeyboard] FolderEditMode.CancelTyping failed: " + e); }
 
             Hide();
             DebugLog.Log("[SearchKeyboard] Force-closed");

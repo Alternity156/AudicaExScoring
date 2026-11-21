@@ -158,6 +158,11 @@ namespace ExScoringMod
             // so the game picks them up naturally on this launch
             MoveDownloadedSongs();
 
+            // Edit Custom Folders changes not applied yet (the game closed without its quit pass,
+            // or a file was in use then). Before the song folders are registered and scanned, so
+            // nothing is open and every song is found where it now lives.
+            FolderOpsJournal.ApplyPending(mainSongDirectory, downloadsDirectory, songBackupDirectory, FolderOpsJournal.WhenLaunch);
+
             // Fallback: also register Downloads as a song source directory
             // in case any files couldn't be moved (e.g. locked files)
             RegisterDownloadsDirectory();
@@ -334,6 +339,33 @@ namespace ExScoringMod
         {
             MpSession.Shutdown();
             CleanDeletedSongs();
+
+            // Edit Custom Folders: best effort. A file the game still has open stops it, and
+            // whatever is left is applied on the next launch.
+            FolderOpsJournal.ApplyPending(mainSongDirectory, downloadsDirectory, songBackupDirectory, FolderOpsJournal.WhenQuit);
+        }
+
+        /// <summary>
+        /// Writes deletedSongPaths to deletedDownloadsListPath right away (DeleteButton.cs), so a
+        /// crash doesn't lose the files still to delete: CleanMarkedForDeletion picks them up on
+        /// the next launch. Removes the list when nothing is left.
+        /// </summary>
+        internal static void SavePendingDeletes()
+        {
+            try
+            {
+                List<string> pending = deletedSongPaths.Where(p => !string.IsNullOrEmpty(p) && File.Exists(p)).ToList();
+                if (pending.Count == 0)
+                {
+                    if (File.Exists(deletedDownloadsListPath)) File.Delete(deletedDownloadsListPath);
+                    return;
+                }
+                File.WriteAllText(deletedDownloadsListPath, MelonLoader.TinyJSON.JSON.Dump(pending));
+            }
+            catch (Exception e)
+            {
+                DebugLog.Log($"[WARNING] Could not write deletion list: {e.Message}");
+            }
         }
 
         /// <summary>
@@ -358,7 +390,13 @@ namespace ExScoringMod
                 }
             }
 
-            if (stillPending.Count == 0) return;
+            if (stillPending.Count == 0)
+            {
+                // The list is now also written during the session (SavePendingDeletes).
+                try { if (File.Exists(deletedDownloadsListPath)) File.Delete(deletedDownloadsListPath); }
+                catch { }
+                return;
+            }
             try
             {
                 string text = MelonLoader.TinyJSON.JSON.Dump(stillPending);
@@ -525,6 +563,7 @@ namespace ExScoringMod
             LobbySongList.Tick();
             OnlinePlayButton.Tick();
             FolderRowManager.TickSortLabels();
+            FolderEditMode.Update(); // keeps the launch page hidden behind the Edit Custom Folders panel
 
             // Safety net: never let the search keyboard stay up during a song, even if it was
             // reopened mid-launch or the launch skipped MenuState.SetState.

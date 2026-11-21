@@ -23,7 +23,7 @@ namespace ExScoringMod
         private static bool handlerWired = false;
 
         // ── Navigation level (playlists) ──────────────────────────────────────
-        internal enum NavLevel { Root, PlaylistList, PlaylistContents, AddPicker, GlobalOptions }
+        internal enum NavLevel { Root, PlaylistList, PlaylistContents, AddPicker, GlobalOptions, FolderEdit, FolderEditPicker }
         private static NavLevel level = NavLevel.Root;
         private static string currentPlaylist = null;
         private static readonly Stack<float> scrollStack = new Stack<float>();
@@ -119,7 +119,10 @@ namespace ExScoringMod
         /// </summary>
         public static void ToggleFolder(string folderName, int shotHeaderIndex)
         {
-            if (level != NavLevel.Root) return; // folder headers only exist at Level 0
+            // Folder headers only exist at Level 0, and in Edit Custom Folders (FolderEditMode).
+            bool editing = level == NavLevel.FolderEdit;
+            if (level != NavLevel.Root && !editing) return;
+            if (editing) FolderEditMode.ClearTransient(); // a pending confirm / name entry belongs to the old view
             MarathonSetup.CancelIfActive();
             srClearArmed = false;   // any folder toggle cancels a pending Clear List confirm
             histClearArmed = false; // ...and a pending Clear History confirm
@@ -140,7 +143,7 @@ namespace ExScoringMod
             SongFolderManager.openFolder = opening ? folderName : null;
 
             // Latest Maudica fetches on open (first open, or fresh after a song was played).
-            if (opening && folderName == SongFolderManager.FolderLatestMaudica)
+            if (!editing && opening && folderName == SongFolderManager.FolderLatestMaudica)
                 LatestMaudica.OnFolderOpened();
 
             DebugLog.Log($"[FolderRowManager] Toggle '{folderName}' -> open={SongFolderManager.openFolder ?? "none"}");
@@ -162,7 +165,7 @@ namespace ExScoringMod
 
                 // If the current selection isn't in this folder (or nothing is selected),
                 // select the folder's first song.
-                var songs = GetFolderSongs(folderName);
+                var songs = editing ? FolderEditMode.SongsIn(folderName) : GetFolderSongs(folderName);
                 if (songs.Count > 0)
                 {
                     string sel = CommunityMapManager.SelectedViewKey(ExScoring.selectedSong);
@@ -225,6 +228,79 @@ namespace ExScoringMod
             VirtualSongList.SetView(BuildView(), 0f, level == NavLevel.Root);
         }
 
+        // ── Edit Custom Folders (FolderEditMode builds the rows) ───────────────
+
+        private static string folderEditReturnFolder;
+
+        public static bool InFolderEdit => level == NavLevel.FolderEdit || level == NavLevel.FolderEditPicker;
+        public static bool InFolderEditPicker => level == NavLevel.FolderEditPicker;
+
+        /// <summary>
+        /// From the Options list: shows the folder editor. Keeps the scroll saved when Options was
+        /// entered, so ExitFolderEdit lands back where the song list was. Its own open folder is
+        /// separate from the song list's (restored on exit).
+        /// </summary>
+        public static void EnterFolderEdit()
+        {
+            MarathonSetup.CancelIfActive();
+            PlaylistNav.ClearTransient();
+            if (level == NavLevel.GlobalOptions) GlobalOptions.HidePanel(); // no-op if FolderEditMode took its panel over
+            if (level == NavLevel.Root)
+            {
+                scrollStack.Push(VirtualSongList.GetScroll());
+                scrollWrapStack.Push(Config.WrapSongList);
+            }
+
+            folderEditReturnFolder = SongFolderManager.openFolder;
+            SongFolderManager.openFolder = null;
+            level = NavLevel.FolderEdit;
+            SetSongListControlsVisible(false);
+            VirtualSongList.SelectedActionId = null;
+            VirtualSongList.SetView(BuildView(), 0f, false);
+        }
+
+        /// <summary>Switches between the folder list and the Move-to picker, at the given scroll (null = keep).</summary>
+        public static void ShowFolderEditView(bool picker, float? scroll)
+        {
+            if (!InFolderEdit) return;
+            level = picker ? NavLevel.FolderEditPicker : NavLevel.FolderEdit;
+            VirtualSongList.SetView(BuildView(), scroll, false);
+        }
+
+        /// <summary>Done: back to the song list (folders already rebuilt with the changes), where it was before Options.</summary>
+        public static void ExitFolderEdit()
+        {
+            if (!InFolderEdit) return;
+
+            level = NavLevel.Root;
+            SetSongListControlsVisible(true);
+            currentPlaylist = null;
+            pendingAddStem = null;
+
+            string back = folderEditReturnFolder;
+            folderEditReturnFolder = null;
+            SongFolderManager.openFolder =
+                back != null && SongFolderManager.availableFolders != null && SongFolderManager.availableFolders.Contains(back)
+                    ? back : null;
+
+            float restore = 0f;
+            if (scrollStack.Count > 0)
+            {
+                // The bottom of the stack is the song list's own position (pushed entering Options).
+                float[] scrolls = scrollStack.ToArray();       // top first
+                bool[] wraps = scrollWrapStack.ToArray();
+                float rootScroll = scrolls[scrolls.Length - 1];
+                bool rootWrap = wraps.Length > 0 ? wraps[wraps.Length - 1] : Config.WrapSongList;
+                restore = rootWrap == Config.WrapSongList ? rootScroll : 0f;
+            }
+            scrollStack.Clear();
+            scrollWrapStack.Clear();
+
+            VirtualSongList.SelectedActionId = null;
+            VirtualSongList.SetView(BuildView(), restore, true);
+            RandomSong.UpdateButtonState();
+        }
+
         public static void EnterPlaylistContents(string playlistName)
         {
             MarathonSetup.CancelIfActive();
@@ -269,6 +345,12 @@ namespace ExScoringMod
         /// <summary>Force back to Level 0 (e.g. wire to a leave-song-page hook if desired).</summary>
         public static void ResetNav()
         {
+            if (InFolderEdit)
+            {
+                FolderEditMode.ClearTransient();
+                SongFolderManager.openFolder = folderEditReturnFolder;
+                folderEditReturnFolder = null;
+            }
             level = NavLevel.Root;
             SetSongListControlsVisible(true);
             currentPlaylist = null;
@@ -571,6 +653,8 @@ namespace ExScoringMod
                 case NavLevel.PlaylistContents: return PlaylistNav.BuildPlaylistContentsView(currentPlaylist);
                 case NavLevel.AddPicker: return PlaylistNav.BuildAddPickerView();
                 case NavLevel.GlobalOptions: return GlobalOptions.BuildView();
+                case NavLevel.FolderEdit: return FolderEditMode.BuildEditView();
+                case NavLevel.FolderEditPicker: return FolderEditMode.BuildPickerView();
                 default: return BuildRootView();
             }
         }

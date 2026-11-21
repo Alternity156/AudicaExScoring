@@ -350,6 +350,10 @@ namespace ExScoringMod
 
         public static void UpdateLaunchPanelInfo()
         {
+            // Edit Custom Folders has the launch page switched off and its own panel in its place;
+            // FolderEditMode.ClosePanel calls this again once the launch page is back.
+            if (FolderEditMode.Active) return;
+
             SetLaunchPanelContentVisible(true);
 
             EnsureValidDifficultySelected();

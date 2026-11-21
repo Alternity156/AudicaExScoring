@@ -318,6 +318,91 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// A song file was moved inside the songs folder (FolderOpsJournal, Edit Custom Folders):
+        /// re-keys its entry so it's still a cache hit. Paths are relative to the songs folder
+        /// with '/' ("Pack/x.audica", or "x.audica" for a loose file); songsDirName is the songs
+        /// folder's own name ("songs"). The entry's ZipPath (the engine-relative path a hit mounts
+        /// and hands the game) is rewritten the same way; if it doesn't have the expected shape
+        /// the entry is dropped instead, so the song is just scanned again once. The bytes and
+        /// write time don't change on a move, so the size/mtime check still matches.
+        /// Call SaveIfDirty afterwards.
+        /// </summary>
+        public static void MoveSongsPath(string songsDirName, string oldRel, string newRel)
+        {
+            EnsureLoaded();
+            if (string.IsNullOrEmpty(oldRel) || string.IsNullOrEmpty(newRel)) return;
+
+            string oldNorm = oldRel.Replace('\\', '/');
+            string newNorm = newRel.Replace('\\', '/');
+
+            List<string> hits = new List<string>();
+            foreach (var kv in entries)
+                if (EndsWithSongsPath(kv.Key.Replace('\\', '/'), songsDirName, oldNorm)) hits.Add(kv.Key);
+
+            foreach (string key in hits)
+            {
+                CachedSongEntry entry = entries[key];
+                entries.Remove(key);
+                bool pending = pendingEntitlementPaths.Remove(key);
+                dirty = true;
+
+                string normKey = key.Replace('\\', '/');
+                string newKey = normKey.Substring(0, normKey.Length - oldNorm.Length) + newNorm;
+
+                string newZip = null;
+                if (entry != null && !string.IsNullOrEmpty(entry.ZipPath))
+                {
+                    string zipNorm = entry.ZipPath.Replace('\\', '/');
+                    if (EndsWithSongsPath(zipNorm, songsDirName, oldNorm))
+                        newZip = zipNorm.Substring(0, zipNorm.Length - oldNorm.Length) + newNorm;
+                }
+
+                if (entry == null || newZip == null || pending)
+                {
+                    DebugLog.Log($"[SongCache] {key} moved to {newRel}: entry dropped, rescanned once");
+                    continue;
+                }
+
+                entry.ZipPath = newZip;
+                entries[newKey] = entry;
+                DebugLog.Log($"[SongCache] {key} -> {newKey}");
+            }
+        }
+
+        /// <summary>Drops the entry of a song file (path relative to the songs folder) that was removed as a duplicate.</summary>
+        public static void RemoveSongsPath(string songsDirName, string rel)
+        {
+            EnsureLoaded();
+            if (string.IsNullOrEmpty(rel)) return;
+            string norm = rel.Replace('\\', '/');
+
+            List<string> hits = new List<string>();
+            foreach (var kv in entries)
+                if (EndsWithSongsPath(kv.Key.Replace('\\', '/'), songsDirName, norm)) hits.Add(kv.Key);
+
+            foreach (string key in hits)
+            {
+                entries.Remove(key);
+                pendingEntitlementPaths.Remove(key);
+                dirty = true;
+            }
+        }
+
+        /// <summary>
+        /// True if path (normalized to '/') is rel inside the songs folder: "rel" itself (a key
+        /// relative to the songs folder), "songs/rel", or ".../songs/rel". Requiring the songs
+        /// folder's name right before rel keeps "x.audica" from matching "songs/Pack/x.audica".
+        /// </summary>
+        private static bool EndsWithSongsPath(string path, string songsDirName, string rel)
+        {
+            if (string.Equals(path, rel, StringComparison.OrdinalIgnoreCase)) return true;
+            if (string.IsNullOrEmpty(songsDirName)) return false;
+            string suffix = songsDirName + "/" + rel;
+            if (string.Equals(path, suffix, StringComparison.OrdinalIgnoreCase)) return true;
+            return path.EndsWith("/" + suffix, StringComparison.OrdinalIgnoreCase);
+        }
+
+        /// <summary>
         /// Writes the cache to disk if anything changed since the last save. Call once at
         /// the end of a scan batch — not per file — to avoid excess disk I/O.
         /// </summary>

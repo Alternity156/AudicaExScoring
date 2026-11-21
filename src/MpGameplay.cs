@@ -723,6 +723,19 @@ namespace ExScoringMod
             {
                 Log($"matchPrepare {matchId}: leaving Options failed: {e.Message}");
             }
+
+            try
+            {
+                if (FolderRowManager.InFolderEdit)
+                {
+                    Log($"matchPrepare {matchId}: leaving Edit Custom Folders (pending changes are kept).");
+                    FolderEditMode.Done(); // restores the launch page
+                }
+            }
+            catch (Exception e)
+            {
+                Log($"matchPrepare {matchId}: leaving Edit Custom Folders failed: {e.Message}");
+            }
         }
 
         private static void SelectForLaunch(SongList.SongData data, KataConfig.Difficulty difficulty)

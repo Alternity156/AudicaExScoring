@@ -25,7 +25,8 @@ namespace ExScoringMod
     ///    songs folder, its pack subfolders or Downloads (a copy that differs is a different
     ///    version and is left alone). From the menu that happens a frame later; from a song it
     ///    waits until the song list is back, so the file isn't pulled out from under the song.
-    ///    A file that can't be deleted is retried on quit, then on the next launch;
+    ///    A file that can't be deleted is retried on quit, then on the next launch (the list is
+    ///    saved right away, so a crash doesn't lose it);
     ///  - blocks the lobby's auto-download of that song for the rest of the session
     ///    (deletedSongs), so a suggestion doesn't bring it straight back. Shooting its row in
     ///    the Suggested Songs folder still downloads it by hand.
@@ -502,6 +503,7 @@ namespace ExScoringMod
                 {
                     File.Copy(filePath, target, true);
                     if (!deletedSongPaths.Contains(filePath)) deletedSongPaths.Add(filePath);
+                    SavePendingDeletes();
                     DebugLog.Log($"{LogPrefix} Couldn't move {filePath} ({moveEx.Message}): copied to {target}, the original is deleted on quit");
                     return false;
                 }
@@ -519,11 +521,12 @@ namespace ExScoringMod
             if (string.IsNullOrEmpty(filePath)) return;
             string full;
             try { full = Path.GetFullPath(filePath); } catch { full = filePath; }
-            deletedSongPaths.RemoveAll(p =>
+            int removed = deletedSongPaths.RemoveAll(p =>
             {
                 try { return string.Equals(Path.GetFullPath(p), full, StringComparison.OrdinalIgnoreCase); }
                 catch { return false; }
             });
+            if (removed > 0) SavePendingDeletes();
         }
 
         /// <summary>The .audica file a song was loaded from, or null when it isn't on disk.</summary>
@@ -604,7 +607,8 @@ namespace ExScoringMod
             return result;
         }
 
-        private static bool FilesIdentical(string a, string b)
+        /// <summary>Byte-for-byte comparison. Also used by FolderOpsJournal.</summary>
+        internal static bool FilesIdentical(string a, string b)
         {
             try
             {
@@ -662,6 +666,7 @@ namespace ExScoringMod
                 catch (Exception ex)
                 {
                     if (!deletedSongPaths.Contains(path)) deletedSongPaths.Add(path);
+                    SavePendingDeletes();
                     DebugLog.Log($"{LogPrefix} Couldn't delete {path} now ({ex.Message}): will retry on quit");
                 }
             }

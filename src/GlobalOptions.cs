@@ -1023,7 +1023,32 @@ namespace ExScoringMod
                 var c = cat; // capture
                 rows.Add(ViewRow.ActionRow(c.Title, CategoryColor, () => OnCategoryShot(c), null, c.Id));
             }
+            rows.Add(ViewRow.ActionRow("Edit Custom Folders", CategoryColor, FolderEditMode.Begin,
+                "New folders, rename, delete, move songs"));
             return rows;
+        }
+
+        /// <summary>
+        /// Edit Custom Folders is opening from this list: if a category panel is up, its clone
+        /// (and the hidden launch page) is handed over as is instead of restoring the launch
+        /// panel just to hide it again. Returns false when no panel was up (nothing to hand over).
+        /// launchPageObj: the inactive launch page, which the new owner re-activates when done.
+        /// </summary>
+        public static bool HandOffPanel(out GameObject launchPageObj)
+        {
+            launchPageObj = null;
+            ColorPickerPopup.CancelIfOpen();
+            VirtualSongList.SetSelectedAction(null);
+            activeCategory = null;
+            if (!panelShown) return false;
+
+            panelShown = false;
+            OptionsMenuClone.Wipe();
+            ModifiersPage.Hide();
+            launchPageObj = launchPage;
+            launchPage = null;
+            DebugLog.Log("[Options] panel handed over to Edit Custom Folders");
+            return true;
         }
 
         private static void OnCategoryShot(OptionsCategory cat)

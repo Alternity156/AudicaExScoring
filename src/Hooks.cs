@@ -170,6 +170,15 @@ namespace ExScoringMod
                     PerSongOptionsPage.ForceTeardown();
                 }
 
+                // Edit Custom Folders: every song select bounces SongPage -> LaunchPage (blocked by
+                // the Prefix above, but this Postfix still runs and menuState follows it), and an
+                // auto-select doesn't bounce back. Neither is really leaving the song page, so only
+                // a move to any other state tears the editor down. Pending folder changes are kept.
+                bool onSongPage = menuState == MenuState.State.SongPage || menuState == MenuState.State.LaunchPage;
+                bool stillOnSongPage = state == MenuState.State.SongPage || state == MenuState.State.LaunchPage;
+                if (onSongPage && !stillOnSongPage)
+                    FolderEditMode.ForceTeardown();
+
                 // Calibration (and any other non-song flow) jumps straight from Settings into
                 // gameplay, skipping SongPage/LaunchPage entirely — flag it so we don't treat this
                 // Launched session like a real song later on (AutoSelectSong, purple stage visual).
@@ -628,6 +637,17 @@ namespace ExScoringMod
                 if (!isAutoSelecting)
                 {
                     MenuState.SetState(MenuState.State.SongPage);
+                }
+
+                // Edit Custom Folders: its panel stands in for the launch page (inactive), so
+                // none of the launch panel refresh below applies — the panel shows the song's
+                // Move / Delete actions instead.
+                if (FolderEditMode.Active)
+                {
+                    UpdateSongSelectionIndicator(__instance, selectedSong);
+                    VirtualSongList.RefreshSelectionIndicators();
+                    FolderEditMode.OnSongSelected(__instance.mSongData);
+                    return;
                 }
 
                 var songSelect = GameObject.Find("menu/ShellPage_Song/page/ShellPanel_Center/SongSelect");
@@ -1967,6 +1987,40 @@ namespace ExScoringMod
         /// If a song search is in progress, input goes to SongSearch.
         /// Otherwise input goes to the download search.
         /// </summary>
+        // ── Keyboard caps (Shift key) ────────────────────────────────────────
+
+        private static bool fallbackCaps; // used if the game's mCaps / ToggleCaps can't be reached
+
+        private static bool IsCapsKey(KeyCode keyCode, string label)
+        {
+            if (keyCode == KeyCode.LeftShift || keyCode == KeyCode.RightShift || keyCode == KeyCode.CapsLock)
+                return true;
+            if (string.IsNullOrEmpty(label)) return false;
+            string l = label.Trim().ToLowerInvariant();
+            return l == "shift" || l == "caps" || l == "caps lock" || l == "capslock";
+        }
+
+        private static void ToggleKeyboardCaps(KeyboardEntry kb)
+        {
+            try
+            {
+                kb.ToggleCaps();
+                DebugLog.Log($"[Keyboard] Caps {(kb.mCaps ? "on" : "off")}");
+                return;
+            }
+            catch (Exception e)
+            {
+                DebugLog.Log("[Keyboard] ToggleCaps failed, using the mod's own caps: " + e.Message);
+            }
+            fallbackCaps = !fallbackCaps;
+        }
+
+        private static bool KeyboardCapsOn(KeyboardEntry kb)
+        {
+            try { return kb.mCaps; }
+            catch { return fallbackCaps; }
+        }
+
         [HarmonyPatch(typeof(KeyboardEntry), "OnKey", new Type[] { typeof(KeyCode), typeof(string) })]
         private static class KeyboardEntryOnKeyPatch
         {
@@ -1974,6 +2028,28 @@ namespace ExScoringMod
             {
                 if (shouldShowKeyboard)
                 {
+                    // Shift: the native OnKey is skipped below, so toggle caps ourselves. The
+                    // game's ToggleCaps also relabels the keys, so the keyboard shows the case.
+                    if (IsCapsKey(keyCode, label))
+                    {
+                        ToggleKeyboardCaps(__instance);
+                        return false;
+                    }
+
+                    // Keys report their lowercase label; apply caps to typed characters only.
+                    // Shift is one-shot: it turns off again after one typed character (space,
+                    // backspace, done and clear leave it armed).
+                    string lower = label != null ? label.ToLowerInvariant() : "";
+                    if (lower == "done" || lower == "clear")
+                    {
+                        label = lower;
+                    }
+                    else if (!string.IsNullOrEmpty(label) && KeyboardCapsOn(__instance))
+                    {
+                        label = label.ToUpperInvariant();
+                        ToggleKeyboardCaps(__instance);
+                    }
+
                     if (SongSearch.searchInProgress)
                     {
                         switch (label)
@@ -2009,6 +2085,15 @@ namespace ExScoringMod
                             case "done": OnlinePlayMenu.FinishCodeEntry(); break;
                             case "clear": OnlinePlayMenu.ClearCode(); break;
                             default: OnlinePlayMenu.AppendCode(label); break;
+                        }
+                    }
+                    else if (FolderEditMode.Typing)
+                    {
+                        switch (label)
+                        {
+                            case "done": FolderEditMode.FinishTyping(); break;
+                            case "clear": FolderEditMode.ClearTyped(); break;
+                            default: FolderEditMode.AppendTyped(label); break;
                         }
                     }
                     else
@@ -2047,6 +2132,10 @@ namespace ExScoringMod
                     {
                         OnlinePlayMenu.BackspaceCode();
                     }
+                    else if (FolderEditMode.Typing)
+                    {
+                        FolderEditMode.BackspaceTyped();
+                    }
                     else
                     {
                         return true;
@@ -2079,6 +2168,10 @@ namespace ExScoringMod
                     else if (OnlinePlayMenu.EnteringCode)
                     {
                         // Lobby codes have no spaces.
+                    }
+                    else if (FolderEditMode.Typing)
+                    {
+                        FolderEditMode.AppendTyped(" ");
                     }
                     else
                     {

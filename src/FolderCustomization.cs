@@ -63,11 +63,16 @@ namespace ExScoringMod
         private static readonly Dictionary<string, FolderStyle> styles =
             new Dictionary<string, FolderStyle>(StringComparer.Ordinal);
 
-        /// <summary>Customization for a folder (by on-disk name), or null if it has none.</summary>
+        /// <summary>
+        /// Customization for a folder, or null if it has none. Styles are keyed by the on-disk
+        /// name; a folder with a pending rename (Edit Custom Folders) is shown under its new name
+        /// before it's renamed on disk, so that name is mapped back first.
+        /// </summary>
         public static FolderStyle Get(string folder)
         {
             if (folder == null) return null;
-            return styles.TryGetValue(folder, out FolderStyle s) ? s : null;
+            string onDisk = FolderOpsJournal.DiskNameFor(folder);
+            return styles.TryGetValue(onDisk ?? folder, out FolderStyle s) ? s : null;
         }
 
         /// <summary>Custom name if set, otherwise the folder name. Used for sorting, so a hidden

@@ -45,6 +45,14 @@ namespace ExScoringMod
         public static List<string> availableFolders = new List<string>();
 
         /// <summary>
+        /// File name -> the folders its copies are really in on disk (pack folder names, and
+        /// "Unsorted" for a loose file), from the last Rebuild — before the pending Edit Custom
+        /// Folders changes are overlaid. Rebuild itself uses the overlaid version, so every view
+        /// shows the folders as they'll be once the changes are applied (FolderOpsJournal).
+        /// </summary>
+        public static Dictionary<string, List<string>> diskFolderMap = new Dictionary<string, List<string>>();
+
+        /// <summary>
         /// The folder whose songs are currently expanded in the song list.
         /// Null means all folders are collapsed (only folder rows visible).
         /// Persists across scene transitions so the list restores its state.
@@ -99,7 +107,13 @@ namespace ExScoringMod
             extraSongFolders.Clear();
             availableFolders.Clear();
 
-            Dictionary<string, List<string>> subfolderByFilename = BuildSubfolderMap(mainSongDirectory);
+            diskFolderMap = BuildSubfolderMap(mainSongDirectory);
+
+            // Pending Edit Custom Folders changes (moves, renames, deletes) aren't on disk until
+            // the game closes or next launches: show them as if they were.
+            Dictionary<string, List<string>> subfolderByFilename = FolderOpsJournal.HasPending
+                ? FolderOpsJournal.Overlay(diskFolderMap)
+                : diskFolderMap;
 
             // Optional folder.json per pack subfolder (display name, colors, image). Cached by
             // write time, so unchanged folders don't reload their image on every rebuild.
@@ -264,6 +278,37 @@ namespace ExScoringMod
 
             if (name != null && !availableFolders.Contains(name))
                 availableFolders.Insert(0, name);
+        }
+
+        /// <summary>
+        /// The folders (as shown: pack names, "Unsorted" for loose) the copies of fileName are
+        /// really in on disk, from the last Rebuild. Case-insensitive on the file name.
+        /// </summary>
+        public static List<string> DiskFoldersOf(string fileName)
+        {
+            var result = new List<string>();
+            if (string.IsNullOrEmpty(fileName) || diskFolderMap == null) return result;
+
+            if (diskFolderMap.TryGetValue(fileName, out List<string> exact))
+            {
+                result.AddRange(exact);
+                return result;
+            }
+            foreach (var kv in diskFolderMap)
+            {
+                if (string.Equals(kv.Key, fileName, System.StringComparison.OrdinalIgnoreCase))
+                {
+                    result.AddRange(kv.Value);
+                    break;
+                }
+            }
+            return result;
+        }
+
+        /// <summary>True for the base-game and DLC songs, which always stay in the Audica / Audica DLC folders.</summary>
+        public static bool IsOfficial(string songID)
+        {
+            return songID != null && (audicaSongIDs.Contains(songID) || audicaDLCSongIDs.Contains(songID));
         }
 
         // ── Helpers ──────────────────────────────────────────────────────────
