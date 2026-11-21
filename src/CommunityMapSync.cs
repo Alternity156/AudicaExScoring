@@ -1054,8 +1054,13 @@ namespace ExScoringMod
         private static void OnShot()
         {
             CommunityMapManager.Entry e = CommunityMapManager.Selected;
-            if (e == null || state == State.Uploading) return;
+            if (e == null || state == State.Uploading)
+            {
+                DebugLog.Log("[CommunityMapUpload] Shot ignored (" + (e == null ? "no map selected" : "already uploading") + ").");
+                return;
+            }
 
+            DebugLog.Log("[CommunityMapUpload] Shot: uploading '" + e.path + "'.");
             state = State.Uploading;
             string path = e.path;
             CommunityMapSync.Upload(e, result =>
@@ -1123,8 +1128,15 @@ namespace ExScoringMod
             button.name = "ExCommunityMapUpload";
             button.transform.localPosition = ButtonPosition;
 
-            // Drop what makes it a difficulty button: the selection indicator and the localizer.
-            // The shot handler is replaced below (same as the Favorite button's clone).
+            // Drop what makes it a difficulty button: the DifficultySelectButton component, the
+            // selection indicator and the localizer. The shot handler is replaced below (same as the
+            // Favorite button's clone).
+            // DifficultySelectButton must go: GunButtonOnHitPatch (Hooks.cs) treats any GunButton whose
+            // parent has one as a difficulty button, sets Expert and skips the original OnHit, so
+            // onHitEvent (OnShot) would never fire. DestroyImmediate so it's gone before the first shot.
+            foreach (DifficultySelectButton diffSelect in button.GetComponentsInChildren<DifficultySelectButton>(true))
+                GameObject.DestroyImmediate(diffSelect);
+
             Transform indicator = button.transform.Find("SelectedIndicator");
             if (indicator != null) GameObject.Destroy(indicator.gameObject);
             Localizer localizer = button.GetComponentInChildren<Localizer>(true);
