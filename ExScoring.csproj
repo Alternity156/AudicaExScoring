@@ -217,6 +217,7 @@
     <Compile Include="src\ColorPickerPopup.cs" />
     <Compile Include="src\ColorSettings.cs" />
     <Compile Include="src\CommunityMapManager.cs" />
+    <Compile Include="src\CommunityMapsOptInPrompt.cs" />
     <Compile Include="src\CommunityMapSync.cs" />
     <Compile Include="src\DifficultyCalculator.cs" />
     <Compile Include="src\EitherHandFix.cs" />

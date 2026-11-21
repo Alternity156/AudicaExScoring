@@ -11,6 +11,9 @@ namespace ExScoringMod
     ///
     /// The wanted state (label + link, or hidden) is remembered here, so it doesn't matter whether the
     /// MOTD arrives before or after the button object is created by ReleaseNotesPanel.Setup().
+    ///
+    /// Hidden while the community maps opt-in question (CommunityMapsOptInPrompt.cs) is up, since it
+    /// sits in the same spot; the prompt calls <see cref="Refresh"/> once it's answered.
     /// </summary>
     internal static class MotdButton
     {
@@ -67,6 +70,12 @@ namespace ExScoringMod
             Apply();
         }
 
+        /// <summary>Re-applies the wanted state (e.g. after the community maps question is answered).</summary>
+        public static void Refresh()
+        {
+            Apply();
+        }
+
         /// <summary>Only absolute https:// links are ever opened.</summary>
         public static bool IsAllowedUrl(string url)
         {
@@ -78,7 +87,8 @@ namespace ExScoringMod
         {
             if (button == null) return;
 
-            bool show = !string.IsNullOrEmpty(wantedLabel) && IsAllowedUrl(wantedUrl);
+            bool show = !string.IsNullOrEmpty(wantedLabel) && IsAllowedUrl(wantedUrl)
+                && !CommunityMapsOptInPrompt.IsShowing;
             if (show)
             {
                 // The label is plain text: noparse keeps any tags in it from being read.

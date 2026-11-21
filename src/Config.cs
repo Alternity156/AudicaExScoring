@@ -84,6 +84,7 @@ namespace ExScoringMod
         public static bool SaveFailedRunData;
         public static bool SongCacheEnabled;
         public static bool AutoDownloadCommunityMaps;
+        public static bool CommunityMapsOptInAsked;
         public static int LatestMaudicaPageSize;
 
         public static string scoringHeader = "[Header]Scoring";
@@ -243,7 +244,8 @@ namespace ExScoringMod
             MelonPrefs.RegisterFloat(Category, nameof(MaxRunDataSizeMB), 100f, "Sets the max total disk space (MB) run data files can use [10,2000,10,100] {G}");
             MelonPrefs.RegisterBool(Category, nameof(SaveFailedRunData), false, "Also saves run data for failed songs (requires Save Run Data)");
             MelonPrefs.RegisterBool(Category, nameof(SongCacheEnabled), true, "Caches song scan results on disk to speed up future boots. Disable to always scan songs live and skip reading/writing the cache");
-            MelonPrefs.RegisterBool(Category, nameof(AutoDownloadCommunityMaps), true, "Downloads the community maps uploaded to AudicaEX for your installed songs while the song list loads");
+            MelonPrefs.RegisterBool(Category, nameof(AutoDownloadCommunityMaps), false, "Downloads the community maps uploaded to AudicaEX for your installed songs while the song list loads");
+            MelonPrefs.RegisterBool(Category, nameof(CommunityMapsOptInAsked), false, "Set once the community maps auto download question on the Main page has been answered (or the option was changed). Until then auto download stays off");
             MelonPrefs.RegisterInt(Category, nameof(LatestMaudicaPageSize), 30, "How many songs the Latest Maudica folder loads per page [14,100,1,30] {G}");
 
             MelonPrefs.RegisterString(Category, nameof(scoringHeader), "", "[Header]Scoring");
@@ -366,7 +368,10 @@ namespace ExScoringMod
             ShowStatsOnFail = MelonPrefs.GetBool(Category, nameof(ShowStatsOnFail));
             SaveFailedRunData = MelonPrefs.GetBool(Category, nameof(SaveFailedRunData));
             SongCacheEnabled = MelonPrefs.GetBool(Category, nameof(SongCacheEnabled));
-            AutoDownloadCommunityMaps = MelonPrefs.GetBool(Category, nameof(AutoDownloadCommunityMaps));
+            CommunityMapsOptInAsked = MelonPrefs.GetBool(Category, nameof(CommunityMapsOptInAsked));
+            // Opt in: stays off until the player answers the Main page question (CommunityMapsOptInPrompt),
+            // even if an older build saved it as on.
+            AutoDownloadCommunityMaps = CommunityMapsOptInAsked && MelonPrefs.GetBool(Category, nameof(AutoDownloadCommunityMaps));
             LatestMaudicaPageSize = ClampLatestMaudicaPageSize(MelonPrefs.GetInt(Category, nameof(LatestMaudicaPageSize)));
             ExScorePopupSize = MelonPrefs.GetFloat(Category, nameof(ExScorePopupSize));
             ExScorePopupOpacity = MelonPrefs.GetFloat(Category, nameof(ExScorePopupOpacity));
@@ -810,10 +815,13 @@ namespace ExScoringMod
             MelonPrefs.SaveConfig();
         }
 
+        /// <summary>Also marks the opt-in question as answered: any explicit choice counts.</summary>
         public static void UpdateAutoDownloadCommunityMaps(bool value)
         {
             MelonPrefs.SetBool(Category, nameof(AutoDownloadCommunityMaps), value);
+            MelonPrefs.SetBool(Category, nameof(CommunityMapsOptInAsked), true);
             AutoDownloadCommunityMaps = value;
+            CommunityMapsOptInAsked = true;
             MelonPrefs.SaveConfig();
         }
 

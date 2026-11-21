@@ -381,6 +381,7 @@ namespace ExScoringMod
         {
             autoDownloadCommunityMaps = value;
             Config.UpdateAutoDownloadCommunityMaps(value);
+            CommunityMapsOptInPrompt.Refresh(); // changing the option answers the Main page question
             if (value) CommunityMapSync.StartBackgroundSync("setting turned on");
         }
 

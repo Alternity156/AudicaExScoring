@@ -12,7 +12,8 @@ namespace ExScoringMod
     /// it reliably on initial game boot as well as on later menu visits.
     /// Also creates (once) the ApiKeyHelpButtons - their visibility is driven separately by
     /// AudicaExStatus, since that's the only place that knows whether the key is missing/invalid.
-    /// Same for the MotdButton (the message of the day's optional link button).
+    /// Same for the MotdButton (the message of the day's optional link button), and the one-time
+    /// community maps opt-in question (CommunityMapsOptInPrompt), which takes the MOTD button's spot.
     /// </summary>
     public static class ReleaseNotesPanel
     {
@@ -101,6 +102,7 @@ namespace ExScoringMod
                 DebugLog.Log("ReleaseNotesPanel: text not found");
 
             ApiKeyHelpButtons.Setup(leftT);
+            CommunityMapsOptInPrompt.Setup(leftT);
             MotdButton.Setup(leftT);
 
             releaseNotes.gameObject.SetActive(true);

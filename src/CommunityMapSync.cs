@@ -78,7 +78,7 @@ namespace ExScoringMod
     /// <summary>
     /// Community maps on the AudicaEX server (ApiContract v2.58, Section 21):
     ///
-    /// - <b>Auto download</b> (Config.AutoDownloadCommunityMaps, on by default): during a full song
+    /// - <b>Auto download</b> (Config.AutoDownloadCommunityMaps, opt in): during a full song
     ///   list load (boot, song list reload) SongListAssembler runs <see cref="RunLoadingPhase"/>
     ///   before reporting the list loaded. It lists every map on the server and downloads the ones
     ///   for installed songs (exact parent songID) that aren't in the community maps folder yet,
