@@ -68,6 +68,7 @@ namespace ExScoringMod
         public static bool hideScoreData;
         public static bool firstPlayBlind;
         public static bool wrapSongList;
+        public static bool goldCommunityMapSongs;
         public static bool optionsBackToSongList;
         public static bool menuAimAssist;
         public static float menuAimAssistWindowMs;
@@ -304,6 +305,18 @@ namespace ExScoringMod
             wrapSongList = value;
             Config.UpdateWrapSongList(value);
             FolderRowManager.RefreshList();
+        }
+
+        public static void GetGoldCommunityMapSongs()
+        {
+            goldCommunityMapSongs = Config.GoldCommunityMapSongs;
+        }
+
+        public static void SetGoldCommunityMapSongs(bool value)
+        {
+            goldCommunityMapSongs = value;
+            Config.UpdateGoldCommunityMapSongs(value);
+            VirtualSongList.RefreshCommunityMapGold();
         }
 
         public static void GetPracticeModeMinimizeButtonEnabled()

@@ -749,6 +749,13 @@ namespace ExScoringMod
                     "Loops the list like a wheel: scrolling or dragging past either end wraps around to the other. Disabled by default.");
                 OptionsMenuClone.AddRow(wrapSongListToggle);
 
+                OptionsMenuFunctions.GetGoldCommunityMapSongs();
+                var goldCommunityMapSongsToggle = OptionsMenuClone.CreateToggle(0, "Gold Community Map Songs",
+                    () => OptionsMenuFunctions.goldCommunityMapSongs,
+                    v => { OptionsMenuFunctions.goldCommunityMapSongs = v; OptionsMenuFunctions.SetGoldCommunityMapSongs(v); },
+                    "Gives songs that have community maps the gold song list button, like the early-access community map contest song. Enabled by default.");
+                OptionsMenuClone.AddRow(goldCommunityMapSongsToggle);
+
                 OptionsMenuFunctions.GetOptionsBackToSongList();
                 var optionsBackToSongListToggle = OptionsMenuClone.CreateToggle(0, "Options Back To Song List",
                     () => OptionsMenuFunctions.optionsBackToSongList,

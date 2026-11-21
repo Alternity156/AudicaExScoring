@@ -64,6 +64,7 @@ namespace ExScoringMod
         public static bool HideScoreData;
         public static bool FirstPlayBlind;
         public static bool WrapSongList;
+        public static bool GoldCommunityMapSongs;
         public static bool OptionsBackToSongList;
         public static bool PracticeModeMinimizeButtonEnabled;
         public static int RandomSongScope; // 0 = Folder Songs, 1 = All Songs
@@ -227,6 +228,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(MenuAimAssist), true, "Temporal aim assist for menu buttons: a trigger pull that just missed a button still clicks it if you were on it a moment earlier");
             MelonPrefs.RegisterFloat(Category, nameof(MenuAimAssistWindowMs), 100f, "How far back (ms) menu aim assist looks for a button you were aiming at [30,200,5,100]");
             MelonPrefs.RegisterBool(Category, nameof(WrapSongList), false, "Loops the song list like a wheel — scrolling or dragging past either end wraps around to the other");
+            MelonPrefs.RegisterBool(Category, nameof(GoldCommunityMapSongs), true, "Gives songs that have community maps the gold song list button (the early-access contest look)");
             MelonPrefs.RegisterBool(Category, nameof(OptionsBackToSongList), true, "While in the song list's Options menu, the bottom Back button returns to the song list instead of the main menu");
             MelonPrefs.RegisterBool(Category, nameof(PracticeModeMinimizeButtonEnabled), true, "Adds a button in practice mode to minimize its panel");
             MelonPrefs.RegisterInt(Category, nameof(RandomSongScope), 0, "Random Song source: 0 = Folder Songs, 1 = All Songs");
@@ -351,6 +353,7 @@ namespace ExScoringMod
             HideScoreData = MelonPrefs.GetBool(Category, nameof(HideScoreData));
             FirstPlayBlind = MelonPrefs.GetBool(Category, nameof(FirstPlayBlind));
             WrapSongList = MelonPrefs.GetBool(Category, nameof(WrapSongList));
+            GoldCommunityMapSongs = MelonPrefs.GetBool(Category, nameof(GoldCommunityMapSongs));
             MenuAimAssist = MelonPrefs.GetBool(Category, nameof(MenuAimAssist));
             MenuAimAssistWindowMs = MelonPrefs.GetFloat(Category, nameof(MenuAimAssistWindowMs));
             OptionsBackToSongList = MelonPrefs.GetBool(Category, nameof(OptionsBackToSongList));
@@ -672,6 +675,13 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(WrapSongList), value);
             WrapSongList = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateGoldCommunityMapSongs(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(GoldCommunityMapSongs), value);
+            GoldCommunityMapSongs = value;
             MelonPrefs.SaveConfig();
         }
 

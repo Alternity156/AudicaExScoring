@@ -409,6 +409,13 @@ namespace ExScoringMod
             public bool inUse;
             public string boundSong; // last song Init()'d, to skip redundant rebinds
             public string appliedTitle; // title override currently shown on this item, or null
+
+            // Gold button for songs that have community maps: the Quad's own material
+            // ("ButtonMirror (Instance)") is kept so a recycled item can be put back to silver.
+            public bool quadLookedUp;
+            public MeshRenderer quadRenderer;
+            public Material quadOriginalMat;
+            public bool quadGold;
         }
 
         private sealed class HeaderPoolItem
@@ -1124,6 +1131,10 @@ namespace ExScoringMod
                 if (row.mapPath != null && pi.ssi != null && pi.ssi.mapperLabel != null)
                     pi.ssi.mapperLabel.text = "";
 
+                // Gold button (the early-access contest look) on songs that have community maps.
+                // Only the song's own row; the map rows in the Community Maps folder stay silver.
+                ApplyCommunityMapGold(pi, WantsCommunityMapGold(row));
+
                 // SongSelectItem.Init registers the item into songSelect.mSongButtons. Since the
                 // game now builds an empty list and we own the display, keep our recycled pool
                 // items OUT of that list — otherwise the game's own ShowSongList iterates a
@@ -1303,6 +1314,104 @@ namespace ExScoringMod
                 var b = kv.Value;
                 if (b.isHeader) ApplyHeaderIndicator(headerPool[b.slot], view[contentIdx]);
                 else ApplySongIndicator(songPool[b.slot], view[contentIdx]);
+            }
+        }
+
+        // ── Community map gold button ────────────────────────────────────────
+
+        private const string GoldMaterialName = "ButtonMirror_Gold";
+        private static Material goldMaterial;
+        private static float goldNextSearchTime;
+        private static bool goldMissingLogged;
+
+        /// <summary>
+        /// The game's own gold mirror material (used by the early-access community map contest
+        /// song; same shader as the normal ButtonMirror). Looked up by name among loaded
+        /// materials; when it isn't loaded, retried at most every 5 s.
+        /// </summary>
+        private static Material GetGoldMaterial()
+        {
+            if (goldMaterial != null) return goldMaterial;
+            if (Time.realtimeSinceStartup < goldNextSearchTime) return null;
+            goldNextSearchTime = Time.realtimeSinceStartup + 5f;
+
+            try
+            {
+                foreach (UnityEngine.Object o in Resources.FindObjectsOfTypeAll(Il2CppType.Of<Material>()))
+                {
+                    if (o == null || o.name != GoldMaterialName) continue;
+                    Material m = o.TryCast<Material>();
+                    if (m == null) continue;
+                    goldMaterial = m;
+                    DebugLog.Log($"[VList] Found '{GoldMaterialName}' for community map songs.");
+                    return goldMaterial;
+                }
+            }
+            catch (Exception e) { DebugLog.Log($"[VList] '{GoldMaterialName}' lookup failed: " + e.Message); }
+
+            if (!goldMissingLogged)
+            {
+                goldMissingLogged = true;
+                DebugLog.Log($"[VList] '{GoldMaterialName}' not loaded; songs with community maps stay silver for now.");
+            }
+            return null;
+        }
+
+        /// <summary>Gold only on a song's own row, when the option is on and the song has maps
+        /// (the map rows in the Community Maps folder stay silver).</summary>
+        private static bool WantsCommunityMapGold(ViewRow row)
+            => Config.GoldCommunityMapSongs && row.mapPath == null && CommunityMapManager.HasMaps(row.songID);
+
+        /// <summary>Re-applies the gold/silver button to the rows on screen (option toggled).</summary>
+        public static void RefreshCommunityMapGold()
+        {
+            try
+            {
+                foreach (var kv in rowBindings)
+                {
+                    if (kv.Value.isHeader) continue;
+                    int contentIdx = ContentIndexFor(kv.Key);
+                    if (contentIdx < 0 || contentIdx >= view.Count) continue;
+                    if (kv.Value.slot < 0 || kv.Value.slot >= songPool.Count) continue;
+                    ApplyCommunityMapGold(songPool[kv.Value.slot], WantsCommunityMapGold(view[contentIdx]));
+                }
+            }
+            catch (Exception e) { DebugLog.Log("[VList] RefreshCommunityMapGold failed: " + e.Message); }
+        }
+
+        /// <summary>
+        /// Puts the gold material on the item's Quad, or its own original material back. The
+        /// original is captured the first time, before anything is changed.
+        /// </summary>
+        private static void ApplyCommunityMapGold(SongPoolItem pi, bool wantGold)
+        {
+            if (pi == null || !Alive(pi.go)) return;
+
+            if (!pi.quadLookedUp)
+            {
+                pi.quadLookedUp = true;
+                Transform quad = FindChild(pi.go.transform, "Quad");
+                if (quad != null)
+                {
+                    pi.quadRenderer = quad.GetComponent<MeshRenderer>();
+                    if (pi.quadRenderer != null) pi.quadOriginalMat = pi.quadRenderer.sharedMaterial;
+                }
+                if (pi.quadRenderer == null) DebugLog.Log($"[VList] No Quad renderer on '{pi.go.name}', gold button skipped.");
+            }
+            if (pi.quadRenderer == null || !Alive(pi.quadRenderer)) return;
+
+            if (wantGold)
+            {
+                if (pi.quadGold) return;
+                Material gold = GetGoldMaterial();
+                if (gold == null) return;
+                pi.quadRenderer.sharedMaterial = gold;
+                pi.quadGold = true;
+            }
+            else if (pi.quadGold)
+            {
+                if (pi.quadOriginalMat != null) pi.quadRenderer.sharedMaterial = pi.quadOriginalMat;
+                pi.quadGold = false;
             }
         }
 

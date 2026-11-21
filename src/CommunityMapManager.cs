@@ -52,6 +52,9 @@ namespace ExScoringMod
         private static readonly Dictionary<string, Entry> byPath = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
         private static readonly Dictionary<string, Entry> byViewKey = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
 
+        // songIDs (SongData.songID) of the songs that have at least one community map.
+        private static readonly HashSet<string> parentsWithMaps = new HashSet<string>(StringComparer.Ordinal);
+
         // Leaderboard IDs computed in earlier scans, kept across rescans by path + write time.
         private static readonly Dictionary<string, Entry> idCache = new Dictionary<string, Entry>(StringComparer.OrdinalIgnoreCase);
 
@@ -83,6 +86,7 @@ namespace ExScoringMod
             entries.Clear();
             byPath.Clear();
             byViewKey.Clear();
+            parentsWithMaps.Clear();
 
             try
             {
@@ -148,6 +152,7 @@ namespace ExScoringMod
                     entries.Add(e);
                     byPath[file] = e;
                     byViewKey[e.viewKey] = e;
+                    parentsWithMaps.Add(e.parentSongID);
                 }
 
                 // Parent title, then map name.
@@ -191,6 +196,10 @@ namespace ExScoringMod
         // ══════════════════════════════════════════════════════════════════════
         //  Lookups
         // ══════════════════════════════════════════════════════════════════════
+
+        /// <summary>True when the song (SongData.songID) has at least one community map installed.</summary>
+        public static bool HasMaps(string songID)
+            => songID != null && parentsWithMaps.Contains(songID);
 
         public static bool IsViewKey(string key)
             => key != null && key.StartsWith(ViewKeyPrefix, StringComparison.Ordinal);
