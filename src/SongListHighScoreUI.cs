@@ -61,6 +61,22 @@ namespace ExScoringMod
         // songId|difficulty (same key format as exRowScoreCache) -> best uploaded run.
         private static readonly Dictionary<string, OnlineBestScore> onlineBestScores = new Dictionary<string, OnlineBestScore>();
 
+        /// <summary>
+        /// The player's EX ranks on one song+difficulty (ApiContract.md v2.62, Section 5b
+        /// ?ranks=true), for the song list's native global/friends rank labels. Unlike the scores
+        /// these only ever come from the server — there's no local equivalent to merge with.
+        /// </summary>
+        private class OnlineRank
+        {
+            public int? globalRank;
+            public int? globalTotal;
+            public int? friendsRank;
+        }
+
+        // songId|difficulty -> ranks. Filled from the same /me/bests fetch as onlineBestScores and
+        // cleared with it; updated after each upload (OnRunSubmittedForRanks).
+        private static readonly Dictionary<string, OnlineRank> onlineRanks = new Dictionary<string, OnlineRank>();
+
         // API key the current onlineBestScores (or the in-flight fetch) belongs to. null = never
         // fetched, or the last attempt failed and may be retried after OnlineBestRetryDelaySeconds.
         private static string onlineBestFetchedForKey;
@@ -84,9 +100,10 @@ namespace ExScoringMod
 
             if (string.IsNullOrEmpty(apiKey))
             {
-                if (onlineBestFetchedForKey != null || onlineBestScores.Count > 0)
+                if (onlineBestFetchedForKey != null || onlineBestScores.Count > 0 || onlineRanks.Count > 0)
                 {
                     onlineBestScores.Clear();
+                    onlineRanks.Clear();
                     onlineBestFetchedForKey = null;
                     onlineBestFetchInFlight = false;
                     onlineBestReady = false;
@@ -106,6 +123,7 @@ namespace ExScoringMod
             onlineBestFetchInFlight = true;
             onlineBestReady = false;
             onlineBestScores.Clear();
+            onlineRanks.Clear();
             int version = ++onlineBestRequestVersion;
 
             if (keyChanged)
@@ -184,15 +202,17 @@ namespace ExScoringMod
             }
 
             onlineBestScores.Clear();
+            onlineRanks.Clear();
             for (int i = 0; i < response.bests.Length; i++)
             {
                 MyBestsApiEntry best = response.bests[i];
                 if (best == null) continue;
                 StoreOnlineBest(best.songId, best.difficulty, best.judgementPercent, best.failed);
+                StoreOnlineRank(best);
             }
 
             onlineBestReady = true;
-            DebugLog.Log($"[ExScoring] Online best scores: {onlineBestScores.Count} song+difficulty best(s) from /me/bests (server total={response.total}).");
+            DebugLog.Log($"[ExScoring] Online best scores: {onlineBestScores.Count} song+difficulty best(s), {onlineRanks.Count} with ranks, from /me/bests (server total={response.total}).");
 
             ApplyOnlineBestScoresToCaches();
         }
@@ -214,6 +234,7 @@ namespace ExScoringMod
             }
 
             onlineBestScores.Clear();
+            onlineRanks.Clear(); // the run history carries no ranks — the rank labels stay empty
             for (int i = 0; i < response.runs.Length; i++)
             {
                 MyRunsApiEntry run = response.runs[i];
@@ -239,6 +260,76 @@ namespace ExScoringMod
                 return;
 
             onlineBestScores[key] = new OnlineBestScore { judgementPercent = judgementPercent, failed = failed };
+        }
+
+        /// <summary>Keeps a /me/bests entry's ranks (v2.62), if the server sent any. A server older
+        /// than v2.62, or a hidden player, sends none, and that song's rank labels stay empty.</summary>
+        private static void StoreOnlineRank(MyBestsApiEntry best)
+        {
+            if (best == null || string.IsNullOrEmpty(best.songId) || string.IsNullOrEmpty(best.difficulty)) return;
+            if (best.globalRank == null && best.friendsRank == null) return;
+
+            onlineRanks[best.songId + "|" + best.difficulty] = new OnlineRank
+            {
+                globalRank = best.globalRank,
+                globalTotal = best.globalTotal,
+                friendsRank = best.friendsRank
+            };
+        }
+
+        /// <summary>
+        /// Called by SubmitRunCoroutine (ApiClient.cs) once an upload succeeds. The response's rank
+        /// is the player's new global rank on that chart, applied right away. Then one
+        /// view=friends fetch (Section 4) gives the friends rank (requesterRank) and the new global
+        /// total (total is global in every view). A null requesterRank there means the player is
+        /// hidden (Section 17.3), so both labels are cleared. Results for an account other than the
+        /// current one (API key changed meanwhile) are dropped.
+        /// </summary>
+        internal static void OnRunSubmittedForRanks(string songId, string difficulty, int rank, string apiKey)
+        {
+            if (string.IsNullOrEmpty(songId) || string.IsNullOrEmpty(difficulty)) return;
+            if (string.IsNullOrEmpty(apiKey) || apiKey != Config.ApiKey) return;
+
+            string key = songId + "|" + difficulty;
+
+            onlineRanks.TryGetValue(key, out OnlineRank existing);
+            OnlineRank updated = new OnlineRank
+            {
+                globalRank = rank > 0 ? rank : existing?.globalRank,
+                globalTotal = existing?.globalTotal,
+                friendsRank = existing?.friendsRank
+            };
+            if (updated.globalRank.HasValue && (updated.globalTotal ?? 0) < updated.globalRank.Value)
+                updated.globalTotal = updated.globalRank; // first score on this chart: the real total comes with the fetch below
+            onlineRanks[key] = updated;
+
+            DebugLog.Log($"[ExScoring] Song-list ranks: {key} global rank {updated.globalRank?.ToString() ?? "-"} from the upload, fetching friends rank.");
+            RefreshAllVisibleSongRowRanks();
+
+            FetchLeaderboard(songId, difficulty, 1, "friends", response =>
+            {
+                if (apiKey != Config.ApiKey) return; // account changed while this was in flight
+                if (response == null) return;        // keep the global rank we already have
+
+                if (response.requesterRank == null)
+                {
+                    onlineRanks.Remove(key);
+                    DebugLog.Log($"[ExScoring] Song-list ranks: {key} has no friends rank after the upload (hidden player?), labels cleared.");
+                }
+                else
+                {
+                    if (!onlineRanks.TryGetValue(key, out OnlineRank current))
+                    {
+                        current = updated;
+                        onlineRanks[key] = current;
+                    }
+                    current.friendsRank = response.requesterRank;
+                    current.globalTotal = Mathf.Max(response.total, current.globalRank ?? 0);
+                    DebugLog.Log($"[ExScoring] Song-list ranks: {key} friends rank {current.friendsRank}, global {current.globalRank?.ToString() ?? "-"}/{current.globalTotal}.");
+                }
+
+                RefreshAllVisibleSongRowRanks();
+            });
         }
 
         /// <summary>
@@ -340,6 +431,21 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// Re-applies only the rank labels on every on-screen row (cheap: no score lookups). Used
+        /// when ranks change after an upload. EX only — native owns the labels otherwise.
+        /// </summary>
+        public static void RefreshAllVisibleSongRowRanks()
+        {
+            if (!Config.ExType || !VirtualSongList.IsActive) return;
+
+            foreach (string songId in VirtualSongList.CurrentViewSongIDs)
+                ApplySongRowRanks(VirtualSongList.GetBoundItem(songId));
+
+            foreach (string mapKey in VirtualSongList.CurrentViewMapKeys)
+                ApplySongRowRanks(VirtualSongList.GetBoundItem(mapKey));
+        }
+
+        /// <summary>
         /// Replaces a song-list row's native high-score/percent/stars with our best saved EX run for
         /// that song+difficulty, whenever EX scoring is on. EX rows show only the judgement percent
         /// and grade — the raw judgement score is never shown, so highScoreLabel stays hidden for
@@ -397,6 +503,10 @@ namespace ExScoringMod
                 // Once-per-launch fetch of leaderboard-only bests (no-op after the first call).
                 EnsureOnlineBestScores();
 
+                // Rank labels follow every score refresh (row bind, difficulty change, scoring type
+                // change), since those all come through here.
+                ApplySongRowRanks(__instance);
+
                 string songId = __instance.mSongData.songID;
                 KataConfig.Difficulty difficulty = KataConfig.I.GetDifficulty();
 
@@ -435,18 +545,16 @@ namespace ExScoringMod
         /// <summary>
         /// Native SongSelectItem.Init() calls UpdateHighScoreInfo() once, then unconditionally calls
         /// UpdateLeaderboardInfo() (when not in party/campaign) — which does its own global/friends
-        /// leaderboard rank lookups (GetGlobalPositionForSong / GetFriendsPosition), sets the rank
-        /// labels/icons, and THEN calls UpdateHighScoreInfo() a second time. Confirmed via decompile +
-        /// [VList-PERF] logging: those two rank lookups cost ~20-40 ms PER SONG, synchronously, on
-        /// every row that gets freshly Init()'d (i.e. every row landing on a song its pool slot wasn't
-        /// already showing) — with ~9-24 rows binding in a single SetView call when a folder opens,
-        /// that alone produced the ~300ms main-thread stall behind the VR reprojection "catch-up" itch.
+        /// leaderboard rank lookups (GetGlobalPositionForSong / GetFriendsPosition, both through
+        /// SongSelect.GetLeaderboardData), sets the rank labels/icons, and THEN calls
+        /// UpdateHighScoreInfo() a second time. Confirmed via decompile + [VList-PERF] logging: those
+        /// two rank lookups cost ~20-40 ms PER SONG, synchronously, on every row that gets freshly
+        /// Init()'d — with ~9-24 rows binding in a single SetView call when a folder opens, that
+        /// alone produced the ~300ms main-thread stall behind the VR reprojection "catch-up" itch.
         ///
-        /// The EX layout never reads globalPositionLabel / friendsPositionLabel / globalIcon /
-        /// friendsIcon (grep confirms zero references anywhere in this mod), so none of that
-        /// computation's output is ever shown. Skip it outright for EX rows — explicitly hiding the
-        /// four elements first so a pooled row reused from a previous song can't show a stale rank —
-        /// rather than just spreading the cost across frames, since the work itself is unnecessary here.
+        /// For EX rows native is still skipped outright, but the labels now show the player's EX
+        /// ranks (ApiContract.md v2.62) instead of being hidden — see ApplySongRowRanks. Its second
+        /// UpdateHighScoreInfo call isn't needed: Init already made the first one.
         /// Audica-native scoring (ExType false) is untouched: native runs exactly as before.
         /// </summary>
         [HarmonyPatch(typeof(SongSelectItem), "UpdateLeaderboardInfo")]
@@ -456,16 +564,101 @@ namespace ExScoringMod
             {
                 if (!Config.ExType) return true; // native runs fully — unrelated to Audica-scoring mode
 
-                if (__instance != null)
-                {
-                    if (__instance.globalPositionLabel != null) __instance.globalPositionLabel.gameObject.SetActive(false);
-                    if (__instance.friendsPositionLabel != null) __instance.friendsPositionLabel.gameObject.SetActive(false);
-                    if (__instance.globalIcon != null) __instance.globalIcon.SetActive(false);
-                    if (__instance.friendsIcon != null) __instance.friendsIcon.SetActive(false);
-                }
+                ApplySongRowRanks(__instance);
 
                 return false; // skip native: rank lookups + label/icon updates + its own UpdateHighScoreInfo call
             }
+        }
+
+        /// <summary>
+        /// The leaderboard key a row's score and ranks are stored under: the song at the list's
+        /// difficulty, or for a community map row that map's leaderboard ID at Expert (one chart
+        /// only). False when there's nothing to look up (no song data, or a map whose ID isn't
+        /// computable yet).
+        /// </summary>
+        private static bool TryGetRowLeaderboardKey(SongSelectItem item, out string key)
+        {
+            key = null;
+            if (item == null || item.mSongData == null) return false;
+
+            string songId = item.mSongData.songID;
+            KataConfig.Difficulty difficulty = KataConfig.I.GetDifficulty();
+
+            string mapPath = VirtualSongList.MapPathForItem(item);
+            if (mapPath != null)
+            {
+                string mapId = CommunityMapManager.LeaderboardIdForPath(mapPath);
+                if (mapId == null) return false;
+                songId = mapId;
+                difficulty = KataConfig.Difficulty.Expert;
+            }
+
+            if (string.IsNullOrEmpty(songId)) return false;
+            key = ExRowCacheKey(songId, difficulty);
+            return true;
+        }
+
+        /// <summary>
+        /// Fills a row's native global/friends rank labels with the player's EX ranks, the same way
+        /// native UpdateLeaderboardInfo does (Ghidra, 2026-11-21): both labels active; global text
+        /// = SongSelectItem.GetGlobalPositionString(rank, total) ("12th", or "TOP 99%" further
+        /// down), friends text = SongSelectItem.AddOrdinal(max(1, rank)) ("2nd"), or "" without a
+        /// rank; each icon shown only when its label's text isn't empty. Both helpers are pure
+        /// formatters (9 calls in 0.223 ms in UnityExplorer), so this is cheap per row. In party or
+        /// campaign — where native doesn't run its rank code at all — the labels and icons are
+        /// hidden, as before.
+        /// </summary>
+        private static void ApplySongRowRanks(SongSelectItem item)
+        {
+            if (item == null) return;
+
+            if (item.mSongData == null || MenuState.IsInParty() || MenuState.IsInCampaign())
+            {
+                HideSongRowRanks(item);
+                return;
+            }
+
+            string globalText = "";
+            string friendsText = "";
+
+            if (TryGetRowLeaderboardKey(item, out string key) && onlineRanks.TryGetValue(key, out OnlineRank ranks))
+            {
+                if (ranks.globalRank.HasValue && ranks.globalRank.Value > 0)
+                {
+                    int rank = ranks.globalRank.Value;
+                    int total = Mathf.Max(ranks.globalTotal ?? rank, rank);
+                    try { globalText = SongSelectItem.GetGlobalPositionString(rank, total) ?? ""; }
+                    catch (System.Exception ex) { DebugLog.Log($"[ExScoring] GetGlobalPositionString({rank}, {total}) failed: {ex.Message}"); }
+                }
+
+                if (ranks.friendsRank.HasValue && ranks.friendsRank.Value > 0)
+                {
+                    int rank = Mathf.Max(1, ranks.friendsRank.Value);
+                    try { friendsText = SongSelectItem.AddOrdinal(rank) ?? ""; }
+                    catch (System.Exception ex) { DebugLog.Log($"[ExScoring] AddOrdinal({rank}) failed: {ex.Message}"); }
+                }
+            }
+
+            SetRankLabel(item.globalPositionLabel, item.globalIcon, globalText);
+            SetRankLabel(item.friendsPositionLabel, item.friendsIcon, friendsText);
+        }
+
+        private static void SetRankLabel(TMPro.TextMeshProUGUI label, GameObject icon, string text)
+        {
+            if (label != null)
+            {
+                label.text = text;
+                label.gameObject.SetActive(true);
+            }
+            if (icon != null) icon.SetActive(!string.IsNullOrEmpty(text));
+        }
+
+        private static void HideSongRowRanks(SongSelectItem item)
+        {
+            if (item.globalPositionLabel != null) item.globalPositionLabel.gameObject.SetActive(false);
+            if (item.friendsPositionLabel != null) item.friendsPositionLabel.gameObject.SetActive(false);
+            if (item.globalIcon != null) item.globalIcon.SetActive(false);
+            if (item.friendsIcon != null) item.friendsIcon.SetActive(false);
         }
 
         private static IEnumerator LoadRowScoreCoroutine(string songId, KataConfig.Difficulty difficulty, string key)

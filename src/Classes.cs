@@ -601,6 +601,22 @@ namespace ExScoringMod
             public float judgementPercent;
             public bool failed;
             public long unixTimestamp;
+
+            /// <summary>
+            /// The player's rank on this song+difficulty's public leaderboard (ApiContract.md v2.62,
+            /// Section 5b, only sent with ?ranks=true). null when the server doesn't send it (older
+            /// server) or the player is hidden. Shown in the song list's native global rank label.
+            /// </summary>
+            public int? globalRank;
+
+            /// <summary>Ranked players on that leaderboard (v2.62, Section 4's total). null as above.</summary>
+            public int? globalTotal;
+
+            /// <summary>
+            /// The player's rank among themselves and their friends (v2.62, Section 4 view=friends
+            /// requesterRank). 1 with no friends. null as above. Shown in the friends rank label.
+            /// </summary>
+            public int? friendsRank;
         }
 
         /// <summary>

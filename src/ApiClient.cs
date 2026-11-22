@@ -131,6 +131,7 @@ namespace ExScoringMod
         private static IEnumerator SubmitRunCoroutine(string songId, string difficulty, byte[] gzipBody)
         {
             string url = ApiBaseUrl + "/api/runs";
+            string submitApiKey = Config.ApiKey; // the account this run is uploaded to (rank cache guard)
 
             UnityWebRequest request = new UnityWebRequest(url, "POST");
             try
@@ -159,6 +160,10 @@ namespace ExScoringMod
                         $"mapDataNeeded={response.mapDataNeeded}");
 
                     MpResultsHold.NoteRunSubmitted(response.isPersonalBest, response.rank);
+
+                    // Song-list rank labels (ApiContract.md v2.62): global rank from this response,
+                    // then one view=friends fetch for the friends rank and the new global total.
+                    OnRunSubmittedForRanks(songId, difficulty, response.rank, submitApiKey);
 
                     string statusText = response.isPersonalBest
                         ? $"Personal Best!\nRank #{response.rank}"
@@ -571,6 +576,12 @@ namespace ExScoringMod
         /// path is logged first. The second argument is the HTTP status code (0 when no request was
         /// made or it never got a response), so the caller can tell a 404 (server not updated to
         /// v2.36 yet → fall back to FetchMyRuns) from any other failure.
+        ///
+        /// Asks for ?ranks=true (ApiContract.md v2.62), which adds each entry's globalRank /
+        /// globalTotal / friendsRank for the song list's rank labels. A server older than v2.62
+        /// ignores the parameter and leaves those fields out (they stay null). If a server rejects
+        /// the parameter with a 400 instead, the request is retried once without it, so the scores
+        /// still load and only the rank labels stay empty.
         /// </summary>
         public static void FetchMyBests(Action<MyBestsApiResponse, long> onComplete)
         {
@@ -582,12 +593,21 @@ namespace ExScoringMod
             }
 
             DebugLog.Log("[ExScoring] FetchMyBests: starting.");
-            MelonCoroutines.Start(FetchMyBestsCoroutine(onComplete));
+            MelonCoroutines.Start(FetchMyBestsCoroutine(true, (response, statusCode) =>
+            {
+                if (response == null && statusCode == 400)
+                {
+                    DebugLog.Log("[ExScoring] FetchMyBests: server rejected ?ranks=true (400), retrying without ranks.");
+                    MelonCoroutines.Start(FetchMyBestsCoroutine(false, onComplete));
+                    return;
+                }
+                onComplete?.Invoke(response, statusCode);
+            }));
         }
 
-        private static IEnumerator FetchMyBestsCoroutine(Action<MyBestsApiResponse, long> onComplete)
+        private static IEnumerator FetchMyBestsCoroutine(bool withRanks, Action<MyBestsApiResponse, long> onComplete)
         {
-            string url = $"{ApiBaseUrl}/api/users/me/bests";
+            string url = withRanks ? $"{ApiBaseUrl}/api/users/me/bests?ranks=true" : $"{ApiBaseUrl}/api/users/me/bests";
 
             DebugLog.Log($"[ExScoring] FetchMyBests: GET {url}");
 
@@ -637,7 +657,10 @@ namespace ExScoringMod
                     yield break;
                 }
 
-                DebugLog.Log($"[ExScoring] FetchMyBests succeeded: bests={response.bests.Length} total={response.total} ({body.Length} chars)");
+                int ranked = 0;
+                for (int i = 0; i < response.bests.Length; i++)
+                    if (response.bests[i]?.globalRank != null) ranked++;
+                DebugLog.Log($"[ExScoring] FetchMyBests succeeded: bests={response.bests.Length} total={response.total} withRanks={withRanks} ranked={ranked} ({body.Length} chars)");
                 onComplete?.Invoke(response, statusCode);
             }
             finally
