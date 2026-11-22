@@ -28,8 +28,8 @@ namespace ExScoringMod
         private static readonly Vector3 IconsLocalPosition = new Vector3(1.6f, 0f, -0.06f);
         private const float IconSize = 0.32f;      // edge length of each square icon's mesh (before IconScale)
         // Each icon keeps its own fixed slot, side by side, whether or not the other one shows.
-        private static readonly Vector3 MineIconLocalPosition = new Vector3(9f, 0f, 0f);
-        private static readonly Vector3 OffGridIconLocalPosition = new Vector3(11f, 0f, 0f);
+        private static readonly Vector3 MineIconLocalPosition = new Vector3(6.4f, 0f, 0f);
+        private static readonly Vector3 OffGridIconLocalPosition = new Vector3(11.4f, 0f, 0f);
         private static readonly Vector3 IconScale = new Vector3(6f, 6f, 6f);
 
         // ── Tuning: colours ──
