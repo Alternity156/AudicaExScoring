@@ -283,6 +283,10 @@ namespace ExScoringMod
     ///    show the beam, the muzzle flash and the gun's fire animation on that layer too (PlayShot's
     ///    in-song branch), straight along the gun's aim: no rebounds, no beam dust, no sounds. They
     ///    are left out of every hit test (rebounds, thrown guns, headshots).
+    ///  - Diorama (2026-11-21): while SpectatorDiorama shows the avatar (no window camera in the
+    ///    head), its head and body are shown again (SetSongHeadBodyShown, called by Show and Hide):
+    ///    the renderers the song look turned off, and only those, so parts hidden in the model stay
+    ///    hidden. They are the watched player's own (MpCosmetics) head and body, built as usual.
     ///
     /// From the UnityExplorer console: ExScoringMod.MpPresence.DebugDump();
     /// </summary>
@@ -738,6 +742,11 @@ namespace ExScoringMod
             public bool InSong;
             /// <summary>v2.53: the current avatar already got the song look (ApplySongLook).</summary>
             public bool SongLook;
+            /// <summary>
+            /// The head's and body's renderers the song look turned off (the ones that were on), so the
+            /// diorama can show them again (SetSongHeadBodyShown). Emptied when the root is destroyed.
+            /// </summary>
+            public readonly List<Renderer> SongHiddenRenderers = new List<Renderer>();
 
             // Built lazily, once templates exist.
             public GameObject Root;
@@ -2073,6 +2082,34 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// 2026-11-21: shows (diorama) or hides (window: its camera sits in the head) the head and body
+        /// of the in-song avatar on this root, the renderers ApplySongLook turned off. From
+        /// SpectatorDiorama.Show and Hide, so the window camera never sees the inside of the head.
+        /// </summary>
+        internal static void SetSongHeadBodyShown(Transform root, bool shown)
+        {
+            if (root == null) return;
+            foreach (Remote remote in remotes.Values)
+            {
+                if (remote.Root == null || remote.Root.transform != root) continue;
+                if (!remote.SongLook) return; // ApplySongLook will ask IsShownFor itself
+                SetRenderersEnabled(remote.SongHiddenRenderers, shown);
+                Log($"{remote.UserId}: head and body {(shown ? "shown" : "hidden")} ({remote.SongHiddenRenderers.Count} renderers)");
+                return;
+            }
+        }
+
+        private static void SetRenderersEnabled(List<Renderer> renderers, bool enabled)
+        {
+            for (int i = renderers.Count - 1; i >= 0; i--)
+            {
+                Renderer r = renderers[i];
+                if (r == null) { renderers.RemoveAt(i); continue; }
+                if (r.enabled != enabled) r.enabled = enabled;
+            }
+        }
+
+        /// <summary>
         /// v2.53: makes a freshly built avatar a spectator-window-only one, for a watched player in a
         /// song: every object on SongOnlyLayer, the head's and body's renderers off (the window's
         /// camera sits at the head; the objects stay, since the window reads the head's pose), and
@@ -2086,6 +2123,9 @@ namespace ExScoringMod
             {
                 SetLayerRecursive(remote.Root, SongOnlyLayer);
 
+                // Shown again while the diorama shows this avatar (a disc rebuild runs this again
+                // on the same root): the window camera is off then.
+                bool shown = SpectatorDiorama.IsShownFor(remote.Root.transform);
                 for (int p = 0; p < 2; p++)
                 {
                     Transform part = p == 0 ? remote.Head : remote.Body;
@@ -2093,9 +2133,12 @@ namespace ExScoringMod
                     var renderers = part.GetComponentsInChildren<Renderer>(true);
                     for (int i = 0; i < renderers.Length; i++)
                     {
-                        if (renderers[i] != null) renderers[i].enabled = false;
+                        Renderer r = renderers[i];
+                        if (r == null || !r.enabled) continue;
+                        if (!remote.SongHiddenRenderers.Contains(r)) remote.SongHiddenRenderers.Add(r);
                     }
                 }
+                SetRenderersEnabled(remote.SongHiddenRenderers, shown);
 
                 var colliders = remote.Root.GetComponentsInChildren<Collider>(true);
                 for (int i = 0; i < colliders.Length; i++)
@@ -3946,6 +3989,7 @@ namespace ExScoringMod
             remote.NameHeadset = remote.NameSpectator = null;
             remote.AppliedName = null;
             remote.SongLook = false;
+            remote.SongHiddenRenderers.Clear(); // destroyed with the root
             remote.BodyInit = false;
             remote.HeadshotStart = -1f;
             remote.HeadshotRenderers = null; // destroyed with the root

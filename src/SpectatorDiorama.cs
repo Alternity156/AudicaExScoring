@@ -34,11 +34,13 @@ namespace ExScoringMod
     /// SpawnerDome, local (0, -1.5, 6) from their root) at the given centre, facing +z, upright.
     ///   MpPresence.Tick asks Place for the avatar root's world pose every frame instead of its seat
     ///   (the only hook in MpPresence), so everything drawn from that root this frame is drawn in the
-    ///   diorama: head, hands and guns (localPosition under the root, scaled with it), the targets
+    ///   diorama: head, body, hands and guns (localPosition under the root, scaled with it), the targets
     ///   (SpectatorTargets puts its root on the avatar root's pose every frame; Show parents it under
     ///   the avatar root, so it also takes the scale), score popups (under the avatar root), and the
     ///   world-space lines worked out from those positions (chain and simultaneous lines, sustain
     ///   beam points, shot beams).
+    ///   Head and body: the song look hides them for the window (its camera sits in the head); Show
+    ///   turns them back on and Hide off again (MpPresence.SetSongHeadBodyShown).
     ///   Widths: LateTick (from ExScoring.OnLateUpdate) multiplies every LineRenderer under the avatar
     ///   root by the scale each frame, after their owners have set this frame's width (see ScaledLine);
     ///   MpPresence scales the watched player's shot beams when it fires them (ScaleOf), since they
@@ -300,6 +302,7 @@ namespace ExScoringMod
                 triedTargets = null;
                 tried = true;
                 CollectCameras(Camera.main);
+                MpPresence.SetSongHeadBodyShown(avatar, true); // no window camera in the head now
                 var names = new List<string>();
                 foreach (ShownCamera c in shownCameras) names.Add(c.Name);
                 Log($"shown: '{avatar.name}' at {V(centre)}, scale {scale:0.###}, on {string.Join(", ", names)}");
@@ -350,6 +353,12 @@ namespace ExScoringMod
         internal static float ScaleOf(Transform root)
         {
             return tried && root != null && root == triedAvatar ? placedScale : 1f;
+        }
+
+        /// <summary>Whether the diorama is shown for this avatar root (MpPresence shows its head and body then).</summary>
+        internal static bool IsShownFor(Transform root)
+        {
+            return tried && root != null && root == triedAvatar;
         }
 
         /// <summary>
@@ -516,7 +525,11 @@ namespace ExScoringMod
                 triedTargets.localScale = Vector3.one;
                 UnityEngine.Object.DontDestroyOnLoad(triedTargets.gameObject); // as SpectatorTargets made it
             }
-            if (triedAvatar != null) triedAvatar.localScale = avatarScaleBefore;
+            if (triedAvatar != null)
+            {
+                triedAvatar.localScale = avatarScaleBefore;
+                MpPresence.SetSongHeadBodyShown(triedAvatar, false); // before the window camera is back
+            }
             int bit = 1 << MpPresence.SongOnlyLayer;
             foreach (ShownCamera c in shownCameras)
             {
