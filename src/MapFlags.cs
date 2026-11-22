@@ -9,8 +9,8 @@ namespace ExScoringMod
     /// <summary>
     /// Song-list warning icons for unconventional charts, shown at the right edge of each song row:
     ///
-    ///  • Mine icon — white if the chart has any mines (Dodge), red if at least one mine sits where it
-    ///    can hit the player (see MineCanHit).
+    ///  • Mine icon — white if the chart has any mines (Dodge), red if at least one mine comes close
+    ///    enough to a still, centred head to hit or nearly hit the player (see MineCanHit).
     ///  • 360 icon — shown if any non-melee target goes past the default grid to the left or right
     ///    (or over the top and behind). Tinted green → orange → red by how far it goes: green just
     ///    past the grid edge, red directly behind the player.
@@ -48,16 +48,19 @@ namespace ExScoringMod
         private const float OffGridToleranceDeg = 0.5f; // ignore float noise right at the grid edge
         private const float RadToDeg = (float)(180.0 / Math.PI); // Mathf.Rad2Deg is a const, stripped from the unhollowed Mathf
 
-        // ── Mines: melee lanes (pitch 98-101) in MeleeHeightAdjust space ──
-        // The hit box below is the bounding box of a mapper's "these are the locations where the player
-        // will get hit" test chart: lane position + gridOffset lands within ±0.23 sideways and between
-        // the two lane heights. Mines at the default lane spots (±0.35) don't hit.
-        // Not verified in-game beyond that chart — widen these if a mine hits outside the box.
+        // ── Mines: melee lanes (pitch 98-101) in MeleeHeightAdjust space (claude/Mine-Hit-Findings.md) ──
+        // The game (Target.Update) hits the player when, at the mine's tick, the head (camera) is within
+        // 0.45 m of the mine's holder. The icon goes red when a holder comes within that distance plus a
+        // generous margin of a still, centred head, so mines that only miss by a little are flagged too.
         private const float MineLaneX = 0.35f;
-        private const float MineLowY = 0.371f, MineHighY = 0.871f;
-        private const float MineHitHalfWidth = 0.23f;
-        private const float MineHitMinY = 0.371f, MineHitMaxY = 0.871f;
-        private const float MineHitEpsilon = 0.01f;
+        private const float MineLowY = 0.3712f, MineHighY = 0.8712f;
+        private const float MineLaneZ = 0.75f;
+        private const float MineLeftYaw = 141.38f, MineRightYaw = 218.62f;
+        private const float MeleeSpawnerScale = 0.5f;
+        private static readonly Vector3 HeadInMeleeSpace = new Vector3(0f, 0.9069f, -0.0361f); // measured, player standing centred
+        private const float MineHitRadius = 0.45f;   // game's own check (distance² > 0.2025 = dodged)
+        private const float MineDangerMargin = 0.45f; // extra distance still flagged; 0.9 m total catches mines at the default high lane spots (0.86 m), which players do have to avoid
+        private const float MineDangerRadius = MineHitRadius + MineDangerMargin;
 
         public struct Result
         {
@@ -178,24 +181,24 @@ namespace ExScoringMod
 
         private static bool MineCanHit(SongCues.Cue cue)
         {
-            float laneX, laneY;
+            float laneX, laneY, yaw;
             switch (cue.pitch)
             {
-                case 98: laneX = -MineLaneX; laneY = MineLowY; break;
-                case 99: laneX = MineLaneX; laneY = MineLowY; break;
-                case 100: laneX = -MineLaneX; laneY = MineHighY; break;
-                case 101: laneX = MineLaneX; laneY = MineHighY; break;
+                case 98: laneX = -MineLaneX; laneY = MineLowY; yaw = MineLeftYaw; break;
+                case 99: laneX = MineLaneX; laneY = MineLowY; yaw = MineRightYaw; break;
+                case 100: laneX = -MineLaneX; laneY = MineHighY; yaw = MineLeftYaw; break;
+                case 101: laneX = MineLaneX; laneY = MineHighY; yaw = MineRightYaw; break;
                 default: return false; // a mine outside the melee lanes — placement unknown
             }
 
-            // Holder offset is 2 × gridOffset inside a spawner scaled 0.5 → 1:1 in lane units.
-            // Mirror mode only flips x, and the box is symmetric.
-            float x = laneX + cue.gridOffset.x;
-            float y = laneY + cue.gridOffset.y;
+            // Holder local position inside its spawner = (2·gx, 2·gy, zOffset); the spawner is scaled 0.5
+            // and yawed, so in MeleeHeightAdjust space the holder sits at lane + yaw × (gx, gy, zOffset/2).
+            // Mirror mode puts the mine at the mirror image of this spot, which is the same distance from a
+            // centred head, so it needs no separate case.
+            Vector3 local = new Vector3(2f * cue.gridOffset.x, 2f * cue.gridOffset.y, cue.zOffset) * MeleeSpawnerScale;
+            Vector3 holder = new Vector3(laneX, laneY, MineLaneZ) + Quaternion.Euler(0f, yaw, 0f) * local;
 
-            return Mathf.Abs(x) <= MineHitHalfWidth + MineHitEpsilon
-                && y >= MineHitMinY - MineHitEpsilon
-                && y <= MineHitMaxY + MineHitEpsilon;
+            return (holder - HeadInMeleeSpace).sqrMagnitude <= MineDangerRadius * MineDangerRadius;
         }
 
         public static Color OffGridColor(float severity)
