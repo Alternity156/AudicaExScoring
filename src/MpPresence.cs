@@ -149,6 +149,9 @@ namespace ExScoringMod
     /// v2.49: on native models, GunModel.UpdateColor's lists on top, through a property block on _Color:
     /// own colour (metal, glow, tinted particles), the other hand's colour (otherGun*), and the muzzle
     /// at rest (colour x 0.5).
+    /// v2.61: the form indicator (form_indicator and its FakeBloom glows) gets the own colour as well,
+    /// and the muzzle and form colours are re-applied every frame in LateTick (ReapplySightColors).
+    /// Before, the form indicator kept its materials' asset colour, orange, on every remote gun.
     ///
     /// Body: TorsoTrack.Update's math on the remote head and hands (Ghidra):
     ///   dir = (lHand - head) + (rHand - head) + head.forward, flattened, normalised
@@ -536,6 +539,11 @@ namespace ExScoringMod
             public readonly List<Renderer> Own = new List<Renderer>();
             public readonly List<Renderer> Other = new List<Renderer>();
             public readonly List<Renderer> Muzzle = new List<Renderer>();
+            /// <summary>v2.61: every renderer under the form indicator (FakeBloom children included).</summary>
+            public readonly List<Renderer> Form = new List<Renderer>();
+            /// <summary>v2.61: the colours last given by ApplyGunRigColors, re-applied each frame (ReapplySightColors).</summary>
+            public Color OwnColor, MuzzleColor;
+            public bool HasColor;
             public Transform Trigger;
             public Transform[] Fire;
             public Vector3[] FireRestPos;
@@ -2949,6 +2957,15 @@ namespace ExScoringMod
 
             CheckThrownGunHeadshots();
             RememberRemoteGunPoses();
+
+            try
+            {
+                ReapplySightColors();
+            }
+            catch (Exception ex)
+            {
+                Log($"remote sight colours failed: {ex.Message}");
+            }
         }
 
         /// <summary>
@@ -3795,14 +3812,45 @@ namespace ExScoringMod
         /// literal 5740, as SetMaterialColor). Then the muzzle at rest, as Muzzle.UpdateMuzzle with
         /// mMuzzle = 0: offColor = colour x 0.5 (alpha kept) on every renderer under it; set last, since
         /// the game sets it every frame after the colour change.
+        /// v2.61: the form indicator gets the own colour too (formIndicator.color = own; its materials,
+        /// GunFormIndicator / GunMuzzle / GunMuzzleGlow, are orange in the asset and the game only colours
+        /// them through a property block, which a copy doesn't keep). The muzzle and form colours are
+        /// kept on the rig and re-applied every frame by ReapplySightColors.
         /// </summary>
         private static void ApplyGunRigColors(GunRig rig, Color own, Color other)
         {
             if (rig == null) return;
             if (gunBlock == null) gunBlock = new MaterialPropertyBlock();
+            rig.OwnColor = own;
+            rig.MuzzleColor = new Color(own.r * MuzzleOffFactor, own.g * MuzzleOffFactor, own.b * MuzzleOffFactor, own.a);
+            rig.HasColor = true;
             SetRendererColor(rig.Own, own);
             SetRendererColor(rig.Other, other);
-            SetRendererColor(rig.Muzzle, new Color(own.r * MuzzleOffFactor, own.g * MuzzleOffFactor, own.b * MuzzleOffFactor, own.a));
+            SetRendererColor(rig.Form, rig.OwnColor);
+            SetRendererColor(rig.Muzzle, rig.MuzzleColor);
+        }
+
+        /// <summary>
+        /// v2.61, from LateTick (after every Animator): the muzzle and form indicator colours again on
+        /// every shown remote gun, as the game sets them every frame (Muzzle.UpdateMuzzle,
+        /// FormIndicator.UpdateForm), so an Animator writing _Color (muzzle_appear / muzzle_disappear /
+        /// muzzle_loop) can't leave them at the asset's orange.
+        /// </summary>
+        private static void ReapplySightColors()
+        {
+            if (remotes.Count == 0) return;
+            if (gunBlock == null) gunBlock = new MaterialPropertyBlock();
+            foreach (Remote remote in remotes.Values)
+            {
+                if (remote.Root == null || !remote.Root.activeSelf) continue;
+                for (int h = 0; h < 2; h++)
+                {
+                    GunRig rig = remote.Guns[h];
+                    if (rig == null || !rig.HasColor) continue;
+                    SetRendererColor(rig.Form, rig.OwnColor);
+                    SetRendererColor(rig.Muzzle, rig.MuzzleColor);
+                }
+            }
         }
 
         private static void SetRendererColor(List<Renderer> renderers, Color color)
@@ -5151,6 +5199,13 @@ namespace ExScoringMod
                 var renderers = muzzle.GetComponentsInChildren<Renderer>(true);
                 for (int i = 0; i < renderers.Length; i++) if (renderers[i] != null) rig.Muzzle.Add(renderers[i]);
             }
+            Transform form = ResolvePath(part, parts.Form);
+            if (form != null)
+            {
+                // v2.61: every renderer under it, as the muzzle (form_indicator and its FakeBloom glows).
+                var formRenderers = form.GetComponentsInChildren<Renderer>(true);
+                for (int i = 0; i < formRenderers.Length; i++) if (formRenderers[i] != null) rig.Form.Add(formRenderers[i]);
+            }
             rig.Trigger = ResolvePath(part, parts.Trigger);
 
             rig.Fire = new Transform[parts.Fire.Count];
@@ -5577,7 +5632,7 @@ namespace ExScoringMod
         private static string GunRigDump(GunRig rig)
         {
             if (rig == null) return "-";
-            return $"own {rig.Own.Count} other {rig.Other.Count} muzzle {rig.Muzzle.Count} trigger={rig.Trigger != null} fire {rig.Fire?.Length ?? 0}{(rig.FireStart >= 0f ? " playing" : "")}";
+            return $"own {rig.Own.Count} other {rig.Other.Count} muzzle {rig.Muzzle.Count} form {rig.Form.Count} trigger={rig.Trigger != null} fire {rig.Fire?.Length ?? 0}{(rig.FireStart >= 0f ? " playing" : "")}";
         }
 
         private static void OwnMaterials(GameObject root)
