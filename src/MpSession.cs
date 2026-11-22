@@ -58,6 +58,8 @@ namespace ExScoringMod
         private const string SpectateFeature = "spectate";
         /// <summary>The v2.55 feature name: choosing to spectate (setSpectating). Doesn't need "presence".</summary>
         private const string SpectatorRoleFeature = "spectatorRole";
+        /// <summary>The v2.60 feature name: community maps as lobby songs. Doesn't need "presence".</summary>
+        private const string CommunityMapsFeature = "communityMaps";
 
         /// <summary>Pose rate without "poseRate" (a v2.39 server), as in v2.39.</summary>
         public const int DefaultPoseRateHz = 15;
@@ -131,6 +133,13 @@ namespace ExScoringMod
         /// PlayerState.spectating is meaningful. False with a v2.54 or older server and after a disconnect.
         /// </summary>
         public static bool SpectatorRoleEnabled { get; private set; }
+
+        /// <summary>
+        /// True when the last welcome listed "communityMaps" (v2.60): a SongRef may carry a
+        /// communityMap block. False with an older server and after a disconnect; map rows then
+        /// can't be suggested or selected.
+        /// </summary>
+        public static bool CommunityMapsEnabled { get; private set; }
 
         /// <summary>How many players are watching this player right now (v2.53, from watchers). 0 outside a lobby.</summary>
         public static int WatcherCount => InLobby ? watcherCount : 0;
@@ -570,7 +579,12 @@ namespace ExScoringMod
         /// "unavailable". "downloading" with a progress (0..1) is throttled to ~2/s and the latest
         /// value always gets through; any other status goes out at once. Repeats are skipped.
         /// </summary>
-        public static void SetSongStatus(string songId, string status, float? progress, string[] availableDifficulties, Action<MpError> onComplete = null)
+        /// <remarks>
+        /// v2.60: on a community map song, <paramref name="communityMapFileId"/> is the selected
+        /// map's fileId. The server ignores a status that doesn't match the selected song (no reply,
+        /// even with a reqId), so once connected this is sent without a reqId and nothing waits.
+        /// </remarks>
+        public static void SetSongStatus(string songId, string status, float? progress, string[] availableDifficulties, Action<MpError> onComplete = null, string communityMapFileId = null)
         {
             JObject fields = new JObject
             {
@@ -579,6 +593,7 @@ namespace ExScoringMod
                 ["availableDifficulties"] = new JArray(availableDifficulties ?? new string[0])
             };
             if (progress.HasValue) fields["progress"] = Math.Max(0f, Math.Min(1f, progress.Value));
+            if (!string.IsNullOrEmpty(communityMapFileId)) fields["communityMapFileId"] = communityMapFileId;
 
             string key = fields.ToString(Formatting.None);
             if (key == lastSentSongStatusKey)
@@ -598,6 +613,13 @@ namespace ExScoringMod
 
             pendingDownloadProgress = null;
             lastSentSongStatusKey = key;
+            if (IsConnected)
+            {
+                // No reply comes for an ignored status (v2.60), so don't wait for one.
+                SendFireAndForget("setSongStatus", fields);
+                onComplete?.Invoke(null);
+                return;
+            }
             Request("setSongStatus", fields, onComplete);
         }
 
@@ -887,7 +909,7 @@ namespace ExScoringMod
         {
             StringBuilder sb = new StringBuilder();
             sb.AppendLine("[Mp] ===== MpSession =====");
-            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} spectate={SpectateEnabled} spectatorRole={SpectatorRoleEnabled} watchers={WatcherCount} cosmetics={CosmeticsEnabled} assets={AssetsEnabled} seat={MySeat}");
+            sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} spectate={SpectateEnabled} spectatorRole={SpectatorRoleEnabled} communityMaps={CommunityMapsEnabled} watchers={WatcherCount} cosmetics={CosmeticsEnabled} assets={AssetsEnabled} seat={MySeat}");
             sb.AppendLine($"[Mp] cosmetics: wanted={wantedCosmeticsKey ?? "none"} sent={(wantedCosmeticsKey != null && wantedCosmeticsKey == lastSentCosmeticsKey ? "yes" : "no")}");
             sb.AppendLine($"[Mp] clock: offset={ClockOffsetMs} ms, lastRtt={LastRttMs} ms, bestRtt={BestRttMs} ms, samples={clockSamples.Count}, serverNow={ServerNowMs}");
             sb.AppendLine($"[Mp] pending requests={pendingRequests.Count}, queued={queuedRequests.Count}, location=\"{currentLocation}\" browsing={currentBrowsingSongId ?? "none"}");
@@ -977,11 +999,11 @@ namespace ExScoringMod
                 ["modVersion"] = ExScoring.BuildInfo.Version,
                 ["platform"] = helloPlatform,
                 ["guestName"] = helloGuestName,
-                ["features"] = new JArray(PresenceFeature, PoseRateFeature, HeadshotFeature, CosmeticsFeature, GunHitFeature, SpectateFeature, SpectatorRoleFeature)
+                ["features"] = new JArray(PresenceFeature, PoseRateFeature, HeadshotFeature, CosmeticsFeature, GunHitFeature, SpectateFeature, SpectatorRoleFeature, CommunityMapsFeature)
             };
             if (!string.IsNullOrEmpty(resumeToken)) hello["resumeToken"] = resumeToken;
 
-            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}, {PoseRateFeature}, {HeadshotFeature}, {CosmeticsFeature}, {GunHitFeature}, {SpectateFeature}, {SpectatorRoleFeature}])");
+            Log($"-> hello (platform={helloPlatform}, guestName=\"{helloGuestName}\", resume={(resumeToken != null ? "yes" : "no")}, features=[{PresenceFeature}, {PoseRateFeature}, {HeadshotFeature}, {CosmeticsFeature}, {GunHitFeature}, {SpectateFeature}, {SpectatorRoleFeature}, {CommunityMapsFeature}])");
             MpClient.Send(hello.ToString(Formatting.None));
         }
 
@@ -1168,6 +1190,7 @@ namespace ExScoringMod
             GunHitEnabled = false;
             SpectateEnabled = false;
             SpectatorRoleEnabled = false;
+            CommunityMapsEnabled = false;
             watcherCount = 0;
             lastSentWatchKey = null;
             CosmeticsEnabled = false;
@@ -1206,6 +1229,8 @@ namespace ExScoringMod
             SpectateEnabled = PresenceEnabled && Array.IndexOf(welcome.features, SpectateFeature) >= 0;
             // "spectatorRole" stands alone (v2.55).
             SpectatorRoleEnabled = welcome.features != null && Array.IndexOf(welcome.features, SpectatorRoleFeature) >= 0;
+            // "communityMaps" stands alone too (v2.60).
+            CommunityMapsEnabled = welcome.features != null && Array.IndexOf(welcome.features, CommunityMapsFeature) >= 0;
             watcherCount = 0;
             lastSentWatchKey = null; // the watch is sent again on this connection
             // "cosmetics" only counts with "presence" too (v2.44); assets need the server's storage and a token.
@@ -1224,7 +1249,7 @@ namespace ExScoringMod
             MpClient.MarkWelcomed();
             nextPingAtMs = 0; // ping right away for a real clock sample
 
-            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz" : "off (" + PoseRateHz + " Hz)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} spectate={SpectateEnabled} spectatorRole={SpectatorRoleEnabled} watchers={WatcherCount} cosmetics={CosmeticsEnabled} assets={AssetsEnabled}");
+            Log($"   welcome: userId={MyUserId} nickname=\"{MyNickname}\" guest={IsGuest}{(ApiKeyRejected ? " (API key not accepted)" : "")} lobby={(welcome.lobby != null ? welcome.lobby.code : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz" : "off (" + PoseRateHz + " Hz)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} spectate={SpectateEnabled} spectatorRole={SpectatorRoleEnabled} communityMaps={CommunityMapsEnabled} watchers={WatcherCount} cosmetics={CosmeticsEnabled} assets={AssetsEnabled}");
 
             if (welcome.lobby != null)
             {
@@ -1781,7 +1806,7 @@ namespace ExScoringMod
         private static JObject SongRefToJson(MpSongRef song)
         {
             if (song == null) return null;
-            return new JObject
+            JObject json = new JObject
             {
                 ["songId"] = song.songId,
                 ["difficulty"] = song.difficulty,
@@ -1790,6 +1815,11 @@ namespace ExScoringMod
                 ["mapper"] = song.mapper,
                 ["maudicaId"] = song.maudicaId.HasValue ? (JToken)song.maudicaId.Value : JValue.CreateNull()
             };
+            // v2.60: a map sends only its fileId (the server fills in the rest). Never without the
+            // feature: the server would answer FEATURE_REQUIRED.
+            if (song.IsCommunityMap && CommunityMapsEnabled)
+                json["communityMap"] = new JObject { ["fileId"] = song.MapFileId };
+            return json;
         }
 
         // ── Helpers ──

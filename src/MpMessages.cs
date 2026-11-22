@@ -19,11 +19,60 @@ namespace ExScoringMod
         public string artist;
         public string mapper;
         public int? maudicaId;
+        /// <summary>
+        /// v2.60: set when this SongRef is a community map of songId (the parent). Absent (null)
+        /// for a normal song. The server fills everything but fileId from its own records.
+        /// </summary>
+        public MpCommunityMapRef communityMap;
+
+        /// <summary>The map's fileId, or null for a normal song.</summary>
+        [JsonIgnore]
+        public string MapFileId => string.IsNullOrEmpty(communityMap?.fileId) ? null : communityMap.fileId;
+
+        /// <summary>True when this is a community map (v2.60).</summary>
+        [JsonIgnore]
+        public bool IsCommunityMap => MapFileId != null;
+
+        /// <summary>"Title [map name]" for a map, the title otherwise.</summary>
+        [JsonIgnore]
+        public string DisplayTitle
+        {
+            get
+            {
+                string t = title ?? songId;
+                if (!IsCommunityMap) return t;
+                return string.IsNullOrEmpty(communityMap.mapName) ? t : $"{t} [{communityMap.mapName}]";
+            }
+        }
+
+        /// <summary>
+        /// The same song (v2.60): same songId and the same map file (null only equals null).
+        /// Difficulty is not compared.
+        /// </summary>
+        public static bool SameSong(MpSongRef a, MpSongRef b)
+        {
+            if (a == null || b == null) return false;
+            return a.songId == b.songId && a.MapFileId == b.MapFileId;
+        }
 
         public override string ToString()
         {
-            return $"{title ?? songId} [{difficulty}] (songId={songId}, maudicaId={(maudicaId.HasValue ? maudicaId.Value.ToString() : "null")})";
+            string map = IsCommunityMap ? $", map={communityMap.mapName ?? "?"} fileId={communityMap.fileId}" : "";
+            return $"{DisplayTitle} [{difficulty}] (songId={songId}, maudicaId={(maudicaId.HasValue ? maudicaId.Value.ToString() : "null")}{map})";
         }
+    }
+
+    /// <summary>
+    /// SongRef.communityMap (v2.60). From the server: fileId, sha256 (lowercase hex), mapName,
+    /// fileName, sizeBytes. The mod sends only fileId.
+    /// </summary>
+    public class MpCommunityMapRef
+    {
+        public string fileId;
+        public string sha256;
+        public string mapName;
+        public string fileName;
+        public long? sizeBytes;
     }
 
     /// <summary>PlayerState.browsingSong (19.3).</summary>
@@ -85,6 +134,11 @@ namespace ExScoringMod
         /// for the lobby's life. Null from an older server (LobbyPanel then counts locally).
         /// </summary>
         public int? picks;
+        /// <summary>
+        /// This player's connection has "communityMaps" (v2.60), so it can play a community map.
+        /// Null from an older server.
+        /// </summary>
+        public bool? communityMaps;
     }
 
     /// <summary>PlayerState.cosmetics (v2.44): four independent slots.</summary>
@@ -175,6 +229,20 @@ namespace ExScoringMod
         public string songId;
         public string title;
         public string difficulty;
+        /// <summary>v2.60: only mapName, for "Title [map name]". Absent for a normal song.</summary>
+        public MpCommunityMapRef communityMap;
+
+        /// <summary>"Title [map name]" for a map, the title otherwise.</summary>
+        [JsonIgnore]
+        public string DisplayTitle
+        {
+            get
+            {
+                string t = title ?? songId;
+                string m = communityMap?.mapName;
+                return string.IsNullOrEmpty(m) ? t : $"{t} [{m}]";
+            }
+        }
     }
 
     /// <summary>LobbySummary (19.2).</summary>

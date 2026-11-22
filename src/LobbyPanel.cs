@@ -695,8 +695,8 @@ namespace ExScoringMod
             string song = lobby.selectedSong == null
                 ? "No song selected"
                 : lobby.allowPlayerDifficulty
-                    ? Safe(lobby.selectedSong.title)
-                    : $"{Safe(lobby.selectedSong.title)} [{DifficultyDisplayName(lobby.selectedSong.difficulty)}]";
+                    ? Safe(lobby.selectedSong.DisplayTitle)
+                    : $"{Safe(lobby.selectedSong.DisplayTitle)} [{DifficultyDisplayName(lobby.selectedSong.difficulty)}]";
             string phase = lobby.phase == "loading" ? "Loading" : lobby.phase == "playing" ? "Playing" : "In lobby";
             // Spectators get a countdown to the end of the current song (MatchTimer).
             string timer = ExScoring.MatchTimer.GetSpectatorText(lobby);
@@ -748,7 +748,11 @@ namespace ExScoringMod
                 if (MpSession.SpectatorRoleEnabled && p.spectating) line.Append("  <color=#b48cff>Spectating</color>");
                 else line.Append(p.ready ? "  <color=#66ff66>Ready</color>" : "  <color=#c0c0c0>Not ready</color>");
 
-                string songStatus = SongStatusText(p.songStatus);
+                // v2.60: on a community map, a player whose mod can't play maps (the server marks
+                // them unavailable) needs a mod update, which says more than "can't get song".
+                string songStatus = lobby.selectedSong != null && lobby.selectedSong.IsCommunityMap && p.communityMaps == false
+                    ? "<color=#ff6666>needs a mod update</color>"
+                    : SongStatusText(p.songStatus);
                 if (songStatus.Length > 0) line.Append("  ").Append(songStatus);
                 if (!string.IsNullOrEmpty(p.difficulty) && lobby.allowPlayerDifficulty)
                 {
@@ -837,7 +841,7 @@ namespace ExScoringMod
             if (results.results == null || results.results.Length == 0) return;
 
             bool ex = Config.ExType;
-            string song = results.song != null ? $"{Safe(results.song.title)} [{results.song.difficulty}]" : "";
+            string song = results.song != null ? $"{Safe(results.song.DisplayTitle)} [{results.song.difficulty}]" : "";
             output.Add($"<b>Last match</b>  <color=#d8d8d8>{song}</color>");
 
             // The server ranks both ways; show the ranking that matches the viewer's mode.

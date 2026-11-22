@@ -237,7 +237,7 @@ namespace ExScoringMod
                 string code = summary.code;
                 string details = $"{summary.hostNickname} - {summary.playerCount}/{summary.maxPlayers} - " +
                                  (summary.phase == "lobby"
-                                     ? (summary.selectedSong != null ? $"{summary.selectedSong.title} [{summary.selectedSong.difficulty}]" : "no song yet")
+                                     ? (summary.selectedSong != null ? $"{summary.selectedSong.DisplayTitle} [{summary.selectedSong.difficulty}]" : "no song yet")
                                      : "playing");
 
                 var joinButton = OptionsMenuClone.CreateButton(0, Trim(summary.name, 24), () => JoinLobby(code),
@@ -257,7 +257,7 @@ namespace ExScoringMod
             OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, $"Lobby {lobby.code} - {lobby.name}"));
             OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0,
                 (inMatch ? "Match in progress - " : "") +
-                (lobby.selectedSong != null ? $"Song: {lobby.selectedSong.title} [{lobby.selectedSong.difficulty}]" : "No song selected yet")));
+                (lobby.selectedSong != null ? $"Song: {lobby.selectedSong.DisplayTitle} [{lobby.selectedSong.difficulty}]" : "No song selected yet")));
 
             var ready = OptionsMenuClone.CreateToggle(0, "Ready",
                 () => MpSession.MyPlayer != null && MpSession.MyPlayer.ready,
@@ -289,13 +289,13 @@ namespace ExScoringMod
             {
                 OptionsMenuClone.AddRow(OptionsMenuClone.CreateButton(0, "Withdraw Suggestion",
                     () => MpSession.SetSongChoice(null, ReportError),
-                    $"Withdraws your suggestion ({me.songChoice.title} [{me.songChoice.difficulty}])"));
+                    $"Withdraws your suggestion ({me.songChoice.DisplayTitle} [{me.songChoice.difficulty}])"));
             }
             else if (current != null && !isHost)
             {
-                OptionsMenuClone.AddRow(OptionsMenuClone.CreateButton(0, "Suggest: " + Trim(current.title, 18),
+                OptionsMenuClone.AddRow(OptionsMenuClone.CreateButton(0, "Suggest: " + Trim(current.DisplayTitle, 18),
                     () => MpSession.SetSongChoice(current, ReportError),
-                    $"Suggests {current.title} [{current.difficulty}] to the host (the song selected in the song list)"));
+                    $"Suggests {current.DisplayTitle} [{current.difficulty}] to the host (the song selected in the song list)"));
             }
             else if (!isHost)
             {
@@ -311,9 +311,9 @@ namespace ExScoringMod
                 OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, "Host"), visibility);
 
                 GameObject select = current != null
-                    ? OptionsMenuClone.CreateButton(0, "Select: " + Trim(current.title, 18),
+                    ? OptionsMenuClone.CreateButton(0, "Select: " + Trim(current.DisplayTitle, 18),
                         () => MpSession.SelectSong(current, ReportError),
-                        $"Makes {current.title} [{current.difficulty}] (selected in the song list) the lobby's song")
+                        $"Makes {current.DisplayTitle} [{current.difficulty}] (selected in the song list) the lobby's song")
                     : OptionsMenuClone.CreateHeader(0, "Pick a song in the song list");
                 OptionsMenuClone.AddRow(select);
 
@@ -361,7 +361,7 @@ namespace ExScoringMod
                 foreach (MpPlayerState p in suggesters)
                 {
                     string userId = p.userId;
-                    string text = $"{p.nickname}: {p.songChoice.title} [{p.songChoice.difficulty}]";
+                    string text = $"{p.nickname}: {p.songChoice.DisplayTitle} [{p.songChoice.difficulty}]";
                     OptionsMenuClone.AddRow(isHost
                         ? OptionsMenuClone.CreateButton(0, Trim(text, 26), () => MpSession.SelectSongFromChoiceOf(userId, ReportError),
                             "Selects " + text)
@@ -549,34 +549,26 @@ namespace ExScoringMod
             sb.Append(lobby.lobbyId).Append('|').Append(lobby.name).Append('|').Append(lobby.hostUserId)
               .Append('|').Append(lobby.visibility).Append('|').Append(lobby.maxPlayers)
               .Append('|').Append(lobby.allowPlayerDifficulty).Append('|').Append(lobby.phase)
-              .Append('|').Append(lobby.selectedSong?.songId).Append(':').Append(lobby.selectedSong?.difficulty);
+              .Append('|').Append(lobby.selectedSong?.songId).Append(':').Append(lobby.selectedSong?.MapFileId).Append(':').Append(lobby.selectedSong?.difficulty);
             if (lobby.players != null)
             {
                 foreach (MpPlayerState p in lobby.players)
                 {
                     if (p == null) continue;
                     sb.Append('|').Append(p.userId).Append(':').Append(p.nickname)
-                      .Append(':').Append(p.songChoice?.songId).Append(':').Append(p.songChoice?.difficulty);
+                      .Append(':').Append(p.songChoice?.songId).Append(':').Append(p.songChoice?.MapFileId).Append(':').Append(p.songChoice?.difficulty);
                 }
             }
             return sb.ToString();
         }
 
-        private static MpSongRef CurrentSongRef()
-        {
-            SongList.SongData song = ExScoring.selectedSongData;
-            if (song == null || KataConfig.I == null) return null;
-
-            return new MpSongRef
-            {
-                songId = song.songID,
-                difficulty = KataConfig.I.GetDifficulty().ToString(),
-                title = song.title,
-                artist = song.artist,
-                mapper = song.author,
-                maudicaId = null // the server looks it up from title/artist/mapper (Section 12)
-            };
-        }
+        /// <summary>
+        /// The song-list selection, the same one the launch panel's Select sends: for a community
+        /// map (v2.60) the parent song with the map's fileId, and null while the map can't go to
+        /// the lobby (not uploaded, or the server doesn't support maps). maudicaId is left out:
+        /// the server looks it up from title/artist/mapper (Section 12).
+        /// </summary>
+        private static MpSongRef CurrentSongRef() => LobbyLaunchButton.CurrentSongRef();
 
         private static string DefaultLobbyName()
         {

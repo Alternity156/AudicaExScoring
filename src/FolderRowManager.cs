@@ -585,8 +585,12 @@ namespace ExScoringMod
         /// branch) and never defers to the background grade load: the caller retries instead.
         /// Leaves the Options menu, playlist navigation and the add-to-playlist picker first.
         /// Returns false when the song couldn't be put in view (the caller doesn't launch).
+        ///
+        /// With <paramref name="mapPath"/> (v2.60, a community map match) the row selected is that
+        /// map's row ("cm:" + path, the parent song with the map's chart), from the Suggested Songs
+        /// folder or the Community Maps folder.
         /// </summary>
-        public static bool RevealForMatch(string songID)
+        public static bool RevealForMatch(string songID, string mapPath = null)
         {
             if (string.IsNullOrEmpty(songID)) return false;
 
@@ -596,6 +600,9 @@ namespace ExScoringMod
 
             if (!VirtualSongList.IsActive) return false;
 
+            // The row to select: the song, or the map's own row.
+            string key = mapPath != null ? CommunityMapManager.ViewKeyPrefix + mapPath : songID;
+
             // Rebuild the view first: a song downloaded since it was built (the lobby's
             // auto-download) may still be a "downloadable" row, or missing from it entirely.
             Apply();
@@ -603,17 +610,30 @@ namespace ExScoringMod
             // The match song is the lobby's song, so the Suggested Songs folder has it, and it
             // knows about songs downloaded this session (the regular folders don't until the
             // song list is reloaded).
-            if (VirtualSongList.IndexOf(songID) < 0 && MpSession.InLobby &&
+            if (VirtualSongList.IndexOf(key) < 0 && MpSession.InLobby &&
                 SongFolderManager.openFolder != LobbySongList.FolderName)
             {
                 SongFolderManager.openFolder = LobbySongList.FolderName;
                 Apply();
             }
 
-            // Its home folder otherwise. A song downloaded this session isn't in the folder map
-            // yet: rebuild it once and look again.
-            if (VirtualSongList.IndexOf(songID) < 0)
+            if (VirtualSongList.IndexOf(key) < 0 && mapPath != null)
             {
+                // A map's home is the Community Maps folder (in every sort mode). A map downloaded
+                // this session isn't listed until the maps are rescanned: rebuild once and look again.
+                if (CommunityMapManager.FindByPath(mapPath) == null)
+                    SongFolderManager.Rebuild(ExScoring.mainSongDirectory);
+                if (CommunityMapManager.FindByPath(mapPath) == null) return false;
+                if (SongFolderManager.openFolder != SongFolderManager.FolderCommunityMaps)
+                {
+                    SongFolderManager.openFolder = SongFolderManager.FolderCommunityMaps;
+                    Apply();
+                }
+            }
+            else if (VirtualSongList.IndexOf(key) < 0)
+            {
+                // Its home folder otherwise. A song downloaded this session isn't in the folder map
+                // yet: rebuild it once and look again.
                 string folder = CurrentFolderFor(songID);
                 if (folder == null && currentSort == SortMode.Default)
                 {
@@ -628,9 +648,9 @@ namespace ExScoringMod
                 }
             }
 
-            if (VirtualSongList.IndexOf(songID) < 0) return false;
+            if (VirtualSongList.IndexOf(key) < 0) return false;
 
-            VirtualSongList.ScrollToAndSelect(songID);
+            VirtualSongList.ScrollToAndSelect(key);
             return true;
         }
 

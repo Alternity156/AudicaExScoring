@@ -31,6 +31,15 @@ namespace ExScoringMod
     /// expected song ID): when another version of the map is installed under the same file
     /// name, the row says "Different version installed - shoot to update", and the download
     /// replaces it (the installed one goes to SongBackups). Auto-download does this too.
+    ///
+    /// Community maps (v2.60): a map suggestion (SongRef.communityMap) is its own row, separate
+    /// from its parent song's, titled "Title [map name] (Suggested by ...)":
+    ///  - parent and map file installed: the map's own row (CommunityMapRow), so it selects the map;
+    ///  - parent missing: the parent's Maudica row as above (the map comes after it);
+    ///  - parent installed, map file missing: a downloadable row that fetches the file from the
+    ///    AudicaEX server (CommunityMapSync.DownloadForLobby), or a red "(Unavailable to download)"
+    ///    row once the server said 404 / the bytes were wrong.
+    /// Auto-download fetches missing map files of suggestions too, after the parent.
     /// </summary>
     internal static class LobbySongList
     {
@@ -56,6 +65,18 @@ namespace ExScoringMod
 
         // Keyed by the suggestion's songId.
         private static readonly Dictionary<string, Lookup> lookups = new Dictionary<string, Lookup>();
+
+        // v2.60: community map file downloads from the AudicaEX server, keyed by fileId.
+        private class MapDownload
+        {
+            public bool downloading;
+            public int percent = -1;
+            public bool failed;     // network / write failure: shooting the row retries
+            public bool gone;       // 404 or SHA-256 mismatch: can't be had
+            public string label;
+        }
+        private static readonly Dictionary<string, MapDownload> mapDownloads = new Dictionary<string, MapDownload>();
+        private const string MapActionPrefix = "cmdl:";
 
         private static bool initialized;
         private static string lastSignature;
@@ -98,9 +119,9 @@ namespace ExScoringMod
             if (SongFolderManager.openFolder == FolderName)
             {
                 if (hostSelection != null)
-                    mine.Add(BuildRow(hostSelection, $"{hostSelection.title ?? hostSelection.songId} (Selected by host)"));
+                    mine.Add(BuildRow(hostSelection, $"{hostSelection.DisplayTitle} (Selected by host)"));
                 foreach (var entry in grouped)
-                    mine.Add(BuildRow(entry.Key, $"{entry.Key.title ?? entry.Key.songId} (Suggested by {entry.Value})"));
+                    mine.Add(BuildRow(entry.Key, $"{entry.Key.DisplayTitle} (Suggested by {entry.Value})"));
             }
 
             rows.InsertRange(insertAt, mine);
@@ -109,7 +130,8 @@ namespace ExScoringMod
         /// <summary>
         /// One entry per suggested song, in the order it was first suggested (join order), with the
         /// first suggester's song ref and every suggester's nickname ("Alternity, Bob"). Several
-        /// players may suggest the same song, possibly at different difficulties.
+        /// players may suggest the same song, possibly at different difficulties. A community map
+        /// and its parent are different songs (v2.60).
         /// </summary>
         private static List<KeyValuePair<MpSongRef, string>> GroupBySong(List<KeyValuePair<MpPlayerState, MpSongRef>> suggestions)
         {
@@ -118,7 +140,7 @@ namespace ExScoringMod
             var names = new Dictionary<string, List<string>>();
             foreach (var entry in suggestions)
             {
-                string songId = entry.Value.songId;
+                string songId = SongKey(entry.Value);
                 if (!songs.ContainsKey(songId))
                 {
                     order.Add(songId);
@@ -141,18 +163,23 @@ namespace ExScoringMod
         private static MpSongRef MissingHostSelection(List<KeyValuePair<MpPlayerState, MpSongRef>> suggestions)
         {
             MpSongRef selected = MpSession.Lobby?.selectedSong;
-            if (selected == null || string.IsNullOrEmpty(selected.songId) || IsInstalled(selected.songId)) return null;
+            if (selected == null || string.IsNullOrEmpty(selected.songId) || IsFullyInstalled(selected)) return null;
             foreach (var entry in suggestions)
             {
-                if (entry.Value.songId == selected.songId) return null;
+                if (MpSongRef.SameSong(entry.Value, selected)) return null;
             }
             return selected;
         }
+
+        /// <summary>Grouping / signature key: songId, plus the map's fileId for a community map (v2.60).</summary>
+        private static string SongKey(MpSongRef song)
+            => song.IsCommunityMap ? song.songId + "|map:" + song.MapFileId : song.songId;
 
         private static ViewRow BuildRow(MpSongRef song, string label)
         {
             string info = string.IsNullOrEmpty(song.mapper) ? (song.artist ?? "") : $"{song.artist} ({song.mapper})";
 
+            if (song.IsCommunityMap && IsInstalled(song.songId)) return BuildMapRow(song, label, info);
             if (IsInstalled(song.songId)) return ViewRow.SongRow(song.songId, label);
 
             Lookup lookup = EnsureLookup(song);
@@ -179,6 +206,44 @@ namespace ExScoringMod
             }
         }
 
+        /// <summary>
+        /// A community map suggestion whose parent song is installed (v2.60): the map's own row
+        /// when its file is here, otherwise a row that downloads the file from the AudicaEX server.
+        /// </summary>
+        private static ViewRow BuildMapRow(MpSongRef song, string label, string info)
+        {
+            CommunityMapManager.Entry local = CommunityMapManager.FindBySha(song.songId, song.communityMap.sha256);
+            if (local != null) return ViewRow.CommunityMapRow(song.songId, local.path, label);
+
+            string fileId = song.MapFileId;
+            string actionId = MapActionPrefix + fileId;
+            MapDownload dl = GetMapDownload(fileId);
+            dl.label = label;
+
+            if (dl.gone || MpGameplay.MapGone(fileId))
+                return ViewRow.DisabledRow(label + " (Unavailable to download)", UnavailableColor,
+                    $"{info} [community map]".Trim(), actionId);
+
+            string sub;
+            if (dl.downloading) sub = $"Downloading map... {Math.Max(0, dl.percent)}%";
+            else if (MpGameplay.DownloadingMapFileId == fileId) sub = "Downloading map...";
+            else if (dl.failed || MpGameplay.MapDownloadFailed(fileId)) sub = "Map download failed - shoot to retry";
+            else sub = "Community map - shoot to download";
+
+            MpSongRef target = song;
+            return ViewRow.ActionRow(label, DownloadableColor, () => DownloadMap(target), sub, actionId);
+        }
+
+        private static MapDownload GetMapDownload(string fileId)
+        {
+            if (!mapDownloads.TryGetValue(fileId, out MapDownload dl))
+            {
+                dl = new MapDownload();
+                mapDownloads[fileId] = dl;
+            }
+            return dl;
+        }
+
         // ── Suggestions ──
 
         /// <summary>Every player's suggestion, in join order.</summary>
@@ -196,12 +261,16 @@ namespace ExScoringMod
             return result;
         }
 
-        /// <summary>The first player who suggested this song (any difficulty), or null.</summary>
-        public static MpPlayerState FindSuggester(string songId, bool excludeMe = false)
+        /// <summary>
+        /// The first player who suggested this song (any difficulty), or null. A community map
+        /// and its parent are different songs (v2.60).
+        /// </summary>
+        public static MpPlayerState FindSuggester(MpSongRef song, bool excludeMe = false)
         {
+            if (song == null) return null;
             foreach (var entry in GetSuggestions())
             {
-                if (entry.Value.songId != songId) continue;
+                if (!MpSongRef.SameSong(entry.Value, song)) continue;
                 if (excludeMe && entry.Key.userId == MpSession.MyUserId) continue;
                 return entry.Key;
             }
@@ -220,11 +289,12 @@ namespace ExScoringMod
         {
             if (!MpSession.InLobby) return "";
             StringBuilder sb = new StringBuilder("lobby");
-            sb.Append('|').Append(MpSession.Lobby?.selectedSong?.songId ?? "-"); // the "Selected by host" row
+            MpSongRef selected = MpSession.Lobby?.selectedSong;
+            sb.Append('|').Append(selected != null ? SongKey(selected) : "-"); // the "Selected by host" row
             foreach (var entry in GetSuggestions())
             {
                 sb.Append('|').Append(entry.Key.userId).Append(':').Append(entry.Key.nickname)
-                  .Append(':').Append(entry.Value.songId).Append(':').Append(entry.Value.difficulty);
+                  .Append(':').Append(SongKey(entry.Value)).Append(':').Append(entry.Value.difficulty);
             }
             return sb.ToString();
         }
@@ -248,6 +318,13 @@ namespace ExScoringMod
             return SongList.I != null && !string.IsNullOrEmpty(songId) && SongList.I.GetSong(songId) != null;
         }
 
+        /// <summary>The song is installed, and for a community map (v2.60) its file too.</summary>
+        private static bool IsFullyInstalled(MpSongRef song)
+        {
+            if (!IsInstalled(song.songId)) return false;
+            return !song.IsCommunityMap || CommunityMapManager.FindBySha(song.songId, song.communityMap.sha256) != null;
+        }
+
         /// <summary>
         /// From ExScoring.DeleteSong: the song is gone, so its row turns back into a downloadable
         /// one (the Maudica lookup is kept), with no stale download state. The view itself is
@@ -264,6 +341,7 @@ namespace ExScoringMod
             // Every failure is forgotten, not just this song's: deleting an old version of a
             // suggestion frees its file name, and that suggestion is under its own (new) ID.
             foreach (Lookup other in lookups.Values) other.failed = false;
+            foreach (MapDownload dl in mapDownloads.Values) dl.failed = false;
             lastSignature = null; // rebuild on the next lobby state, even if nothing else changed
         }
 
@@ -317,6 +395,10 @@ namespace ExScoringMod
                 {
                     if (existing.downloading) return;
                 }
+                foreach (MapDownload existing in mapDownloads.Values)
+                {
+                    if (existing.downloading) return;
+                }
 
                 string selectedId = MpSession.Lobby?.selectedSong?.songId;
                 List<KeyValuePair<MpPlayerState, MpSongRef>> suggestions = GetSuggestions();
@@ -327,6 +409,20 @@ namespace ExScoringMod
                 foreach (var entry in suggestions)
                 {
                     MpSongRef song = entry.Value;
+
+                    // v2.60: a map whose parent is here but whose file isn't (MpGameplay fetches
+                    // the selected song's own map).
+                    if (song.IsCommunityMap && IsInstalled(song.songId))
+                    {
+                        if (MpSongRef.SameSong(song, MpSession.Lobby?.selectedSong)) continue;
+                        if (IsFullyInstalled(song)) continue;
+                        MapDownload dl = GetMapDownload(song.MapFileId);
+                        if (dl.gone || dl.failed || dl.downloading || MpGameplay.MapDownloadFailed(song.MapFileId)) continue; // retried only by a shot
+                        DebugLog.Log($"[LobbySongList] auto-downloading community map {song.MapFileId} of {song.songId}, suggested by {entry.Key.nickname}");
+                        DownloadMap(song);
+                        return;
+                    }
+
                     if (song.songId == selectedId || IsInstalled(song.songId)) continue;
                     if (ExScoring.IsDeletedThisSession(song.songId)) continue;
 
@@ -377,6 +473,40 @@ namespace ExScoringMod
                     VirtualSongList.UpdateActionRowText(map.song_id, lookup.label, $"Downloading... {percent}%");
                 },
                 songId)); // the exact version: an older one with the same file name gets updated
+        }
+
+        /// <summary>Downloads a suggested community map's file from the AudicaEX server (v2.60).</summary>
+        private static void DownloadMap(MpSongRef song)
+        {
+            if (song == null || !song.IsCommunityMap) return;
+            string fileId = song.MapFileId;
+            if (MpGameplay.DownloadingMapFileId == fileId) return; // the lobby's own download has it
+
+            MapDownload dl = GetMapDownload(fileId);
+            if (dl.downloading || dl.gone) return;
+            dl.downloading = true;
+            dl.failed = false;
+            dl.percent = 0;
+            string actionId = MapActionPrefix + fileId;
+            VirtualSongList.UpdateActionRowText(actionId, dl.label, "Downloading map... 0%");
+
+            CommunityMapSync.DownloadForLobby(fileId, song.songId, song.communityMap.sha256, song.communityMap.fileName,
+                progress =>
+                {
+                    int percent = Mathf.Clamp((int)(progress * 100f), 0, 100);
+                    if (percent == dl.percent) return;
+                    dl.percent = percent;
+                    VirtualSongList.UpdateActionRowText(actionId, dl.label, $"Downloading map... {percent}%");
+                },
+                result =>
+                {
+                    dl.downloading = false;
+                    dl.failed = result == CommunityMapSync.LobbyDownloadResult.Failed;
+                    dl.gone = result == CommunityMapSync.LobbyDownloadResult.NotFound || result == CommunityMapSync.LobbyDownloadResult.Mismatch;
+                    DebugLog.Log($"[LobbySongList] community map {fileId}: {result}");
+                    lastSignature = null;
+                    Refresh();
+                });
         }
     }
 }

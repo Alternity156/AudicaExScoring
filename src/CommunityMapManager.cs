@@ -227,6 +227,53 @@ namespace ExScoringMod
             return selectedSongID;
         }
 
+        // ── v2.60: online play identifies a map by its file (SHA-256), not by its path ──
+
+        /// <summary>SHA-256 of a map's file (cached by size + write time), or null on error.</summary>
+        public static string Sha(Entry e) => e != null ? CommunityMapSync.LocalSha(e.path) : null;
+
+        /// <summary>
+        /// The installed map of <paramref name="parentSongID"/> whose file has this SHA-256, or null.
+        /// Hashes are cached, so this is cheap after the first call per file.
+        /// </summary>
+        public static Entry FindBySha(string parentSongID, string sha256)
+        {
+            if (string.IsNullOrEmpty(parentSongID) || string.IsNullOrEmpty(sha256)) return null;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                Entry e = entries[i];
+                if (e.parentSongID != parentSongID) continue;
+                if (string.Equals(Sha(e), sha256, StringComparison.OrdinalIgnoreCase)) return e;
+            }
+            return null;
+        }
+
+        /// <summary>
+        /// The server's fileId for this map, or null while it isn't known to be on the server
+        /// (asks the server about the parent the first time, see CommunityMapSync.EnsureParentKnown).
+        /// </summary>
+        public static string RemoteFileId(Entry e)
+        {
+            if (e == null) return null;
+            string sha = Sha(e);
+            if (sha == null) return null;
+            string id = CommunityMapSync.RemoteFileId(e.parentSongID, sha);
+            if (id == null) CommunityMapSync.EnsureParentKnown(e.parentSongID);
+            return id;
+        }
+
+        /// <summary>
+        /// True when the selected map is <paramref name="parentSongID"/>'s map with this SHA-256
+        /// (a null SHA-256 means "no map selected for it").
+        /// </summary>
+        public static bool IsSelectedMap(string parentSongID, string sha256)
+        {
+            Entry e = Selected;
+            if (string.IsNullOrEmpty(sha256)) return e == null || e.parentSongID != parentSongID;
+            return e != null && e.parentSongID == parentSongID &&
+                   string.Equals(Sha(e), sha256, StringComparison.OrdinalIgnoreCase);
+        }
+
         /// <summary>All map row keys in folder order.</summary>
         public static List<string> ViewKeys()
         {

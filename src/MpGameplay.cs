@@ -13,7 +13,8 @@ namespace ExScoringMod
     /// Connects online play (MpSession, ApiContract.md Section 19) to the game itself:
     ///  - location: the menu the player is in and the song they're browsing (setLocation);
     ///  - song status for the lobby's selected song, with an automatic Maudica download when it's
-    ///    missing (setSongStatus);
+    ///    missing (setSongStatus); for a community map (v2.60) the parent song first, then the map
+    ///    file from the AudicaEX server, reported as one download, "have" only with both;
     ///  - the scoring mode when the player switches EX/classic (setScoringMode);
     ///  - match launch: on matchPrepare a participant's song is launched the way marathon does it,
     ///    paused the moment playback starts, "loaded" is sent, and playback resumes at matchStart's
@@ -65,6 +66,16 @@ namespace ExScoringMod
         private static string downloadingSongId;
         private static readonly HashSet<string> failedDownloadSongIds = new HashSet<string>();
         private static long nextStatusCheckMs;
+
+        // ── Community map song status (v2.60) ──
+        // Share of the "downloading" progress used by the parent song when the lobby's song is a map
+        // (the map file takes the rest), so the two downloads read as one.
+        private const float MapParentProgressShare = 0.8f;
+        private static string downloadingMapFileId;
+        // fileIds whose download failed this session, with why: 404 / SHA-256 mismatch (gone for
+        // good) or a network / write failure (the Suggested Songs row can retry it).
+        private static readonly Dictionary<string, CommunityMapSync.LobbyDownloadResult> failedMapFileIds =
+            new Dictionary<string, CommunityMapSync.LobbyDownloadResult>();
 
         // ── Match run ──
         private static string launchMatchId;   // match a launch was started for, until playback starts
@@ -310,14 +321,19 @@ namespace ExScoringMod
 
             if (statusAvailableDifficulties != null)
             {
-                MpSession.SetSongStatus(songId, "have", null, statusAvailableDifficulties);
+                if (selected.IsCommunityMap)
+                {
+                    UpdateMapStatus(selected);
+                    return;
+                }
+                SendStatus(selected, "have", null, statusAvailableDifficulties);
                 return;
             }
 
             if (failedDownloadSongIds.Contains(songId))
             {
                 // Fetching it failed this session (or the map wasn't this song).
-                MpSession.SetSongStatus(songId, "unavailable", null, new string[0]);
+                SendStatus(selected, "unavailable", null, new string[0]);
                 return;
             }
 
@@ -340,11 +356,103 @@ namespace ExScoringMod
             if (lookup == null)
             {
                 MaudicaLookup.Find(selected, map => { nextStatusCheckMs = 0; });
-                MpSession.SetSongStatus(songId, "missing", null, new string[0]);
+                SendStatus(selected, "missing", null, new string[0]);
                 return;
             }
-            MpSession.SetSongStatus(songId, lookup == MaudicaLookup.State.NotFound ? "unavailable" : "missing", null, new string[0]);
+            SendStatus(selected, lookup == MaudicaLookup.State.NotFound ? "unavailable" : "missing", null, new string[0]);
         }
+
+        /// <summary>
+        /// setSongStatus for the selected song, with the map's fileId when it's a community map
+        /// (v2.60: the server ignores a map song's status without it).
+        /// </summary>
+        private static void SendStatus(MpSongRef selected, string status, float? progress, string[] availableDifficulties)
+        {
+            MpSession.SetSongStatus(selected.songId, status, progress, availableDifficulties, null, selected.MapFileId);
+        }
+
+        /// <summary>
+        /// The parent song is installed and the lobby's song is one of its community maps: "have"
+        /// (Expert only) once a local file has the map's SHA-256, otherwise download it from the
+        /// AudicaEX server (with Auto-Download Missing Songs on, whatever the general community
+        /// map auto-download is set to) or report "missing" / "unavailable".
+        /// </summary>
+        private static void UpdateMapStatus(MpSongRef selected)
+        {
+            string fileId = selected.MapFileId;
+            string sha = selected.communityMap.sha256;
+
+            if (string.IsNullOrEmpty(sha))
+            {
+                // The server always fills it in; without it the file can't be checked.
+                SendStatus(selected, "unavailable", null, new string[0]);
+                return;
+            }
+
+            if (CommunityMapManager.FindBySha(selected.songId, sha) != null)
+            {
+                SendStatus(selected, "have", null, new[] { KataConfig.Difficulty.Expert.ToString() });
+                return;
+            }
+
+            if (downloadingMapFileId == fileId) return; // the download reports its own progress
+
+            if (failedMapFileIds.ContainsKey(fileId))
+            {
+                SendStatus(selected, "unavailable", null, new string[0]);
+                return;
+            }
+
+            if (!Config.AutoDownloadSongs)
+            {
+                SendStatus(selected, "missing", null, new string[0]);
+                return;
+            }
+
+            if (downloadingMapFileId != null) return; // another map is still coming in
+
+            downloadingMapFileId = fileId;
+            Log($"Selected community map '{selected.communityMap.mapName}' ({fileId}) for {selected.songId} is missing: downloading it");
+            SendStatus(selected, "downloading", MapParentProgressShare, new string[0]);
+
+            MpSongRef song = selected;
+            CommunityMapSync.DownloadForLobby(fileId, selected.songId, sha, selected.communityMap.fileName,
+                progress =>
+                {
+                    if (downloadingMapFileId != fileId) return;
+                    MpSongRef current = MpSession.Lobby?.selectedSong;
+                    if (current == null || current.MapFileId != fileId) return;
+                    float total = MapParentProgressShare + (0.99f - MapParentProgressShare) * Mathf.Clamp01(progress);
+                    SendStatus(song, "downloading", total, new string[0]);
+                },
+                result =>
+                {
+                    if (downloadingMapFileId == fileId) downloadingMapFileId = null;
+                    if (result == CommunityMapSync.LobbyDownloadResult.Saved)
+                    {
+                        failedMapFileIds.Remove(fileId);
+                        Log($"Downloaded community map '{song.communityMap.mapName}' ({fileId}).");
+                    }
+                    else
+                    {
+                        failedMapFileIds[fileId] = result;
+                        Log($"Couldn't get community map {fileId}: {result}.");
+                    }
+                    nextStatusCheckMs = 0;
+                    UpdateSongStatus();
+                });
+        }
+
+        /// <summary>The community map (fileId) being downloaded for the lobby's selected song, or null.</summary>
+        public static string DownloadingMapFileId => downloadingMapFileId;
+
+        /// <summary>True when this map (fileId) couldn't be downloaded this session (404, bad bytes, failure).</summary>
+        public static bool MapDownloadFailed(string fileId) => fileId != null && failedMapFileIds.ContainsKey(fileId);
+
+        /// <summary>True when the server doesn't have this map (404) or sent other bytes: it can't be had this session.</summary>
+        public static bool MapGone(string fileId)
+            => fileId != null && failedMapFileIds.TryGetValue(fileId, out CommunityMapSync.LobbyDownloadResult r) &&
+               (r == CommunityMapSync.LobbyDownloadResult.NotFound || r == CommunityMapSync.LobbyDownloadResult.Mismatch);
 
         /// <summary>The selected song being downloaded by the lobby's auto-download, or null.</summary>
         public static string DownloadingSongId => downloadingSongId;
@@ -378,6 +486,7 @@ namespace ExScoringMod
             if (failedDownloadSongIds.Count > 0)
                 Log($"Forgetting {failedDownloadSongIds.Count} failed download(s) after a delete: they'll be tried again");
             failedDownloadSongIds.Clear();
+            failedMapFileIds.Clear();
             nextStatusCheckMs = 0;
             Log($"{songId} was deleted: no auto-download for it this session");
         }
@@ -390,13 +499,19 @@ namespace ExScoringMod
         {
             get
             {
-                if (downloadingSongId != null) return true;
+                if (downloadingSongId != null || downloadingMapFileId != null) return true;
                 if (!Config.AutoDownloadSongs) return false;
                 MpSongRef selected = MpSession.Lobby?.selectedSong;
                 if (selected == null || string.IsNullOrEmpty(selected.songId)) return false;
                 if (failedDownloadSongIds.Contains(selected.songId)) return false;
+                if (SongList.I == null) return false;
+                if (SongList.I.GetSong(selected.songId) != null)
+                {
+                    // Parent installed: still pending while its map file is missing and can be had.
+                    if (!selected.IsCommunityMap || failedMapFileIds.ContainsKey(selected.MapFileId)) return false;
+                    return CommunityMapManager.FindBySha(selected.songId, selected.communityMap.sha256) == null;
+                }
                 if (IsDeletedThisSession(selected.songId)) return false;
-                if (SongList.I == null || SongList.I.GetSong(selected.songId) != null) return false;
                 return MaudicaLookup.Peek(selected.songId, out Song unused) != MaudicaLookup.State.NotFound;
             }
         }
@@ -430,7 +545,9 @@ namespace ExScoringMod
             Log(other != null
                 ? $"Selected song {songId} is missing ({other.songID} is installed, another version): looking it up on Maudica to update it"
                 : $"Selected song {songId} is missing: looking it up on Maudica to download it");
-            MpSession.SetSongStatus(songId, "downloading", 0f, new string[0]);
+            // A community map's parent takes the first part of one progress bar (the map file the rest).
+            float share = selected.IsCommunityMap ? MapParentProgressShare : 0.99f;
+            SendStatus(selected, "downloading", 0f, new string[0]);
 
             // audica_id first, then the server's maudicaId, then a title search (MaudicaLookup).
             Song map = null;
@@ -462,7 +579,7 @@ namespace ExScoringMod
                 },
                 (id, progress) =>
                 {
-                    if (downloadingSongId == songId) MpSession.SetSongStatus(songId, "downloading", progress * 0.99f, new string[0]);
+                    if (downloadingSongId == songId) SendStatus(selected, "downloading", progress * share, new string[0]);
                 },
                 songId)); // the exact version: an older one with the same file name gets updated
 
@@ -525,6 +642,20 @@ namespace ExScoringMod
                 yield break;
             }
 
+            // v2.60: a community map match plays the local file with the lobby's SHA-256, always on
+            // Expert. A normal match must not keep a map of the song selected (it would play the map).
+            CommunityMapManager.Entry mapEntry = null;
+            if (prepare.song.IsCommunityMap)
+            {
+                mapEntry = CommunityMapManager.FindBySha(songId, prepare.song.communityMap.sha256);
+                if (mapEntry == null)
+                {
+                    Log($"matchPrepare {matchId}: community map {prepare.song.MapFileId} of {songId} isn't installed, not launching (the server will make us a spectator).");
+                    yield break;
+                }
+                difficulty = KataConfig.Difficulty.Expert;
+            }
+
             if (menuState == MenuState.State.Launching || menuState == MenuState.State.Launched)
             {
                 Log($"matchPrepare {matchId}: already in a song, not launching.");
@@ -533,8 +664,10 @@ namespace ExScoringMod
 
             launchMatchId = matchId;
             exitPending = false;
-            Log($"matchPrepare {matchId}: launching {songId} on {difficulty}");
+            Log($"matchPrepare {matchId}: launching {songId} on {difficulty}" +
+                (mapEntry != null ? $" (community map '{mapEntry.name}')" : ""));
 
+            if (mapEntry == null) CommunityMapManager.Deselect(); // before SelectForLaunch: it restores the old difficulty
             SelectForLaunch(data, difficulty);
 
             // The song list's Options categories and the Song Settings page deactivate
@@ -577,14 +710,17 @@ namespace ExScoringMod
             // it the menu hides, the game sits in Launching forever and the player is left in the
             // void: e.g. still on the song list with another song selected, or the match song in
             // a collapsed folder so the song page's auto-select couldn't reach it.
-            if (nativeSelectedSongId != songId)
+            // A normal match: a map row of this song selected since (the page's own select) is dropped.
+            if (mapEntry == null) CommunityMapManager.Deselect();
+
+            if (!AtMatchSelection(songId, mapEntry))
             {
-                Log($"matchPrepare {matchId}: the game hasn't selected {songId} " +
-                    $"(last select: {nativeSelectedSongId ?? "none"}), selecting it.");
+                Log($"matchPrepare {matchId}: the game hasn't selected {songId}{(mapEntry != null ? $" with map '{mapEntry.name}'" : "")} " +
+                    $"(last select: {nativeSelectedSongId ?? "none"}{(CommunityMapManager.IsActive ? ", map " + CommunityMapManager.Selected?.name : "")}), selecting it.");
 
                 float selectDeadline = Time.unscaledTime + MatchSelectTimeoutSeconds;
                 float nextAttempt = Time.unscaledTime + (navigated ? MatchSelectGraceSeconds : 0f);
-                while (nativeSelectedSongId != songId && Time.unscaledTime < selectDeadline)
+                while (!AtMatchSelection(songId, mapEntry) && Time.unscaledTime < selectDeadline)
                 {
                     if (launchMatchId != matchId) yield break;
                     if (Time.unscaledTime >= nextAttempt)
@@ -593,7 +729,7 @@ namespace ExScoringMod
                         bool started = false;
                         try
                         {
-                            started = FolderRowManager.RevealForMatch(songId);
+                            started = FolderRowManager.RevealForMatch(songId, mapEntry?.path);
                         }
                         catch (Exception e)
                         {
@@ -605,7 +741,7 @@ namespace ExScoringMod
                 }
 
                 if (launchMatchId != matchId) yield break;
-                if (nativeSelectedSongId != songId)
+                if (!AtMatchSelection(songId, mapEntry))
                 {
                     // Staying on the song list beats the void: the server drops us at its load
                     // timeout and we spectate this one.
@@ -635,6 +771,7 @@ namespace ExScoringMod
             }
 
             // The select can reset the difficulty: put the match's back.
+            if (mapEntry == null) CommunityMapManager.Deselect();
             SelectForLaunch(data, difficulty);
 
             Log($"matchPrepare {matchId}: Play");
@@ -745,7 +882,19 @@ namespace ExScoringMod
             if (SongDataHolder.I != null) SongDataHolder.I.songData = data;
             // The field, not SetDifficulty(), which rebuilds the song list (see EnsureValidDifficultySelected).
             KataConfig.I.mDifficulty = difficulty;
-            maxPossibleExScore = GetMaxPossibleExScore(data.songID, difficulty);
+            // The selected community map's chart when one is selected for this song (v2.60).
+            maxPossibleExScore = GetMaxPossibleExScore(CommunityMapManager.EffectiveSongID(data.songID), difficulty);
+        }
+
+        /// <summary>
+        /// True when the game itself has selected the match song, and the community map selection is
+        /// the match's: that map's file for a map match (v2.60), no map at all for a normal one.
+        /// </summary>
+        private static bool AtMatchSelection(string songId, CommunityMapManager.Entry mapEntry)
+        {
+            if (nativeSelectedSongId != songId) return false;
+            if (mapEntry == null) return !CommunityMapManager.IsActive;
+            return string.Equals(CommunityMapManager.SelectedPath, mapEntry.path, StringComparison.OrdinalIgnoreCase);
         }
 
         /// <summary>AudioDriver.StartPlaying postfix: hold the match song at its very start.</summary>

@@ -26,6 +26,12 @@ namespace ExScoringMod
     /// the song only, so changing difficulty in the song list never re-selects the song for the
     /// lobby, and Start Song only needs the host on the lobby's song. Select still suggests the
     /// song at the song list's difficulty either way.
+    ///
+    /// Community maps (v2.60): a selected map row suggests / selects the parent song with the
+    /// map's fileId (always Expert). Songs compare by songId and map fileId, so a map and its
+    /// parent are different songs. Select is greyed out, with the reason as its label, while the
+    /// map isn't on the AudicaEX server ("Upload map first"; the launch panel's Upload Map button
+    /// fixes that) or the server doesn't support maps in lobbies.
     /// </summary>
     internal static class LobbyLaunchButton
     {
@@ -71,7 +77,9 @@ namespace ExScoringMod
                     return;
                 }
 
-                Apply("Select", MpSession.Lobby != null && CurrentSongRef() != null);
+                string blocker = MapBlocker();
+                if (blocker != null) Apply(blocker, false);
+                else Apply("Select", MpSession.Lobby != null && CurrentSongRef() != null);
             }
             catch (Exception ex)
             {
@@ -88,11 +96,11 @@ namespace ExScoringMod
             if (!MpSession.InLobby || MpGameplay.IsLaunchingMatch) return false;
 
             MpSongRef song = CurrentSongRef();
-            if (song == null) return true;
+            if (song == null) return true; // nothing selected, or a map that can't be suggested (greyed out)
 
             // Already your suggestion at this difficulty: nothing to send.
             MpSongRef mine = MpSession.MyPlayer?.songChoice;
-            if (mine != null && mine.songId == song.songId && mine.difficulty == song.difficulty) return true;
+            if (MpSongRef.SameSong(mine, song) && mine.difficulty == song.difficulty) return true;
 
             MpSession.SetSongChoice(song, ReportError);
             nextRefreshMs = 0;
@@ -121,7 +129,7 @@ namespace ExScoringMod
             bool isHost = MpSession.IsHost;
             MpSongRef current = isHost ? CurrentSongRef() : null;
             string key = SelectionKey(current);
-            bool inPool = current != null && LobbySongList.FindSuggester(current.songId) != null;
+            bool inPool = current != null && LobbySongList.FindSuggester(current) != null;
 
             if (!isHost || lobby == null)
             {
@@ -153,7 +161,7 @@ namespace ExScoringMod
 
             lastSelectionKey = key;
 
-            DebugLog.Log($"[LobbyLaunchButton] host picked {current.songId} [{current.difficulty}]: selecting it for the lobby");
+            DebugLog.Log($"[LobbyLaunchButton] host picked {current}: selecting it for the lobby");
             MpSession.SelectSong(current, ReportError);
         }
 
@@ -175,7 +183,7 @@ namespace ExScoringMod
         /// </summary>
         private static bool SameSelection(MpSongRef a, MpSongRef b)
         {
-            if (a == null || b == null || a.songId != b.songId) return false;
+            if (!MpSongRef.SameSong(a, b)) return false; // songId and community map (v2.60)
             return PlayerDifficulty || a.difficulty == b.difficulty;
         }
 
@@ -183,16 +191,23 @@ namespace ExScoringMod
         private static string SelectionKey(MpSongRef song)
         {
             if (song == null) return null;
-            return PlayerDifficulty ? song.songId : song.songId + "|" + song.difficulty;
+            string id = song.IsCommunityMap ? song.songId + "|map:" + song.MapFileId : song.songId;
+            return PlayerDifficulty ? id : id + "|" + song.difficulty;
         }
 
         private static bool PlayerDifficulty => MpSession.Lobby != null && MpSession.Lobby.allowPlayerDifficulty;
 
-        private static MpSongRef CurrentSongRef()
+        /// <summary>
+        /// The song-list selection as a SongRef, or null when nothing is selected or the selection
+        /// is a community map that can't go to the lobby (MapBlocker). Never the parent song in a
+        /// map's place: that would make the others play the original chart.
+        /// </summary>
+        internal static MpSongRef CurrentSongRef()
         {
             SongList.SongData song = ExScoring.selectedSongData;
             if (song == null || KataConfig.I == null) return null;
-            return new MpSongRef
+
+            var songRef = new MpSongRef
             {
                 songId = song.songID,
                 difficulty = KataConfig.I.GetDifficulty().ToString(),
@@ -201,6 +216,47 @@ namespace ExScoringMod
                 mapper = song.author,
                 maudicaId = null
             };
+
+            CommunityMapManager.Entry map = SelectedMapOf(song);
+            if (map == null) return songRef;
+
+            // v2.60: the parent's fields plus the map's fileId (the server fills in the rest).
+            if (!MpSession.CommunityMapsEnabled) return null;
+            string fileId = CommunityMapManager.RemoteFileId(map);
+            if (fileId == null) return null;
+
+            songRef.difficulty = KataConfig.Difficulty.Expert.ToString();
+            songRef.communityMap = new MpCommunityMapRef
+            {
+                fileId = fileId,
+                sha256 = CommunityMapManager.Sha(map),
+                mapName = map.name
+            };
+            return songRef;
+        }
+
+        /// <summary>The selected community map when it's a map of <paramref name="song"/>, else null.</summary>
+        private static CommunityMapManager.Entry SelectedMapOf(SongList.SongData song)
+        {
+            if (song == null || !CommunityMapManager.IsActive) return null;
+            CommunityMapManager.Entry map = CommunityMapManager.Selected;
+            return map != null && map.parentSongID == song.songID ? map : null;
+        }
+
+        /// <summary>
+        /// Why the selected community map can't be suggested or selected (the greyed-out Select's
+        /// label), or null when it can, or when no map is selected.
+        /// </summary>
+        private static string MapBlocker()
+        {
+            CommunityMapManager.Entry map = SelectedMapOf(ExScoring.selectedSongData);
+            if (map == null) return null;
+            if (!MpSession.CommunityMapsEnabled) return "Maps not supported";
+            if (CommunityMapManager.RemoteFileId(map) != null) return null;
+
+            // Not known to be on the server yet: still asking, or it isn't there.
+            bool? onServer = CommunityMapSync.IsOnServer(map.parentSongID, CommunityMapManager.Sha(map));
+            return onServer == false ? "Upload map first" : "Checking map...";
         }
 
         private static void ReportError(MpError error)

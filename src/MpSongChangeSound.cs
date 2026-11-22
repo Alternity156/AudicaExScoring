@@ -50,7 +50,7 @@ namespace ExScoringMod
             if (lobby == null) return;
 
             string songId = lobby.selectedSong != null && !string.IsNullOrEmpty(lobby.selectedSong.songId)
-                ? lobby.selectedSong.songId
+                ? lobby.selectedSong.songId + (lobby.selectedSong.IsCommunityMap ? "|map:" + lobby.selectedSong.MapFileId : "") // v2.60: a map is its own song
                 : null;
 
             bool sameLobby = lastLobbyId != null && lastLobbyId == lobby.lobbyId;

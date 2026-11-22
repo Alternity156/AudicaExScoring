@@ -136,6 +136,9 @@ namespace ExScoringMod
         private static readonly Dictionary<string, HashSet<string>> remoteShas =
             new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
         private static bool fullListKnown;                     // remoteShas covers every parent
+        // v2.60: the server's entries by "parentSongId|sha256", for the fileId a lobby SongRef carries.
+        private static readonly Dictionary<string, CommunityMapApiEntry> remoteEntries =
+            new Dictionary<string, CommunityMapApiEntry>(StringComparer.OrdinalIgnoreCase);
         private static readonly HashSet<string> parentsFetched = new HashSet<string>(StringComparer.Ordinal);
         private static readonly HashSet<string> parentsFetching = new HashSet<string>(StringComparer.Ordinal);
 
@@ -666,7 +669,11 @@ namespace ExScoringMod
                 if (resp == null || resp.maps == null) break;
 
                 for (int i = 0; i < resp.maps.Length; i++)
-                    if (!string.IsNullOrEmpty(resp.maps[i]?.sha256)) shas.Add(resp.maps[i].sha256);
+                {
+                    if (string.IsNullOrEmpty(resp.maps[i]?.sha256)) continue;
+                    shas.Add(resp.maps[i].sha256);
+                    AddRemoteEntry(resp.maps[i]);
+                }
 
                 offset += resp.maps.Length;
                 if (resp.maps.Length == 0 || offset >= resp.total) { ok = true; break; }
@@ -685,6 +692,7 @@ namespace ExScoringMod
         private static void SetRemoteFull(List<CommunityMapApiEntry> all)
         {
             remoteShas.Clear();
+            remoteEntries.Clear();
             for (int i = 0; i < all.Count; i++)
                 AddRemote(all[i]);
             fullListKnown = true;
@@ -699,12 +707,169 @@ namespace ExScoringMod
                 remoteShas[m.parentSongId] = set;
             }
             set.Add(m.sha256);
+            AddRemoteEntry(m);
+        }
+
+        private static void AddRemoteEntry(CommunityMapApiEntry m)
+        {
+            if (m == null || string.IsNullOrEmpty(m.fileId) || string.IsNullOrEmpty(m.parentSongId) || string.IsNullOrEmpty(m.sha256)) return;
+            remoteEntries[m.parentSongId + "|" + m.sha256] = m;
+        }
+
+        /// <summary>
+        /// v2.60: the server's fileId for this parent + SHA-256, or null when it isn't known (not on
+        /// the server, or not fetched yet: call <see cref="EnsureParentKnown"/>).
+        /// </summary>
+        public static string RemoteFileId(string parentSongId, string sha256)
+        {
+            if (string.IsNullOrEmpty(parentSongId) || string.IsNullOrEmpty(sha256)) return null;
+            return remoteEntries.TryGetValue(parentSongId + "|" + sha256, out CommunityMapApiEntry m) ? m.fileId : null;
         }
 
         private static void RaiseRemoteChanged()
         {
             try { RemoteStateChanged?.Invoke(); }
             catch (Exception ex) { DebugLog.Log($"{LogPrefix} RemoteStateChanged handler threw: {ex.Message}"); }
+        }
+
+        // ══════════════════════════════════════════════════════════════════════
+        //  Lobby download (v2.60): one map file for an online match
+        // ══════════════════════════════════════════════════════════════════════
+
+        public enum LobbyDownloadResult
+        {
+            /// <summary>Saved (or a file with these bytes was already there).</summary>
+            Saved,
+            /// <summary>The server doesn't have it (404).</summary>
+            NotFound,
+            /// <summary>The bytes didn't match the SHA-256 the lobby gave.</summary>
+            Mismatch,
+            /// <summary>Network error, bad reply, too large, or it couldn't be written.</summary>
+            Failed
+        }
+
+        /// <summary>
+        /// Downloads one map for a lobby song (any time, even with the general auto-download off).
+        /// Checks the bytes against <paramref name="sha256"/>. If the file name is already taken by
+        /// different bytes, saves it as "name (2).ext" (the map's leaderboard ID depends on the chart,
+        /// not the name). Rebuilds the folders after a save. Progress 0..1 on the main thread.
+        /// </summary>
+        public static void DownloadForLobby(string fileId, string parentSongId, string sha256, string fileName,
+                                            Action<float> onProgress, Action<LobbyDownloadResult> onDone)
+        {
+            MelonCoroutines.Start(DownloadForLobbyCoroutine(fileId, parentSongId, sha256, fileName, onProgress, onDone));
+        }
+
+        private static IEnumerator DownloadForLobbyCoroutine(string fileId, string parentSongId, string sha256, string fileName,
+                                                             Action<float> onProgress, Action<LobbyDownloadResult> onDone)
+        {
+            LobbyDownloadResult outcome = LobbyDownloadResult.Failed;
+            string dir = GetMapDir();
+
+            if (string.IsNullOrEmpty(fileId) || string.IsNullOrEmpty(sha256) || !IsSafeFileName(fileName) || string.IsNullOrEmpty(dir))
+            {
+                DebugLog.Log($"{LogPrefix} Lobby download refused: fileId={fileId ?? "null"} name='{fileName}' dir={(dir != null ? "ok" : "null")}.");
+                SafeDone(onDone, LobbyDownloadResult.Failed);
+                yield break;
+            }
+
+            try { Directory.CreateDirectory(dir); }
+            catch (Exception ex) { DebugLog.Log($"{LogPrefix} Can't create '{dir}': {ex.Message}"); }
+
+            string url = $"{ExScoring.CommunityMapApiBase}/api/community-maps/{Uri.EscapeDataString(fileId)}/download";
+            DebugLog.Log($"{LogPrefix} Lobby download of '{fileName}' ({fileId}) for {parentSongId}.");
+
+            UnityWebRequest request = UnityWebRequest.Get(url);
+            long code = 0;
+            byte[] bytes = null;
+            bool ok = false;
+            string error = null;
+            try
+            {
+                request.timeout = DownloadTimeoutSeconds;
+                var op = request.SendWebRequest();
+                while (!op.isDone)
+                {
+                    try { onProgress?.Invoke(Mathf.Clamp01(request.downloadProgress)); } catch { }
+                    yield return null;
+                }
+
+                code = request.responseCode;
+                error = request.error;
+                ok = !request.isNetworkError && !request.isHttpError;
+                if (ok)
+                {
+                    try { bytes = CopyBytes(request.downloadHandler.data); }
+                    catch (Exception ex) { ok = false; error = ex.Message; }
+                }
+            }
+            finally
+            {
+                request.Dispose();
+            }
+
+            if (code == 404)
+            {
+                DebugLog.Log($"{LogPrefix} Lobby map {fileId} is gone from the server.");
+                outcome = LobbyDownloadResult.NotFound;
+            }
+            else if (!ok || bytes == null || bytes.Length == 0)
+            {
+                DebugLog.Log($"{LogPrefix} Lobby download of {fileId} failed ({code}): {error}");
+                outcome = LobbyDownloadResult.Failed;
+            }
+            else if (bytes.Length > MaxFileBytes)
+            {
+                DebugLog.Log($"{LogPrefix} Lobby map {fileId} is too large ({bytes.Length} bytes).");
+                outcome = LobbyDownloadResult.Failed;
+            }
+            else if (!string.Equals(Sha256Hex(bytes), sha256, StringComparison.OrdinalIgnoreCase))
+            {
+                DebugLog.Log($"{LogPrefix} Lobby map {fileId}: SHA-256 mismatch, not saved.");
+                outcome = LobbyDownloadResult.Mismatch;
+            }
+            else
+            {
+                outcome = SaveForLobby(dir, fileId, parentSongId, sha256, fileName, bytes)
+                    ? LobbyDownloadResult.Saved
+                    : LobbyDownloadResult.Failed;
+            }
+
+            if (outcome == LobbyDownloadResult.Saved)
+            {
+                AddRemote(new CommunityMapApiEntry { fileId = fileId, parentSongId = parentSongId, sha256 = sha256, fileName = fileName });
+                RebuildViewsIfLoaded();
+                RaiseRemoteChanged();
+            }
+            SafeDone(onDone, outcome);
+        }
+
+        private static void SafeDone(Action<LobbyDownloadResult> onDone, LobbyDownloadResult r)
+        {
+            try { onDone?.Invoke(r); }
+            catch (Exception ex) { DebugLog.Log($"{LogPrefix} Lobby download callback threw: {ex.Message}"); }
+        }
+
+        private static bool SaveForLobby(string dir, string fileId, string parentSongId, string sha256, string fileName, byte[] bytes)
+        {
+            // Already there with the same bytes (e.g. saved by a sync meanwhile): nothing to write.
+            HashSet<string> names, shas;
+            IndexLocalFolder(dir, out names, out shas);
+            if (shas.Contains(sha256)) return true;
+
+            string ext = Path.GetExtension(fileName);
+            string stem = Path.GetFileNameWithoutExtension(fileName);
+            string name = fileName;
+            for (int n = 2; names.Contains(name) && n < 100; n++)
+                name = $"{stem} ({n}){ext}";
+            if (names.Contains(name) || !IsSafeFileName(name))
+            {
+                DebugLog.Log($"{LogPrefix} No free file name for '{fileName}', not saved.");
+                return false;
+            }
+
+            var m = new CommunityMapApiEntry { fileId = fileId, parentSongId = parentSongId, sha256 = sha256, fileName = name };
+            return SaveDownloaded(dir, m, bytes);
         }
 
         // ══════════════════════════════════════════════════════════════════════
