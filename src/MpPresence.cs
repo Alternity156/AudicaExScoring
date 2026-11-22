@@ -1220,6 +1220,43 @@ namespace ExScoringMod
             return true;
         }
 
+        private static bool chainShotFailed;
+
+        /// <summary>
+        /// A watched in-song player's chain node shot (hand 0 = left, 1 = right), for the spectator
+        /// window. Natively a chain node isn't a press (Target.Update calls Gun.Fire with
+        /// useChainBeam), so it never raises the shot count and PlayShot never sees it. Gun.Fire's
+        /// chain branch draws no GunBeam (SpectatorTargets draws the ChainBeam), but still plays
+        /// the muzzle flash and the gun's fire animation: those two, on SongOnlyLayer.
+        /// </summary>
+        internal static void PlaySpectatorChainShot(string userId, int hand)
+        {
+            if (chainShotFailed) return;
+            try
+            {
+                if (userId == null || !remotes.TryGetValue(userId, out Remote remote) || !remote.InSong) return;
+                if (remote.Root == null || !remote.Root.activeSelf) return;
+                Transform gunPart = hand == 0 ? remote.LGun : remote.RGun;
+                if (gunPart == null || !gunPart.gameObject.activeSelf) return;
+                Transform firepoint = hand == 0 ? remote.LFire : remote.RFire;
+                if (firepoint == null) firepoint = gunPart;
+
+                Gun local = hand == 0 ? localGunL : localGunR;
+                if (local == null) return;
+                ShotFx fx = EnsureShotFx(remote, hand, local);
+                if (fx == null) return;
+                SongLayerShotFx(fx);
+
+                if (IsAlive(fx.Muzzle)) fx.Muzzle.Play(firepoint.position, firepoint.forward, gunPart.eulerAngles.z);
+                if (remote.Guns[hand] != null) remote.Guns[hand].FireStart = Time.time; // the model's fire animation (UpdateGun)
+            }
+            catch (Exception ex)
+            {
+                chainShotFailed = true;
+                MelonLogger.Log($"[MpPresence] chain shot effect for {userId} {HandName(hand)} failed (no more from now on): {ex}");
+            }
+        }
+
         // ── For SpectatorSong (the watcher's audio and chart) ──
 
         // A watched player's song position is carried this far past their newest pose before it counts as lost.

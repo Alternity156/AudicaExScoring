@@ -10,8 +10,9 @@ namespace ExScoringMod
     /// behind it: claude/Spectator-Window-Target-Findings.md, claude/Spectator-Window-Hit-Findings.md
     /// and claude/Spectator-Window-Targets-Build-Notes.md.
     ///
-    /// What is drawn: Standard, Vertical, Horizontal, Hold (sustain) and Melee targets with their
-    /// telegraphs, and the line between two targets that land together, from this client's own
+    /// What is drawn: Standard, Vertical, Horizontal, Hold (sustain), chain, Melee and Dodge (mine)
+    /// targets with their telegraphs, the chain and sustain beams, and the line between two
+    /// targets that land together, from this client's own
     /// copy of the chart (SpectatorSong.Cues), at the watched player's song position
     /// (SpectatorSong.TryGetPosition, the same position their avatar is drawn at), flying in at
     /// their target and melee speed, melee targets at their player height (spectateInfo settings).
@@ -64,10 +65,30 @@ namespace ExScoringMod
     /// is hidden once the previous node is gone; _Travel = 1 - clamp01(ticks until the node / 240),
     /// _Glow = clamp01(InverseLerp(1.47, 1.6, clip time)).
     ///
+    /// Chain beam (ChainBeam.Fire / Update / Init, Ghidra 2026-11-21; findings in
+    /// claude/Spectator-ChainBeam-Mine-Findings.md): a chain node isn't a press, so MpPresence
+    /// never draws a shot for it; Gun.Fire(useChainBeam) takes the next of the gun's 5 ChainBeams
+    /// instead of a GunBeam. Here: 5 copies of KataConfig.chainBeamPrefab per hand under the root,
+    /// and each chain node hit, when it is applied, fires the next one the way ChainBeam.Fire does:
+    /// mTravel and _Travel 0, the hand's colour (start alpha 0), start = the watched gun's
+    /// firepoint, startForward = 2 m ahead of it (x the diorama scale), middle = 40% of the way,
+    /// end = the node, Bezier_Spline.UpdatePoints, its mPoints into the line, switched on. The
+    /// copy's own ChainBeam.Update then runs as natively (mTravel += dt x speed, off past 1).
+    /// MpPresence.PlaySpectatorChainShot adds the muzzle flash and the gun's fire animation.
+    ///
+    /// Mines (dodge targets, probe 2026-11-21): a copy of KataConfig.targetDodge on a melee lane,
+    /// placed like a melee target except the holder: spawner + (2 gx, 2 gy, zOffset - 0.65) along
+    /// the melee root's own axes (not the spawner's turned, half-size ones). Clip
+    /// target_left_dodge / target_right_dodge by side, melee show / complete times (0.55 / 2.45),
+    /// but at the dome's clip speed (KataConfig.GetSecondsLookahead(Dodge) is the dome lookahead:
+    /// mines don't take the melee speed). Their own red material, the melee telegraph with a
+    /// white circle, and for a pair the connector between the two balls in its material's own
+    /// colours and width. Results need nothing new: a dodge sends nothing, a mine that hit the
+    /// player is a miss, and either way it flies on and goes at clip time 2.45. No hit effect.
+    ///
     /// Score, early and late popups: SpectatorPopups (fed from PullResults, updated from Tick).
     ///
-    /// Not yet: dodge targets; the chain beam (KataConfig.chainBeamPrefab); hit particles
-    /// and the beam's dust; the target's particle trail.
+    /// Not yet: hit particles and the beam's dust; the target's particle trail.
     ///
     /// How a target is made: the native prefabs (KataConfig.targetStandard / targetVertical /
     /// targetHorizontal / targetSustain / targetMelee, and each one's Target.telegraphPrefab) are
@@ -176,6 +197,18 @@ namespace ExScoringMod
         private const float ChainTravelTicks = 240f;
         private const string MeleeLineName = "melee_connector";
 
+        // Mines (dodge targets).
+        private const string DodgeLeftClip = "target_left_dodge";
+        private const string DodgeRightClip = "target_right_dodge";
+        private const string DodgeConnectorName = "connectorhider";       // the parent of a mine's melee_connector, off in the prefab
+        private const float DodgeHolderZ = -0.65f;                         // holder z from its spawner (probe 2026-11-21, zOffset 0)
+
+        // Chain beam (ChainBeam.Fire).
+        private const int ChainBeamsPerHand = 5;                           // Gun.SetUp's pool size (mChainBeams, probe)
+        private const float ChainBeamAhead = 2f;                           // startForward: this far ahead of the gun
+        private const float ChainBeamMiddle = 0.4f;                        // middle: this far from the gun to the node
+        private const string TravelProperty = "_Travel";
+
         private const double JumpBackMs = 250;          // the position went back this much: start over
         private const double JumpAheadMs = 3000;        // or ahead this much in one frame
         private const float SameColor = 0.004f;
@@ -198,7 +231,8 @@ namespace ExScoringMod
             public int Index;
             public SongCues.Cue Cue;
             public double CueMs, EndMs;
-            public bool Melee;
+            public bool Melee;              // on a melee lane: melee targets and mines
+            public bool Dodge;              // a mine
             public float Speed, ShowTime;
             public GameObject Spawner;
             public Transform TargetTransform;
@@ -280,6 +314,17 @@ namespace ExScoringMod
         private static readonly bool[] trackerTried = new bool[2];
         private const int TrackerBufferLength = 15000, TrackerSampleDelay = 4320, TrackerTapLeft = 2, TrackerTapRight = 3;
         private static bool holdBeamFailed;
+
+        // The chain beams: ChainBeamsPerHand per hand (0 = left, 1 = right), used in turn.
+        private class ChainBeamPool
+        {
+            public ChainBeam[] Beams;
+            public int Cycle;
+        }
+
+        private static readonly ChainBeamPool[] chainBeams = new ChainBeamPool[2];
+        private static bool chainBeamFailed;
+        private static int chainBeamsFired;
 
         private static bool useSample = true;
         private static bool lineWidthFailed;
@@ -557,6 +602,7 @@ namespace ExScoringMod
                 AddTemplate(Target.TargetBehavior.Melee, config.targetMelee != null ? config.targetMelee.gameObject : null);
                 AddTemplate(Target.TargetBehavior.ChainStart, config.targetChainStart != null ? config.targetChainStart.gameObject : null);
                 AddTemplate(Target.TargetBehavior.Chain, config.targetChainNode != null ? config.targetChainNode.gameObject : null);
+                AddTemplate(Target.TargetBehavior.Dodge, config.targetDodge != null ? config.targetDodge.gameObject : null);
 
                 if (templates.Count == 0)
                 {
@@ -676,11 +722,13 @@ namespace ExScoringMod
         {
             if (cue == null || !templates.TryGetValue((int)cue.behavior, out Template template))
             {
-                skippedTotal++; // dodge: not drawn yet
+                skippedTotal++; // a type whose prefab couldn't be copied
                 return;
             }
 
-            bool melee = IsMelee(cue);
+            // Mines use a melee lane, the melee clip times and telegraph, but the dome's speed.
+            bool dodge = cue.behavior == Target.TargetBehavior.Dodge;
+            bool melee = IsMelee(cue) || dodge;
             Live target = new Live
             {
                 Index = index,
@@ -691,7 +739,8 @@ namespace ExScoringMod
                 Head = headOf[index],
                 Prev = prevOf[index],
                 Melee = melee,
-                Speed = melee ? meleeSpeed : domeSpeed,
+                Dodge = dodge,
+                Speed = melee && !dodge ? meleeSpeed : domeSpeed,
                 ShowTime = melee ? MeleeShowClipTime : ShowClipTime,
                 CompleteTime = melee ? MeleeCompleteClipTime : CompleteClipTime,
                 Pair = pairOf[index]
@@ -712,7 +761,15 @@ namespace ExScoringMod
                 target.Spawner = spawner.gameObject;
 
                 holder = NewChild("targetholder", spawner);
-                holder.localPosition = new Vector3(2f * cue.gridOffset.x, 2f * cue.gridOffset.y, cue.zOffset);
+                if (dodge)
+                {
+                    // A mine's holder (probe 2026-11-21): the offset is along the melee root's own
+                    // axes, not the spawner's turned, half-size ones, and 0.65 m nearer the player.
+                    // Only zOffset 0 was seen; zOffset is taken in metres like a melee target's.
+                    Vector3 offset = new Vector3(2f * cue.gridOffset.x, 2f * cue.gridOffset.y, cue.zOffset + DodgeHolderZ);
+                    holder.localPosition = Quaternion.Inverse(spawner.localRotation) * offset / MeleeSpawnerScale;
+                }
+                else holder.localPosition = new Vector3(2f * cue.gridOffset.x, 2f * cue.gridOffset.y, cue.zOffset);
             }
             else
             {
@@ -750,8 +807,8 @@ namespace ExScoringMod
                 if (source == null) source = target.Mesh.sharedMaterial;
                 if (source != null)
                 {
-                    // An either-hand melee ball keeps its own grey material.
-                    bool keep = melee && cue.handType != Target.TargetHandType.Left && cue.handType != Target.TargetHandType.Right;
+                    // An either-hand melee ball keeps its own grey material, a mine its own red one.
+                    bool keep = dodge || (melee && cue.handType != Target.TargetHandType.Left && cue.handType != Target.TargetHandType.Right);
                     target.Mesh.sharedMaterial = keep ? source : Tinted(source, color);
                 }
                 target.Mesh.enabled = false; // shown from ShowTime
@@ -761,7 +818,10 @@ namespace ExScoringMod
             if (target.Timing != null) target.Timing.enabled = false;
 
             target.TargetAnim = targetObject.GetComponent<Animation>();
-            target.TargetState = StateOf(target.TargetAnim, melee ? (leftSide ? MeleeLeftClip : MeleeRightClip) : (leftSide ? LeftClip : RightClip));
+            string clip = dodge ? (leftSide ? DodgeLeftClip : DodgeRightClip)
+                : melee ? (leftSide ? MeleeLeftClip : MeleeRightClip)
+                : (leftSide ? LeftClip : RightClip);
+            target.TargetState = StateOf(target.TargetAnim, clip);
 
             // Its telegraph: beside the target on the holder, or on the melee ball itself.
             if (template.Telegraph != null && !chainNode && target.CueMs > lastNowMs)
@@ -772,7 +832,8 @@ namespace ExScoringMod
                 target.Telegraph.transform.localRotation = Quaternion.identity;
                 float scale = melee ? MeleeTelegraphScale : TelegraphScale;
                 target.Telegraph.transform.localScale = new Vector3(scale, scale, scale);
-                ColorTelegraph(target.Telegraph.transform, cue, color);
+                // A mine's telegraph circle is white (probe), whatever the hand colours.
+                ColorTelegraph(target.Telegraph.transform, cue, dodge ? Color.white : color);
 
                 target.TelegraphAnim = target.Telegraph.GetComponent<Animation>();
                 target.TelegraphState = StateOf(target.TelegraphAnim, TelegraphClip);
@@ -781,9 +842,16 @@ namespace ExScoringMod
             // The line to the target landing with it: on the later one of the two.
             if (target.Pair >= 0 && target.Pair < index)
             {
-                Transform line = targetObject.transform.Find(melee ? MeleeLineName : LineName);
+                Transform line = dodge ? targetObject.transform.Find(DodgeConnectorName + "/" + MeleeLineName)
+                    : targetObject.transform.Find(melee ? MeleeLineName : LineName);
                 target.Line = line != null ? line.GetComponent<LineRenderer>() : null;
-                if (target.Line != null && !lineBlockFailed)
+                if (target.Line != null && dodge)
+                {
+                    // A mine's connector sits under connectorhider (off in the prefab) and keeps its
+                    // material's own red colours.
+                    if (!line.parent.gameObject.activeSelf) line.parent.gameObject.SetActive(true);
+                }
+                else if (target.Line != null && !lineBlockFailed)
                 {
                     try
                     {
@@ -1132,6 +1200,8 @@ namespace ExScoringMod
             switch (e.k)
             {
                 case SpectatorEvents.Hit:
+                    // A chain node: Gun.Fire's chain beam, from the gun to the node.
+                    if (place >= 0 && IsChainNode(place)) FireChainBeam(e, target);
                     // The target's sound: SpectatorSounds, told when the result was received (TellSounds).
                     if (target != null)
                     {
@@ -1169,6 +1239,21 @@ namespace ExScoringMod
         }
 
         private static long CueKey(int tick, int pitch) => (long)tick * 1000 + pitch;
+
+        /// <summary>The cue at that place in this client's chart is a chain node (a chain sustain's tail included: it loads as one).</summary>
+        private static bool IsChainNode(int place)
+        {
+            List<SongCues.Cue> cues = SpectatorSong.Cues;
+            return place >= 0 && place < cues.Count && cues[place] != null && cues[place].behavior == Target.TargetBehavior.Chain;
+        }
+
+        /// <summary>The place in this client's chart of the cue a result names, or -1.</summary>
+        private static int PlaceOf(MpSpectateEvent e)
+        {
+            if (positionOfCue.TryGetValue(CueKey(e.ct, e.cp), out int position)) return position;
+            if (e.ct == 0 && e.cp == 0 && e.i >= 0 && e.i < chartCueCount) return e.i;
+            return -1;
+        }
 
         /// <summary>The watched player is holding a sustain with that hand (0 = left, 1 = right) right now. For SpectatorSounds.</summary>
         internal static bool IsHolding(int hand)
@@ -1220,6 +1305,8 @@ namespace ExScoringMod
                     Result result = results[i];
                     MpSpectateEvent e = result.E;
                     if (result.BeamUsed || e.k != SpectatorEvents.Hit || !e.shot || e.hand != wantedHand || e.p == null || e.p.Length != 3) continue;
+                    // A chain node is never a press: its beam is the chain beam (FireChainBeam).
+                    if (IsChainNode(PlaceOf(e))) continue;
                     double gap = Math.Abs(result.Ms - lastNowMs);
                     if (gap <= bestGap) { best = result; bestGap = gap; }
                 }
@@ -1395,6 +1482,149 @@ namespace ExScoringMod
             return beam;
         }
 
+        // ── Chain beam ───────────────────────────────────────────────────────
+
+        /// <summary>
+        /// A chain node hit by the watched player: the next chain beam of that hand, fired the way
+        /// ChainBeam.Fire does it (Ghidra 2026-11-21), from their gun to the node.
+        /// </summary>
+        private static void FireChainBeam(MpSpectateEvent e, Live target)
+        {
+            if (chainBeamFailed || root == null) return;
+            int h;
+            if (e.hand == (int)Target.TargetHandType.Left) h = 0;
+            else if (e.hand == (int)Target.TargetHandType.Right) h = 1;
+            else return;
+
+            string userId = SpectatorSong.WatchedUserId;
+            try
+            {
+                if (!MpPresence.TryGetRemoteFirepoint(userId, h, out Vector3 from, out Vector3 aim)) return;
+
+                // ChainBeam.Fire ends on the node itself (Gun.Fire passes the target's transform).
+                Vector3 to;
+                if (target != null && target.TargetTransform != null) to = target.TargetTransform.position;
+                else if (e.p != null && e.p.Length == 3) to = root.transform.TransformPoint(new Vector3(e.p[0], e.p[1], e.p[2]));
+                else return;
+
+                ChainBeam beam = NextChainBeam(h);
+                if (beam == null) return;
+                LineRenderer line = beam.mLine;
+                Bezier_Spline spline = beam.mSpline;
+                if (line == null || spline == null || beam.start == null || beam.startForward == null || beam.middle == null || beam.end == null)
+                    throw new Exception("a chain beam copy is missing its line, spline or points");
+
+                // mTravel and _Travel back to 0 (ChainBeam.Update takes it from there).
+                beam.mTravel = 0f;
+                Material material = line.material; // the renderer's own instance, as natively ("chain_beam (Instance)")
+                if (material != null && material.HasProperty(TravelProperty)) material.SetFloat(TravelProperty, 0f);
+                beam.mHand = (Target.TargetHandType)e.hand;
+
+                // KataConfig.GetTargetColor(hand) natively: the watched player's colour here.
+                // The line fades in from the gun: start alpha 0.
+                MpPresence.GetGunColors(userId, out Color leftColor, out Color rightColor);
+                Color color = h == 0 ? leftColor : rightColor;
+                Color startColor = color;
+                startColor.a = 0f;
+                line.startColor = startColor;
+                line.endColor = color;
+
+                // The four points. 2 m ahead of the gun natively; shrunk with a spectator diorama
+                // (the sustain beam's curve overshot the nearer target unscaled).
+                float ahead = ChainBeamAhead * SpectatorDiorama.ScaleOf(SpectatorWindow.ShownWatchedRoot);
+                beam.start.position = from;
+                beam.startForward.position = from + aim * ahead;
+                beam.middle.position = from + (to - from) * ChainBeamMiddle;
+                beam.end.position = to;
+
+                // The spline's points into the line, then on.
+                spline.UpdatePoints();
+                var points = spline.mPoints;
+                if (points == null || points.Length == 0) throw new Exception("Bezier_Spline.UpdatePoints gave no points");
+                line.positionCount = points.Length;
+                for (int i = 0; i < points.Length; i++) line.SetPosition(i, points[i]);
+                beam.gameObject.SetActive(true);
+                chainBeamsFired++;
+
+                // Gun.Fire's chain branch still plays the muzzle flash and the gun's fire animation.
+                MpPresence.PlaySpectatorChainShot(userId, h);
+            }
+            catch (Exception ex)
+            {
+                chainBeamFailed = true;
+                MelonLogger.Log("[SpectatorTargets] the chain beam failed (no chain beams from now on): " + ex);
+                DestroyChainBeams();
+            }
+        }
+
+        /// <summary>The next chain beam of a hand (0 = left, 1 = right), the pool built on first use. Null without a prefab.</summary>
+        private static ChainBeam NextChainBeam(int h)
+        {
+            ChainBeamPool pool = chainBeams[h];
+            bool whole = pool != null && pool.Beams != null;
+            for (int i = 0; whole && i < pool.Beams.Length; i++)
+                if (pool.Beams[i] == null) whole = false; // Unity-null: destroyed with the root
+            if (!whole)
+            {
+                KataConfig config = KataConfig.I;
+                if (config == null || config.chainBeamPrefab == null) return null;
+
+                if (pool != null && pool.Beams != null)
+                    for (int i = 0; i < pool.Beams.Length; i++)
+                        if (pool.Beams[i] != null) GameObject.Destroy(pool.Beams[i].gameObject);
+
+                pool = new ChainBeamPool { Beams = new ChainBeam[ChainBeamsPerHand], Cycle = 0 };
+                for (int i = 0; i < ChainBeamsPerHand; i++)
+                {
+                    GameObject copy = GameObject.Instantiate(config.chainBeamPrefab.gameObject, root.transform);
+                    copy.SetActive(false); // off until fired, as the game's own (its Update would run on a line not looked up yet)
+                    copy.name = "ChainBeam " + (h == 0 ? "L" : "R") + " " + i;
+                    var colliders = copy.GetComponentsInChildren<Collider>(true);
+                    for (int c = 0; c < colliders.Length; c++)
+                        if (colliders[c] != null) colliders[c].enabled = false;
+                    SetLayerRecursive(copy.transform, MpPresence.SongOnlyLayer);
+
+                    ChainBeam beam = copy.GetComponent<ChainBeam>();
+                    if (beam == null)
+                    {
+                        GameObject.Destroy(copy);
+                        throw new Exception("the chain beam prefab has no ChainBeam");
+                    }
+                    beam.Init(); // ChainBeam.Init: finds its LineRenderer and Bezier_Spline
+                    pool.Beams[i] = beam;
+                }
+                chainBeams[h] = pool;
+                Log($"chain beams built for the {(h == 0 ? "left" : "right")} hand ({ChainBeamsPerHand})");
+            }
+
+            // Gun.Fire: mCycle = (mCycle + 1) % length, then that beam.
+            pool.Cycle = (pool.Cycle + 1) % pool.Beams.Length;
+            return pool.Beams[pool.Cycle];
+        }
+
+        private static void HideChainBeams()
+        {
+            for (int h = 0; h < 2; h++)
+            {
+                ChainBeamPool pool = chainBeams[h];
+                if (pool == null || pool.Beams == null) continue;
+                for (int i = 0; i < pool.Beams.Length; i++)
+                    if (pool.Beams[i] != null && pool.Beams[i].gameObject.activeSelf) pool.Beams[i].gameObject.SetActive(false);
+            }
+        }
+
+        private static void DestroyChainBeams()
+        {
+            for (int h = 0; h < 2; h++)
+            {
+                ChainBeamPool pool = chainBeams[h];
+                if (pool != null && pool.Beams != null)
+                    for (int i = 0; i < pool.Beams.Length; i++)
+                        if (pool.Beams[i] != null) GameObject.Destroy(pool.Beams[i].gameObject);
+                chainBeams[h] = null;
+            }
+        }
+
         // ── Per frame ────────────────────────────────────────────────────────
 
         private static void UpdateTarget(Live target, double nowMs, double tick, Transform head)
@@ -1475,6 +1705,9 @@ namespace ExScoringMod
             // Dome targets: holder to holder. A melee pair: ball to ball.
             target.Line.SetPosition(0, target.Melee ? target.TargetTransform.position : target.Holder.position);
             target.Line.SetPosition(1, target.Melee ? pair.TargetTransform.position : pair.Holder.position);
+
+            // A mine's connector keeps its prefab's width and colours (seen unchanged in flight).
+            if (target.Dodge) return;
 
             float t = HitClipTime - (float)((target.CueMs - nowMs) / 1000.0) * target.Speed;
 
@@ -1591,6 +1824,7 @@ namespace ExScoringMod
             {
                 if (holdBeams[h] != null && holdBeams[h].Root != null && holdBeams[h].Root.activeSelf) holdBeams[h].Root.SetActive(false);
             }
+            HideChainBeams();
         }
 
         /// <summary>Removes every target and forgets the chart (the templates stay).</summary>
@@ -1610,7 +1844,7 @@ namespace ExScoringMod
                     if (textures[i] != null) UnityEngine.Object.Destroy(textures[i]);
             }
             cloudTextures.Clear();
-            if (chartSong != null) Log($"cleared ({reason}): {spawnedTotal} targets shown, {skippedTotal} cues of types not drawn yet (dodge), results applied {resultsApplied} (hits {hitsApplied}, misses {missesApplied}, without a cue {resultsWithoutCue})");
+            if (chartSong != null) Log($"cleared ({reason}): {spawnedTotal} targets shown, {skippedTotal} cues without a template, {chainBeamsFired} chain beams fired, results applied {resultsApplied} (hits {hitsApplied}, misses {missesApplied}, without a cue {resultsWithoutCue})");
             chartSong = null;
             chartCueCount = 0;
             cueMs = null;
@@ -1648,7 +1882,8 @@ namespace ExScoringMod
                 catch (Exception ex) { state = "unreadable: " + ex.Message; }
                 MelonLogger.Log($"  sustain audio tracker {(h == 0 ? "L" : "R")}: tried={trackerTried[h]} {state}");
             }
-            MelonLogger.Log($"  chainLineFailed={chainLineFailed}");
+            MelonLogger.Log($"  chainLineFailed={chainLineFailed} chainBeamFailed={chainBeamFailed} chainBeamsFired={chainBeamsFired} " +
+                $"chainBeamPools=L:{(chainBeams[0] != null ? "built" : "none")} R:{(chainBeams[1] != null ? "built" : "none")}");
             for (int i = 0; i < live.Count && i < 8; i++)
             {
                 Live target = live[i];
