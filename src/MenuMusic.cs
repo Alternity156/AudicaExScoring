@@ -30,6 +30,11 @@ namespace ExScoringMod
     ///  - Random Song: a random installed song (not hidden, not the tutorial, none of the last 10)
     ///    from its beginning; 0.7 s before its end it fades out and the next one fades in. A new song
     ///    is picked each time the menus are entered. Shown by <see cref="NowPlayingLabel"/>.
+    ///    It doesn't play on the song list while a song is selected and the launch-panel Song
+    ///    Preview checkbox is on (that song's preview is the music there): it fades out, and a new
+    ///    random song fades in once that no longer holds. This keeps a preview that keeps
+    ///    restarting (a map whose previewStartSeconds is at the very end of its audio) from
+    ///    fighting with the random song. The environment music stays silent meanwhile.
     ///
     /// Menu Music Volume (0..100 %, relative to the game's Music Level) scales the Tutorial/Random
     /// track's gain and the environment music's gain. Song previews aren't affected. With Normalize
@@ -178,6 +183,49 @@ namespace ExScoringMod
             return (int)state != NativeCreditsState;
         }
 
+        /// <summary>True in the menus with Tutorial or Random Song as the menu music (environment music held silent).</summary>
+        private static bool MenuTrackMusicSelected => IsMenuState() && (TutorialSelected || RandomSelected);
+
+        private static bool loggedSelectedPreviewError;
+
+        /// <summary>
+        /// True when the song list is playing the selected song's preview: SongPreview is on its
+        /// launch-screen path (the OnLaunchScreen patch in Hooks.cs makes that true on the song list
+        /// and false during marathon setup), a song is selected (SongDataHolder.I.songData) and the
+        /// launch-panel Song Preview checkbox is on. Called from AudioAmbience.Update, never during
+        /// SongPreview.Update, so the online lobby swap (MpLobbyPreview.Feeding) never shows up here.
+        /// </summary>
+        private static bool SelectedSongPreviewActive()
+        {
+            try
+            {
+                SongPreview preview = SongPreview.I;
+                if (preview == null || !preview.OnLaunchScreen()) return false;
+
+                SongDataHolder holder = SongDataHolder.I;
+                if (holder == null || holder.songData == null) return false;
+
+                PlayerPreferences prefs = PlayerPreferences.I;
+                return prefs != null && prefs.SongPreviewOnLaunchScreen != null && prefs.SongPreviewOnLaunchScreen.mVal;
+            }
+            catch (Exception ex)
+            {
+                if (!loggedSelectedPreviewError)
+                {
+                    loggedSelectedPreviewError = true;
+                    DebugLog.Log($"[MenuMusic] selected song preview check failed (logged once): {ex.Message}");
+                }
+                return false;
+            }
+        }
+
+        /// <summary>Holds the environment music at gain 0 while Tutorial / Random Song is the selected menu music.</summary>
+        private static void SilenceShellMusic(AudioAmbience ambience)
+        {
+            if (ambience != null && ambience.mShellMusicHandle != 0 && MenuTrackMusicSelected)
+                Hmx.Audio.Sound.SetGain(ambience.mShellMusicHandle, 0f);
+        }
+
         /// <summary>How much of SongPreview is audible right now (0 = nothing, 1 = full).</summary>
         private static float PreviewLevel(SongPreview preview)
         {
@@ -289,7 +337,8 @@ namespace ExScoringMod
             {
                 if (!IsMenuState()) return Mode.None;
                 if (TutorialSelected) return Mode.Tutorial;
-                if (RandomSelected) return Mode.Random;
+                // Song list with a song selected and its preview on: the preview is the music there.
+                if (RandomSelected) return SelectedSongPreviewActive() ? Mode.None : Mode.Random;
                 return Mode.None;
             }
 
@@ -303,6 +352,8 @@ namespace ExScoringMod
 
                     if (mode == Mode.None && wanted == Mode.None)
                     {
+                        // Random Song held off on the song list: keep the environment music silent.
+                        SilenceShellMusic(ambience);
                         NowPlayingLabel.Hide();
                         return;
                     }
@@ -317,6 +368,7 @@ namespace ExScoringMod
 
                     if (mode == Mode.None && !Start(wanted))
                     {
+                        SilenceShellMusic(ambience);
                         NowPlayingLabel.Hide();
                         return;
                     }
@@ -335,11 +387,13 @@ namespace ExScoringMod
                         Stop(wasAdvancing ? "next random song" : "deselected");
                         if (next != Mode.None && !Start(next))
                         {
+                            SilenceShellMusic(ambience);
                             NowPlayingLabel.Hide();
                             return;
                         }
                         if (mode == Mode.None)
                         {
+                            SilenceShellMusic(ambience);
                             NowPlayingLabel.Hide();
                             return;
                         }
@@ -350,9 +404,9 @@ namespace ExScoringMod
                     float spectatorDuck = SpectatorSong.MenuDuck; // the spectator window is playing a watched player's song
                     Hmx.Audio.Sound.SetGain(handle, baseGain * VolumeFactor * fade * (1f - previewLevel) * (1f - spectatorDuck));
 
-                    // Keep the environment music silent while a menu track is the selected music.
-                    if (wanted != Mode.None && ambience != null && ambience.mShellMusicHandle != 0)
-                        Hmx.Audio.Sound.SetGain(ambience.mShellMusicHandle, 0f);
+                    // Keep the environment music silent while a menu track is the selected music
+                    // (also while Random Song is held off on the song list and fading out).
+                    SilenceShellMusic(ambience);
 
                     if (mode == Mode.Random && wanted == Mode.Random && previewLevel <= 0f && spectatorDuck <= 0f)
                         NowPlayingLabel.Show(song);
