@@ -171,6 +171,12 @@ namespace ExScoringMod
         private static SongSelect songSelect;
         private static ShellScrollable scroller;
 
+        // Native pointer of the SongSelect the song pool was last wired to. VList_Hidden is
+        // DontDestroyOnLoad, so pool items parked there survive the menu being rebuilt after a
+        // song, still pointing (mSongSelect) at the destroyed SongSelect. When a new SongSelect
+        // shows up, every pool item's bind cache is invalidated so the next BindRow re-Inits it.
+        private static IntPtr wiredSongSelectPtr = IntPtr.Zero;
+
         /// <summary>
         /// The native song-row prefab (same one the header/action pools clone via StyleFolderQuad),
         /// for other systems that need to clone its shootable "Quad" child. Lazily resolves
@@ -1116,7 +1122,11 @@ namespace ExScoringMod
                 // doesn't want that same text (Init puts the song's own title back). Keyed on the
                 // row key, so a parent song row and its community map rows never skip a rebind.
                 string rowKey = row.Key;
-                if (pi.boundSong != rowKey || (pi.appliedTitle != null && pi.appliedTitle != row.titleOverride))
+                // Also re-Init when the item isn't wired to the live SongSelect: a pooled item that
+                // survived a menu rebuild (parked in the DontDestroyOnLoad holder) keeps a dead
+                // mSongSelect, and native OnSelect then throws before selecting the song.
+                if (pi.boundSong != rowKey || (pi.appliedTitle != null && pi.appliedTitle != row.titleOverride)
+                    || !IsWiredToCurrentSelect(pi.ssi))
                 {
                     if (pi.ssi != null) pi.ssi.Init(row.songID, songSelect);
                     pi.boundSong = rowKey;
@@ -2070,6 +2080,7 @@ namespace ExScoringMod
         {
             if (songSelect == null) songSelect = UnityEngine.Object.FindObjectOfType<SongSelect>();
             if (songSelect == null) { DebugLog.Log("[VList] No SongSelect — be on the song page."); return false; }
+            InvalidatePoolIfSongSelectChanged();
             scroller = songSelect.scroller;
             if (scroller == null) { DebugLog.Log("[VList] No scroller."); return false; }
             scrollParent = scroller.scrollParent;
@@ -2077,6 +2088,48 @@ namespace ExScoringMod
             if (songSelect.songSelectItemPrefab == null) { DebugLog.Log("[VList] No songSelectItemPrefab."); return false; }
             EnsureHiddenHolder();
             return true;
+        }
+
+        /// <summary>
+        /// True when this item's mSongSelect is the live SongSelect. A destroyed Il2Cpp object
+        /// compares equal to null, so a stale reference to the old menu's SongSelect fails here.
+        /// </summary>
+        private static bool IsWiredToCurrentSelect(SongSelectItem ssi)
+        {
+            if (ssi == null || songSelect == null) return true; // nothing to re-wire against
+            try
+            {
+                var current = ssi.mSongSelect;
+                return current != null && current.Pointer == songSelect.Pointer;
+            }
+            catch (Exception)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// When the menu was rebuilt (new SongSelect instance), drop every pool item's bind cache so
+        /// BindRow re-Inits it against the new SongSelect, even if it gets the same song back.
+        /// </summary>
+        private static void InvalidatePoolIfSongSelectChanged()
+        {
+            if (songSelect == null) return;
+            IntPtr ptr = songSelect.Pointer;
+            if (ptr == wiredSongSelectPtr) return;
+
+            bool hadPrevious = wiredSongSelectPtr != IntPtr.Zero;
+            wiredSongSelectPtr = ptr;
+            if (!hadPrevious) return;
+
+            int cleared = 0;
+            foreach (var pi in songPool)
+            {
+                if (pi == null) continue;
+                if (pi.boundSong != null) cleared++;
+                pi.boundSong = null;
+            }
+            DebugLog.Log($"[VList] New SongSelect instance; cleared bind cache on {cleared} song pool item(s).");
         }
 
         private static void EnsureHiddenHolder()
