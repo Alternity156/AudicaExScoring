@@ -5,9 +5,12 @@ using UnityEngine;
 namespace ExScoringMod
 {
     /// <summary>
-    /// Online play: in a lobby, the song the host selected plays as the preview in every menu
-    /// outside the song list (Main page, Online Play screen, Settings, ...), replacing the menu
-    /// music. On the song list the native preview is left alone (the song you're browsing).
+    /// Online play: in a lobby, the song the host selected plays as the preview in the menus (Main
+    /// page, Online Play screen, Settings, ...), replacing the menu music. On the song list it plays
+    /// only while your own launch-panel preview isn't playing: no song selected, or the Song
+    /// Preview checkbox off. With a song selected and the checkbox on, the native preview plays
+    /// your song. Hovering a song button still previews that song (native gives it priority).
+    /// While the lobby song plays, MenuMusic holds the Random Song track off (<see cref="LobbySongActive"/>).
     ///
     /// The game's own SongPreview does the playing. Its Update picks the song each frame (a hovered
     /// song button, otherwise SongDataHolder.I.songData when OnLaunchScreen() is true and the
@@ -25,7 +28,10 @@ namespace ExScoringMod
     ///
     /// Lobby mode: online play on, in a lobby in the "lobby" phase with a selected song that is
     /// installed (a missing song stays silent until it's downloaded), Lobby Song Preview on, and
-    /// not on the song list, the title screen, the credits or in a song (results screen included).
+    /// not on Compare Scores, the title screen, the credits or in a song (results screen included).
+    /// On the song list, also not during marathon setup, and not while you have a song selected
+    /// with the Song Preview checkbox on. Your real selection and checkbox are read in the prefix
+    /// before the swap, and the swap never changes them for anything outside SongPreview.Update.
     ///
     /// Outside lobby mode, the same patch applies the Song Preview Volume setting (0..100 %) to the
     /// song list previews: gain (hovered song button) and gainLaunchScreen (selected song on the
@@ -36,6 +42,12 @@ namespace ExScoringMod
     {
         /// <summary>True only during SongPreview.Update while it's being fed the lobby song.</summary>
         public static bool Feeding { get; private set; }
+
+        /// <summary>
+        /// True while lobby mode is active (the lobby song was fed to SongPreview on its last
+        /// Update). MenuMusic holds the Random Song track off meanwhile.
+        /// </summary>
+        public static bool LobbySongActive => wasActive;
 
         // Native MenuState values OnLaunchScreen() treats as the launch screen (from Ghidra), plus
         // the title screen (0) and the credits (9), which have their own music.
@@ -70,7 +82,12 @@ namespace ExScoringMod
             if (lobby == null || lobby.phase != "lobby") return null;
             if (lobby.selectedSong == null || string.IsNullOrEmpty(lobby.selectedSong.songId)) return null;
 
-            if (IsSongListOrOwnMusicState()) return null;
+            if (IsOwnMusicState()) return null;
+            if (IsSongListState())
+            {
+                if (MarathonSetup.Active) return null;
+                if (OwnSelectedPreviewOn()) return null; // your selected song's preview plays instead
+            }
 
             if (SongList.I == null) return null;
             SongList.SongData song = SongList.I.GetSong(lobby.selectedSong.songId);
@@ -78,23 +95,44 @@ namespace ExScoringMod
             return song;
         }
 
-        private static bool IsSongListOrOwnMusicState()
+        /// <summary>States where the lobby song never plays: Compare Scores, in a song, the title screen, the credits.</summary>
+        private static bool IsOwnMusicState()
         {
             MenuState.State state = MenuState.GetState();
-            if (state == MenuState.State.SongPage ||
-                state == MenuState.State.LaunchPage ||
-                state == MenuState.State.CompareScoresPage ||
+            if (state == MenuState.State.CompareScoresPage ||
                 state == MenuState.State.Launching ||
                 state == MenuState.State.Launched ||
                 state == MenuState.State.TitleScreen)
                 return true;
 
             int raw = (int)state;
-            return raw == NativeTitleScreenState ||
-                   raw == NativeLaunchStateA ||
+            return raw == NativeTitleScreenState || raw == NativeCreditsState;
+        }
+
+        /// <summary>The song list: SongPage, LaunchPage and the native launch-screen states.</summary>
+        private static bool IsSongListState()
+        {
+            MenuState.State state = MenuState.GetState();
+            if (state == MenuState.State.SongPage || state == MenuState.State.LaunchPage)
+                return true;
+
+            int raw = (int)state;
+            return raw == NativeLaunchStateA ||
                    raw == NativeLaunchStateB ||
-                   raw == NativeLaunchStateC ||
-                   raw == NativeCreditsState;
+                   raw == NativeLaunchStateC;
+        }
+
+        /// <summary>
+        /// A song is selected and the launch-panel Song Preview checkbox is on, so the native
+        /// preview plays your own song. Read before the swap, so these are the real values.
+        /// </summary>
+        private static bool OwnSelectedPreviewOn()
+        {
+            SongDataHolder holder = SongDataHolder.I;
+            if (holder == null || holder.songData == null) return false;
+
+            PlayerPreferences prefs = PlayerPreferences.I;
+            return prefs != null && prefs.SongPreviewOnLaunchScreen != null && prefs.SongPreviewOnLaunchScreen.mVal;
         }
 
         /// <summary>

@@ -32,7 +32,8 @@ namespace ExScoringMod
     ///    is picked each time the menus are entered. Shown by <see cref="NowPlayingLabel"/>.
     ///    It doesn't play on the song list while a song is selected and the launch-panel Song
     ///    Preview checkbox is on (that song's preview is the music there): it fades out, and a new
-    ///    random song fades in once that no longer holds. This keeps a preview that keeps
+    ///    random song fades in once that no longer holds. The same goes while an online lobby
+    ///    song plays (MpLobbyPreview.LobbySongActive), on any menu page. This keeps a preview that keeps
     ///    restarting (a map whose previewStartSeconds is at the very end of its audio) from
     ///    fighting with the random song. The environment music stays silent meanwhile.
     ///
@@ -337,8 +338,10 @@ namespace ExScoringMod
             {
                 if (!IsMenuState()) return Mode.None;
                 if (TutorialSelected) return Mode.Tutorial;
-                // Song list with a song selected and its preview on: the preview is the music there.
-                if (RandomSelected) return SelectedSongPreviewActive() ? Mode.None : Mode.Random;
+                // Song list with a song selected and its preview on, or an online lobby song
+                // playing: that preview is the music there.
+                if (RandomSelected)
+                    return SelectedSongPreviewActive() || MpLobbyPreview.LobbySongActive ? Mode.None : Mode.Random;
                 return Mode.None;
             }
 
