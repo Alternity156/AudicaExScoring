@@ -184,6 +184,7 @@ namespace ExScoringMod
         private const string TelegraphClip = "telegraph";
         private const string TimingName = "timing_shootable";
         private const string TrailsName = "trails";
+        private const string FakeBloomName = "fake_bloom";  // off in every copy (natively switched off by Target / Telegraph)
         private const string CircleName = "circle_mesh";
         private const string CenterName = "center";
         private const string CloudPrefix = "cloud";
@@ -681,6 +682,13 @@ namespace ExScoringMod
             var animations = copy.GetComponentsInChildren<Animation>(true);
             for (int i = 0; i < animations.Length; i++)
                 if (animations[i] != null) animations[i].playAutomatically = false;
+
+            // The fake bloom (the target's own and the telegraph's under circle_mesh): the game
+            // switches it off itself, which the stripped copies no longer do. Left on, the sustain
+            // and chain start ones showed as a still grey shape from the spawn on (2026-11-23).
+            var children = copy.GetComponentsInChildren<Transform>(true);
+            for (int i = 0; i < children.Length; i++)
+                if (children[i] != null && children[i].name == FakeBloomName) children[i].gameObject.SetActive(false);
 
             SetLayerRecursive(copy.transform, MpPresence.SongOnlyLayer);
         }
