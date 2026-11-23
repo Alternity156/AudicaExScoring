@@ -306,6 +306,7 @@
     <Compile Include="src\RandomSong.cs" />
     <Compile Include="src\RandomSongButton.cs" />
     <Compile Include="src\RefreshButton.cs" />
+    <Compile Include="src\RigJumpWatcher.cs" />
     <Compile Include="src\RunDataRecalculator.cs" />
     <Compile Include="src\RunDataSaveHandler.cs" />
     <Compile Include="src\ScrollIndicator.cs" />
@@ -385,9 +386,6 @@
     <Compile Include="csvorbis\Time0.cs" />
     <Compile Include="csvorbis\VorbisFile.cs" />
     <Compile Include="src\VirtualSongList.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <None Include="src\ApiContract.md" />
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
