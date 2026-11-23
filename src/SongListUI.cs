@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System.Collections;
+using System.Collections.Generic;
 using MelonLoader;
 using TMPro;
 using UnityEngine;
@@ -419,13 +420,18 @@ namespace ExScoringMod
         /// <summary>
         /// True if target data, heatmap, and intensity graph should be hidden for this song —
         /// either Hide Score Data is on permanently, or First Play Blind is on and the song has
-        /// never been played.
+        /// never been played. A selected community map counts as its own song: the game logs map
+        /// plays under the parent, so the map is checked against its own saved runs instead.
         /// </summary>
         public static bool ShouldHideScoreData(string songId)
         {
             if (Config.HideScoreData) return true;
             if (!Config.FirstPlayBlind) return false;
             if (string.IsNullOrEmpty(songId)) return false;
+
+            CommunityMapManager.Entry map = CommunityMapManager.Selected;
+            if (map != null && map.parentSongID == songId)
+                return !HasPlayedCommunityMap(songId);
 
             try
             {
@@ -437,6 +443,79 @@ namespace ExScoringMod
             {
                 DebugLog.Log($"[BlindData] play count check failed for {songId}: {ex.Message}");
                 return false;
+            }
+        }
+
+        // Path of the map a BlindDataWaitCoroutine is waiting for (null = none running).
+        private static string blindDataWaitMapPath;
+        // Last map a wait finished for. If the online fetch still hadn't settled by then (it timed
+        // out), that map isn't waited for again until another map is waited for, so a stuck fetch
+        // can't refresh the panel over and over.
+        private static string blindDataWaitedMapPath;
+
+        /// <summary>
+        /// Whether the selected community map of <paramref name="parentSongId"/> has been played:
+        /// a saved local run, or a score of the player's on the leaderboard, under the map's own ID
+        /// (always Expert). While either source isn't known yet it answers false (hidden) and starts
+        /// a one-off wait that refreshes the panel once both are in, so a played map shows its data
+        /// without needing to be reselected.
+        /// </summary>
+        private static bool HasPlayedCommunityMap(string parentSongId)
+        {
+            CommunityMapManager.Entry map = CommunityMapManager.Selected;
+            string mapId = CommunityMapManager.EffectiveSongID(parentSongId);
+            if (map == null || string.IsNullOrEmpty(mapId) || mapId == parentSongId)
+                return false; // the map's ID couldn't be computed — treat as unplayed
+
+            const string difficulty = "Expert";
+
+            bool indexBuilt;
+            lock (runFileIndexLock)
+            {
+                indexBuilt = runFileIndex != null;
+            }
+
+            if (indexBuilt && HasRunFiles(mapId, difficulty)) return true;
+            if (TryGetOnlineBest(mapId, difficulty, out _)) return true;
+
+            if (!indexBuilt || !OnlineBestScoresSettled)
+                StartBlindDataWait();
+
+            return false;
+        }
+
+        private static void StartBlindDataWait()
+        {
+            string path = CommunityMapManager.SelectedPath;
+            if (string.IsNullOrEmpty(path)) return;
+            if (blindDataWaitMapPath == path) return;   // already waiting for this map
+            if (blindDataWaitedMapPath == path) return; // already waited once; don't loop
+
+            blindDataWaitMapPath = path;
+            MelonCoroutines.Start(BlindDataWaitCoroutine(path));
+        }
+
+        private static IEnumerator BlindDataWaitCoroutine(string mapPath)
+        {
+            yield return WaitForRunFileIndex();
+            yield return WaitForOnlineBestScores();
+
+            // A newer wait (another map) replaced this one; it does its own refresh.
+            if (blindDataWaitMapPath != mapPath) yield break;
+            blindDataWaitMapPath = null;
+            blindDataWaitedMapPath = mapPath;
+
+            // Only refresh if that same map is still the one on the launch panel.
+            if (CommunityMapManager.SelectedPath != mapPath) yield break;
+            if (!Config.FirstPlayBlind || Config.HideScoreData) yield break;
+
+            try
+            {
+                RefreshScoreDataVisibility();
+            }
+            catch (System.Exception ex)
+            {
+                DebugLog.Log($"[BlindData] refresh after wait failed: {ex.Message}");
             }
         }
 
