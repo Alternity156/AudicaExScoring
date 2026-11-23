@@ -443,8 +443,8 @@ namespace ExScoringMod
         };
 
         // Fallback when a player hasn't sent colours yet.
-        private static readonly Color DefaultLeftColor = new Color(0f, 0.665f, 1f, 1f);
-        private static readonly Color DefaultRightColor = new Color(1f, 0.467f, 0f, 1f);
+        internal static readonly Color DefaultLeftColor = new Color(0f, 0.665f, 1f, 1f);
+        internal static readonly Color DefaultRightColor = new Color(1f, 0.467f, 0f, 1f);
 
         // Material names the game tints with the gun colour (MpColorDump, 2026-10-23). Copies get
         // " (Instance)" appended, hence StartsWith.
@@ -1076,8 +1076,14 @@ namespace ExScoringMod
 
             if (!MpSession.InLobby)
             {
-                if (remotes.Count > 0) DestroyAll("not in a lobby");
                 wasInSong = false;
+                // A replay (Replays.cs) is watched offline too: only its player is kept and drawn.
+                if (Replays.Active && !InSong())
+                {
+                    TickReplayOnly("not in a lobby");
+                    return;
+                }
+                if (remotes.Count > 0) DestroyAll("not in a lobby");
                 return;
             }
 
@@ -1096,6 +1102,11 @@ namespace ExScoringMod
             if (!MpSession.PresenceEnabled)
             {
                 // Reconnected to a server without the feature, or still handshaking.
+                if (Replays.Active)
+                {
+                    TickReplayOnly("presence off on this connection");
+                    return;
+                }
                 if (remotes.Count > 0) DestroyAll("presence off on this connection");
                 return;
             }
@@ -1179,47 +1190,73 @@ namespace ExScoringMod
             return pose;
         }
 
-        // ── Debug hooks for SpectatorDebug (record and replay, no server needed) ──
+        // ── Hooks for Replays (record and watch, no server needed) ──
 
         /// <summary>In a song, end screen excluded: when a recording runs.</summary>
-        internal static bool DebugInSong => InSong();
+        internal static bool InSongForRecording => InSong();
 
         /// <summary>The pose this player would send right now, stamped t, or null without a rig. Nothing is sent.</summary>
-        internal static JObject DebugBuildPose(long t)
+        internal static JObject BuildRecordingPose(long t)
         {
             return FindLocalRig() ? BuildPose(t) : null;
         }
 
-        /// <summary>Takes one pose entry as if the server had listed it (the fake player's replay).</summary>
-        internal static void DebugInjectPose(MpPoseEntry entry)
+        /// <summary>Takes one pose entry of the replay player as if the server had listed it. Outside songs, in a lobby or not.</summary>
+        internal static void InjectReplayPose(MpPoseEntry entry)
         {
-            if (entry == null || entry.userId == null || !MpSession.InLobby || InSong()) return;
+            if (entry == null || entry.userId == null || InSong()) return;
             AcceptEntry(entry);
         }
 
-        /// <summary>Removes a player added by DebugInjectPose, with their avatar.</summary>
-        internal static void DebugRemoveRemote(string userId)
+        /// <summary>Removes the replay player, with their avatar.</summary>
+        internal static void RemoveReplayPlayer(string userId)
         {
             if (userId == null || !remotes.TryGetValue(userId, out Remote remote)) return;
             DestroyAvatar(remote);
             remotes.Remove(userId);
-            Log($"{userId} removed (debug)");
+            Log($"{userId} removed (replay)");
         }
 
-        /// <summary>The debug replay's fake player, who is in no lobby list and no poses message.</summary>
-        private static bool IsDebugFake(Remote remote)
+        /// <summary>The replay player (Replays.cs), who is in no lobby list and no poses message.</summary>
+        private static bool IsReplayPlayer(Remote remote)
         {
-            return SpectatorDebug.ReplayActive && remote.UserId == SpectatorDebug.FakeUserId;
+            return Replays.Active && remote.UserId == Replays.UserId;
+        }
+
+        /// <summary>
+        /// Outside a lobby (or without presence) while a replay is watched: every other player is
+        /// removed, and the replay player is drawn as in a lobby.
+        /// </summary>
+        private static void TickReplayOnly(string reason)
+        {
+            List<string> gone = null;
+            foreach (Remote remote in remotes.Values)
+            {
+                if (IsReplayPlayer(remote)) continue;
+                (gone ?? (gone = new List<string>())).Add(remote.UserId);
+            }
+            if (gone != null)
+            {
+                foreach (string userId in gone)
+                {
+                    DestroyAvatar(remotes[userId]);
+                    remotes.Remove(userId);
+                }
+                Log($"{gone.Count} avatar(s) removed ({reason}), the replay kept");
+            }
+            CheckDisc();
+            Render();
         }
 
         /// <summary>
         /// v2.53: in a song, this player's pose still goes out while someone is watching them (the
         /// server's watchers message) and Allow Spectators is on. The server relays it to the
-        /// watchers only, and drops it when nobody is watching.
+        /// watchers only, and drops it when nobody is watching. Never in practice mode (its song
+        /// speed can differ from 1, which watchers can't follow).
         /// </summary>
         private static void SendSongPoseIfWatched()
         {
-            if (!Config.AllowSpectators) return;
+            if (!Config.AllowSpectators || Replays.InPracticeMode) return;
             if (!MpSession.PresenceEnabled || !MpSession.SpectateEnabled || MpSession.WatcherCount <= 0) return;
             UpdateLocalSpin();
             SendPoseIfDue();
@@ -1231,8 +1268,8 @@ namespace ExScoringMod
         // ── For SpectatorTargets (the watched player's colours) ──
 
         /// <summary>
-        /// A player's gun colours as the lobby has them (the defaults without any). The debug
-        /// replay's fake player has this player's own.
+        /// A player's gun colours as the lobby has them (the defaults without any). The replay
+        /// player has the colours saved in the recording.
         /// </summary>
         internal static void GetGunColors(string userId, out Color left, out Color right)
         {
@@ -1240,14 +1277,9 @@ namespace ExScoringMod
             right = DefaultRightColor;
             try
             {
-                if (userId == SpectatorDebug.FakeUserId)
+                if (userId == Replays.UserId)
                 {
-                    KataConfig config = KataConfig.I;
-                    if (config != null)
-                    {
-                        left = config.leftHandColor;
-                        right = config.rightHandColor;
-                    }
+                    Replays.TryGetGunColors(out left, out right);
                     return;
                 }
 
@@ -1701,7 +1733,7 @@ namespace ExScoringMod
             foreach (Remote remote in remotes.Values)
             {
                 if (present.Contains(remote.UserId)) continue;
-                if (IsDebugFake(remote)) continue; // fed by SpectatorDebug, never by the server
+                if (IsReplayPlayer(remote)) continue; // fed by Replays, never by the server
                 if (remote.Present) Log($"{remote.UserId} left the poses (song, disconnected or stale), hiding");
                 remote.Present = false;
                 remote.Samples.Clear();
@@ -1819,7 +1851,7 @@ namespace ExScoringMod
             foreach (Remote remote in remotes.Values)
             {
                 if (lobby != null && lobby.FindPlayer(remote.UserId) != null) continue;
-                if (IsDebugFake(remote)) continue; // SpectatorDebug removes it itself
+                if (IsReplayPlayer(remote)) continue; // Replays removes it itself
                 if (gone == null) gone = new List<string>();
                 gone.Add(remote.UserId);
             }
@@ -1843,10 +1875,19 @@ namespace ExScoringMod
             float dt = Time.deltaTime;
             foreach (Remote remote in remotes.Values) UpdateSongDelay(remote, serverNow, dt);
 
-            if (!Config.ShowOtherPlayers)
+            // Show Other Players off hides every other player, but not the replay player (a replay
+            // was asked for, and is only seen in the spectator window).
+            bool showOthers = Config.ShowOtherPlayers;
+            if (!showOthers)
             {
+                bool replayShown = false;
                 foreach (Remote remote in remotes.Values)
                 {
+                    if (IsReplayPlayer(remote))
+                    {
+                        replayShown = true;
+                        continue;
+                    }
                     long renderTime = RenderTimeOf(remote, serverNow);
                     // Shots are still read, so the baselines stay current and turning it back on
                     // doesn't replay a burst. Nothing fires while it's off.
@@ -1854,7 +1895,7 @@ namespace ExScoringMod
                     SetVisible(remote, false);
                     ResetDiscFade(remote, true);
                 }
-                return;
+                if (!replayShown) return;
             }
             int mySeat = MpSession.MySeat;
             MpLobbyState lobby = MpSession.Lobby;
@@ -1870,6 +1911,7 @@ namespace ExScoringMod
 
             foreach (Remote remote in remotes.Values)
             {
+                if (!showOthers && !IsReplayPlayer(remote)) continue; // hidden above
                 if (!remote.Present || remote.Samples.Count == 0)
                 {
                     SetVisible(remote, false);
@@ -1903,7 +1945,7 @@ namespace ExScoringMod
                 if (remote.InSong && !remote.SongLook) ApplySongLook(remote); // v2.53
 
                 int seat = player != null ? player.seat : 0;
-                if (player == null && IsDebugFake(remote)) seat = (Math.Max(0, mySeat) + 1) % Spots.Length; // the spot after this player's
+                if (player == null && IsReplayPlayer(remote)) seat = (Math.Max(0, mySeat) + 1) % Spots.Length; // the spot after this player's (offline: one spot ahead)
                 Vector3 rootPosition = LayoutOffset(seat, mySeat);
                 Quaternion rootRotation = Quaternion.identity;
                 SpectatorDiorama.Place(remote.Root.transform, ref rootPosition, ref rootRotation); // no-op unless a diorama is shown for this avatar
@@ -4047,6 +4089,10 @@ namespace ExScoringMod
             {
                 left = ToColor(player.gunColors.left, DefaultLeftColor);
                 right = ToColor(player.gunColors.right, DefaultRightColor);
+            }
+            else if (IsReplayPlayer(remote))
+            {
+                Replays.TryGetGunColors(out left, out right); // the colours saved in the recording
             }
 
             string key = $"{left.r:F3},{left.g:F3},{left.b:F3}|{right.r:F3},{right.g:F3},{right.b:F3}";

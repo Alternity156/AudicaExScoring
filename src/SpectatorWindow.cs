@@ -104,8 +104,15 @@ namespace ExScoringMod
     ///   Size: - and + step the diorama's scale by SizeStepFactor around DioramaBaseScale (min
     ///   SizeStepMin steps), separately from the window's size.
     ///   Saved (PrefsCategory): PrefsMode, PrefsDioramaCentre, PrefsDioramaScale.
+    ///   The title goes below the button row there (top-aligned, TitleGap under the lowest
+    ///   button's collider), so the platform above doesn't hide it; the buttons don't move.
     ///
-    /// Testing alone: SpectatorDebug's replay adds a fake in-song player to the list (no server needed).
+    /// Replays (Replays.cs, 2026-11-23): watching a recording opens the window on the replay
+    /// player (WatchReplay), in a lobby or not: offline the window shows only while a replay is
+    /// active, without the Spectate toggle. In a lobby the replay player is one more candidate for
+    /// Next Player. While it is shown, three more square buttons sit right of 3D/2D: pause/resume
+    /// (II / >), restart (|<) and stop (X). The title reads Replays.TitleText (difficulty, score,
+    /// loading / paused / finished), the song on the second line as for a live player.
     ///
     /// Not in this phase: targets and beams during a song, scenery, post-processing, other
     /// players' heads and bodies.
@@ -194,8 +201,10 @@ namespace ExScoringMod
         private const float DioramaHeight = 1.0f;                    // and metres above the floor
         private const float DomeRadius = 15f;                        // SpectatorTargets: the targets' sphere
         private static readonly Vector3 DomeLocal = new Vector3(0f, -1.5f, 6f); // SpawnerDome from the play space's root
-        private const float ControlsBelowPlatform = 0.12f;           // the controls (title just above the button row) this far below their platform
+        private const float ControlsBelowPlatform = 0.12f;           // the button row this far below their platform (the title below the row)
         private const float ModeLabelFontSize = 0.3f;                // "3D" / "2D"
+        private const float RowHalfHeightGuess = 0.03f;              // half the button row's height, before its colliders exist
+        private const float ReplayLabelFontSize = 0.3f;              // "II", ">", "|<", "X"
 
         // ── State ────────────────────────────────────────────────────────────
         private static bool open;            // the player wants the window
@@ -237,6 +246,11 @@ namespace ExScoringMod
         private static GameObject minusObject, plusObject;
         private static GunButton minusButton, plusButton;
         private static Vector3 minusOffset, plusOffset;  // from Next Player's local position
+        // Replay controls (Replays.cs), right of the mode button: shown only while the replay is watched.
+        private static GameObject pauseObject, restartObject, stopObject;
+        private static GunButton pauseButton, restartButton, stopButton;
+        private static TextMeshPro pauseLabel;
+        private static Vector3 pauseOffset, restartOffset, stopOffset;
         private static bool sizeButtonsFailed;            // no source button found: don't search every refresh
 
         private static GameObject openerRoot;
@@ -309,6 +323,8 @@ namespace ExScoringMod
             try
             {
                 bool available = Config.EnableOnlinePlay && MpSession.InLobby && !InSongScene();
+                // A replay (Replays.cs) is watched in the window in a lobby or not.
+                bool replayShown = Replays.Active && !InSongScene();
                 if (!MpSession.InLobby && open)
                 {
                     open = false;
@@ -323,12 +339,12 @@ namespace ExScoringMod
                 if (Time.unscaledTime >= nextWatchSync)
                 {
                     nextWatchSync = Time.unscaledTime + StateRefreshSeconds;
-                    // The debug replay's fake player isn't someone the server knows.
-                    bool real = watchedId != null && watchedId != SpectatorDebug.FakeUserId;
+                    // The replay player isn't someone the server knows.
+                    bool real = watchedId != null && watchedId != Replays.UserId;
                     MpSession.SetWatch(available && open && real ? watchedId : null);
                 }
 
-                bool show = available && open && !buildFailed;
+                bool show = ((available && open) || replayShown) && !buildFailed;
                 if (!show)
                 {
                     SpectatorDiorama.Hide();
@@ -446,6 +462,15 @@ namespace ExScoringMod
 
         /// <summary>True while the player wants the window (the Spectate toggle is on).</summary>
         internal static bool IsOpen => open;
+
+        /// <summary>Replays.Play: the window shows the replay player (it opens by itself while a replay is active).</summary>
+        internal static void WatchReplay()
+        {
+            if (watchedId != Replays.UserId) hasCameraPose = false;
+            watchedId = Replays.UserId;
+            nextStateRefresh = 0f;
+            Log("watching the replay");
+        }
 
         /// <summary>
         /// The Spectate toggle (here and in the Online Play screen): opens or closes the window and,
@@ -706,7 +731,7 @@ namespace ExScoringMod
 
         // ── Who is watched ───────────────────────────────────────────────────
 
-        /// <summary>Everyone the window can show, in seat order: the other lobby members, then the debug replay's fake player.</summary>
+        /// <summary>Everyone the window can show, in seat order: the other lobby members, then the replay player.</summary>
         private static void RefreshCandidates()
         {
             candidates.Clear();
@@ -719,7 +744,7 @@ namespace ExScoringMod
                     candidates.Add(player.userId);
                 }
             }
-            if (SpectatorDebug.ReplayActive) candidates.Add(SpectatorDebug.FakeUserId);
+            if (Replays.Active) candidates.Add(Replays.UserId);
         }
 
         /// <summary>Keeps the watched player while they can still be picked; otherwise the first one whose avatar is shown, else the first.</summary>
@@ -854,6 +879,54 @@ namespace ExScoringMod
             minusButton.SetInteractable(CurrentStep > SizeStepMin);
             plusButton.SetInteractable(true);
             if (modeButton != null) modeButton.SetInteractable(true);
+            UpdateReplayButtons(page);
+        }
+
+        /// <summary>The replay controls: shown only while the window shows the replay player.</summary>
+        private static void UpdateReplayButtons(ShellPage page)
+        {
+            bool show = Replays.Active && watchedId == Replays.UserId;
+            SetReplayButton(pauseObject, pauseButton, show, page, !Replays.Loading && !Replays.Finished);
+            SetReplayButton(restartObject, restartButton, show, page, !Replays.Loading);
+            SetReplayButton(stopObject, stopButton, show, page, true);
+            if (pauseLabel != null)
+            {
+                string text = Replays.Paused ? ">" : "II";
+                if (pauseLabel.text != text) pauseLabel.text = text;
+            }
+        }
+
+        private static void SetReplayButton(GameObject obj, GunButton button, bool show, ShellPage page, bool interactable)
+        {
+            if (obj == null) return;
+            if (obj.activeSelf != show) obj.SetActive(show);
+            if (!show || button == null) return;
+            if (page != null) button.mShellPage = page;
+            button.SetInteractable(interactable);
+        }
+
+        private static void OnPauseShot()
+        {
+            Replays.TogglePause();
+            UpdateReplayButtons(LobbyPanel.CurrentShellPage());
+            lastTitle = null;
+            UpdateTitle();
+        }
+
+        private static void OnRestartShot()
+        {
+            Replays.Restart();
+            hasCameraPose = false;
+            UpdateReplayButtons(LobbyPanel.CurrentShellPage());
+            lastTitle = null;
+            UpdateTitle();
+        }
+
+        private static void OnStopShot()
+        {
+            // Not hidden here, inside its own shot: the next refresh does it (or the window goes).
+            Replays.Stop("stopped from the window");
+            nextStateRefresh = 0f;
         }
 
         // ── Size ─────────────────────────────────────────────────────────────
@@ -866,16 +939,44 @@ namespace ExScoringMod
             if (frameObject != null) frameObject.transform.localScale = new Vector3(w + FrameBorder * 2f, h + FrameBorder * 2f, 1f);
             if (blockerBox != null) blockerBox.size = new Vector3(w + FrameBorder * 2f, h + FrameBorder * 2f, 0.004f);
             float layoutH = LayoutHeight;
-            if (title != null)
-            {
-                title.rectTransform.sizeDelta = new Vector2(dioramaMode ? WindowWidth : w, 0.1f);
-                title.transform.localPosition = new Vector3(0f, layoutH * 0.5f + FrameBorder + TitleGap, -0.002f);
-            }
             Vector3 next = NextButtonPosition;
             if (nextObject != null) nextObject.transform.localPosition = next;
             if (minusObject != null) minusObject.transform.localPosition = next + minusOffset;
             if (plusObject != null) plusObject.transform.localPosition = next + plusOffset;
             if (modeObject != null) modeObject.transform.localPosition = next + modeOffset;
+            if (pauseObject != null) pauseObject.transform.localPosition = next + pauseOffset;
+            if (restartObject != null) restartObject.transform.localPosition = next + restartOffset;
+            if (stopObject != null) stopObject.transform.localPosition = next + stopOffset;
+            if (title != null)
+            {
+                title.rectTransform.sizeDelta = new Vector2(dioramaMode ? WindowWidth : w, 0.1f);
+                if (dioramaMode)
+                {
+                    // Below the button row, growing downward: the platform just above hid it.
+                    title.rectTransform.pivot = new Vector2(0.5f, 1f);
+                    title.alignment = TextAlignmentOptions.Top;
+                    title.transform.localPosition = new Vector3(0f, RowBottom(next) - TitleGap, -0.002f);
+                }
+                else
+                {
+                    // Above the frame, growing upward.
+                    title.rectTransform.pivot = new Vector2(0.5f, 0f);
+                    title.alignment = TextAlignmentOptions.Bottom;
+                    title.transform.localPosition = new Vector3(0f, layoutH * 0.5f + FrameBorder + TitleGap, -0.002f);
+                }
+            }
+        }
+
+        /// <summary>The lowest edge of the button row (their colliders, in the controls' space), or a guess before they exist.</summary>
+        private static float RowBottom(Vector3 next)
+        {
+            float bottom = float.MaxValue;
+            GameObject[] row = { nextObject, minusObject, plusObject, modeObject };
+            foreach (GameObject button in row)
+            {
+                if (button != null && LocalColliderBounds(button, out Bounds b)) bottom = Mathf.Min(bottom, b.min.y);
+            }
+            return bottom < float.MaxValue ? bottom : next.y - RowHalfHeightGuess;
         }
 
         private static void OnMinusShot() => ChangeSize(-1);
@@ -1023,7 +1124,11 @@ namespace ExScoringMod
             if (minusObject != null) GameObject.Destroy(minusObject);
             if (plusObject != null) GameObject.Destroy(plusObject);
             if (modeObject != null) GameObject.Destroy(modeObject);
+            if (pauseObject != null) GameObject.Destroy(pauseObject);
+            if (restartObject != null) GameObject.Destroy(restartObject);
+            if (stopObject != null) GameObject.Destroy(stopObject);
             minusObject = plusObject = modeObject = null; minusButton = plusButton = modeButton = null; modeLabel = null;
+            pauseObject = restartObject = stopObject = null; pauseButton = restartButton = stopButton = null; pauseLabel = null;
 
             GameObject source = FindSizeButtonSource(out Transform sliderRoot, out string from);
             if (source == null)
@@ -1067,14 +1172,23 @@ namespace ExScoringMod
             plusOffset = PlaceRightOf(plusObject, minusRight, centerY, nextPos, out float plusRight);
 
             // The mode button: the same square, right of +.
+            float rowRight = plusRight;
             modeObject = CreateSizeButton(source, "ModeButton", dioramaMode ? "2D" : "3D", OnModeShot, scale, rotation, out modeButton);
             if (modeObject != null)
             {
-                modeOffset = PlaceRightOf(modeObject, plusRight, centerY, nextPos, out _);
+                modeOffset = PlaceRightOf(modeObject, plusRight, centerY, nextPos, out rowRight);
                 Transform label = modeObject.transform.Find("SizeLabel");
                 modeLabel = label != null ? label.GetComponent<TextMeshPro>() : null;
                 if (modeLabel != null) modeLabel.fontSize = ModeLabelFontSize;
             }
+
+            // Replay controls: the same squares, right of the mode button, hidden until a replay is watched.
+            pauseObject = CreateReplayButton(source, "ReplayPauseButton", "II", OnPauseShot, scale, rotation, centerY, nextPos,
+                ref rowRight, out pauseOffset, out pauseButton, out pauseLabel);
+            restartObject = CreateReplayButton(source, "ReplayRestartButton", "|<", OnRestartShot, scale, rotation, centerY, nextPos,
+                ref rowRight, out restartOffset, out restartButton, out _);
+            stopObject = CreateReplayButton(source, "ReplayStopButton", "X", OnStopShot, scale, rotation, centerY, nextPos,
+                ref rowRight, out stopOffset, out stopButton, out _);
             ApplySize();
 
             Log($"size buttons created (copied from {from}){(modeObject != null ? ", with the 3D/2D button" : ", no 3D/2D button")}");
@@ -1082,6 +1196,28 @@ namespace ExScoringMod
         }
 
         private static float SafeRatio(float a, float b) => Mathf.Abs(b) < 1e-6f ? 1f : a / b;
+
+        /// <summary>One replay control: a square like - and +, placed right of rowRight (moved on), plain-text label, hidden.</summary>
+        private static GameObject CreateReplayButton(GameObject source, string name, string text, Action onShot, Vector3 scale,
+                                                     Quaternion rotation, float centerY, Vector3 nextPos, ref float rowRight,
+                                                     out Vector3 offset, out GunButton gunButton, out TextMeshPro label)
+        {
+            offset = Vector3.zero;
+            label = null;
+            GameObject button = CreateSizeButton(source, name, text, onShot, scale, rotation, out gunButton);
+            if (button == null) return null;
+            offset = PlaceRightOf(button, rowRight, centerY, nextPos, out rowRight);
+            Transform labelTransform = button.transform.Find("SizeLabel");
+            label = labelTransform != null ? labelTransform.GetComponent<TextMeshPro>() : null;
+            if (label != null)
+            {
+                label.richText = false; // "|<" isn't a tag
+                label.text = text;
+                label.fontSize = ReplayLabelFontSize;
+            }
+            button.SetActive(false);
+            return button;
+        }
 
         private static GameObject CreateSizeButton(GameObject source, string name, string label, Action onShot,
                                                    Vector3 scale, Quaternion rotation, out GunButton gunButton)
@@ -1246,8 +1382,8 @@ namespace ExScoringMod
             string content;
             MpLobbyState lobby = MpSession.Lobby;
             MpPlayerState player = lobby != null && watchedId != null ? lobby.FindPlayer(watchedId) : null;
-            if (watchedId == SpectatorDebug.FakeUserId && SpectatorDebug.ReplayActive)
-                content = SpectatorDebug.FakeName + (targetVisible ? "" : " <color=#c0c0c0>(not visible right now)</color>");
+            if (watchedId == Replays.UserId && Replays.Active)
+                content = Replays.TitleText;
             else if (player == null) content = "Nobody to watch";
             else
             {
@@ -1611,6 +1747,8 @@ namespace ExScoringMod
             frameObject = null; pictureObject = null; blockerBox = null;
             minusObject = null; plusObject = null; minusButton = null; plusButton = null;
             modeObject = null; modeButton = null; modeLabel = null; controls = null;
+            pauseObject = null; restartObject = null; stopObject = null;
+            pauseButton = null; restartButton = null; stopButton = null; pauseLabel = null;
             cameraConfigured = false; hasCameraPose = false; grabHand = -1; lastTitle = null;
         }
 
@@ -1623,7 +1761,7 @@ namespace ExScoringMod
             MelonLogger.Log($"  root={(root != null ? (root.activeSelf ? "active" : "inactive") : "null")} opener={(openerObject != null ? "built" : "null")} next={(nextObject != null ? "built" : "null")}");
             if (root != null && !root.WasCollected)
                 MelonLogger.Log($"  window pos={root.transform.position} rot={root.transform.eulerAngles} size={CurrentWidth:0.###}x{CurrentHeight:0.###} (step {sizeStep}) grabHand={grabHand}");
-            MelonLogger.Log($"  size buttons: {(minusObject != null && plusObject != null ? "built" : (sizeButtonsFailed ? "failed" : "null"))} mode button: {(modeObject != null ? "built" : "null")}");
+            MelonLogger.Log($"  size buttons: {(minusObject != null && plusObject != null ? "built" : (sizeButtonsFailed ? "failed" : "null"))} mode button: {(modeObject != null ? "built" : "null")} replay buttons: {(pauseObject != null && restartObject != null && stopObject != null ? "built" : "null")} replay={(Replays.Active ? "active" : "none")}");
             MelonLogger.Log($"  mode={(dioramaMode ? "diorama" : "window")} dioramaStep={dioramaStep} scale={DioramaScale:0.###} centre=({dioramaCentre.x:0.##}, {dioramaCentre.y:0.##}, {dioramaCentre.z:0.##}) saved={hasDioramaCentre}");
             if (windowCamera != null && !windowCamera.WasCollected)
                 MelonLogger.Log($"  camera pos={windowCamera.transform.position} rot={windowCamera.transform.eulerAngles} fov={windowCamera.fieldOfView} " +

@@ -11,7 +11,7 @@ namespace ExScoringMod
     /// Findings: claude/Spectator-Window-Hit-Findings.md.
     ///
     /// The watched player's side (hooks below, only while someone is watching them and they allow
-    /// it, or while SpectatorDebug records): each result is queued with the song position in ticks
+    /// it, outside practice mode, or while Replays records): each result is queued with the song position in ticks
     /// (AudioDriver's Audio tick, the same clock as the poses' songTick):
     /// (every result names its cue by the cue's own tick and pitch: the index the game gives a cue
     /// in a song isn't there on a chart loaded in the menus, log 2026-11-14)
@@ -20,11 +20,11 @@ namespace ExScoringMod
     ///   miss        ScoreKeeper.OnFailure(cue, pass: true): the target went by
     ///   holdBroken  ScoreKeeper.OnFailure for a sustain whose hit was reported: let go
     ///   holdDone    Target.CompleteTarget on a sustain: held to its end
-    /// FlushIfDue (from MpPresence's in-song branch and from the debug recorder) sends the queue
+    /// FlushIfDue (from MpPresence's in-song branch and from the replay recorder) sends the queue
     /// as one spectateEvents message at most once per pose interval (FlushIntervalMs), and hands it to the recorder.
     ///
-    /// The watcher's side: batches from the server (MpSession.OnSpectateEvents) or from the debug
-    /// replay are kept per player until SpectatorTargets takes them (TakeFor).
+    /// The watcher's side: batches from the server (MpSession.OnSpectateEvents) or from the
+    /// replay player (Replays) are kept per player until SpectatorTargets takes them (TakeFor).
     /// </summary>
     internal static class SpectatorEvents
     {
@@ -61,15 +61,18 @@ namespace ExScoringMod
 
         private static void Log(string message) => DebugLog.Log("[SpectatorEvents] " + message);
 
-        /// <summary>Someone is watching this player and they allow it, or the debug recorder is running.</summary>
+        /// <summary>Someone is watching this player and they allow it (never in practice mode), or a replay is being recorded.</summary>
         private static bool Capturing
         {
             get
             {
-                if (SpectatorDebug.IsRecording) return true;
-                return Config.AllowSpectators && MpSession.SpectateEnabled && MpSession.WatcherCount > 0;
+                if (Replays.IsRecording) return true;
+                return SendingToWatchers;
             }
         }
+
+        private static bool SendingToWatchers =>
+            Config.AllowSpectators && !Replays.InPracticeMode && MpSession.SpectateEnabled && MpSession.WatcherCount > 0;
 
         private static void Queue(SongCues.Cue cue, string kind, int hand, bool shot, bool hasPoint, Vector3 point)
         {
@@ -190,7 +193,7 @@ namespace ExScoringMod
             }
         }
 
-        /// <summary>Sends what was queued (when watched) and hands it to the debug recorder (when recording).</summary>
+        /// <summary>Sends what was queued (when watched) and hands it to the replay recorder (when recording).</summary>
         internal static void FlushIfDue()
         {
             if (queue.Count == 0) return;
@@ -202,9 +205,9 @@ namespace ExScoringMod
             for (int i = 0; i < queue.Count; i++) events.Add(queue[i]);
             queue.Clear();
 
-            if (Config.AllowSpectators && MpSession.SpectateEnabled && MpSession.WatcherCount > 0)
+            if (SendingToWatchers)
                 MpSession.SendSpectateEvents(new JObject { ["events"] = events });
-            SpectatorDebug.RecordEvents(events);
+            Replays.RecordEvents(events);
         }
 
         [HarmonyPatch(typeof(Target), "OnHit")]
@@ -276,7 +279,7 @@ namespace ExScoringMod
             MpSession.OnLeftLobby += reason => incoming.Clear();
         }
 
-        /// <summary>A batch of a watched player's results (from the server, or from the debug replay).</summary>
+        /// <summary>A batch of a watched player's results (from the server, or from a replay).</summary>
         internal static void Receive(string userId, MpSpectateEvent[] events)
         {
             if (userId == null || events == null || events.Length == 0) return;

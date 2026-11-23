@@ -306,6 +306,8 @@
     <Compile Include="src\RandomSong.cs" />
     <Compile Include="src\RandomSongButton.cs" />
     <Compile Include="src\RefreshButton.cs" />
+    <Compile Include="src\Replays.cs" />
+    <Compile Include="src\ReplaysPage.cs" />
     <Compile Include="src\RigJumpWatcher.cs" />
     <Compile Include="src\RunDataRecalculator.cs" />
     <Compile Include="src\RunDataSaveHandler.cs" />

@@ -143,6 +143,7 @@ namespace ExScoringMod
         public static bool HeadshotEffects;
         public static bool HeadshotSounds;
         public static bool AllowSpectators;
+        public static bool RecordGameplay; // Replays.cs: record every completed song (not practice mode)
         public static bool SpectatorAudioOverPreviews;
         public static float SpectatorVolume; // 0..100 %, of the song preview level
         public static bool LobbySongPreview;
@@ -284,6 +285,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(AutoDownloadSongs), true, "In an online lobby, automatically downloads the selected song and the players' suggestions you don't have, when they're on Maudica");
             MelonPrefs.RegisterBool(Category, nameof(HeadshotEffects), true, "Shows the headshot effect when you're shot in the head, and on other players when they are. Your shots still count for the others while this is off");
             MelonPrefs.RegisterBool(Category, nameof(HeadshotSounds), true, "Plays the headshot sound when another player is shot in the head (only while Headshot Effects is on)");
+            MelonPrefs.RegisterBool(Category, nameof(RecordGameplay), false, "Records every song you finish (not practice mode), to watch later in the spectator window from Options > Replays");
             MelonPrefs.RegisterBool(Category, nameof(AllowSpectators), true, "Lets the other players in your lobby watch you play through their spectator window. Off = nothing is shared while you're in a song");
             MelonPrefs.RegisterBool(Category, nameof(SpectatorAudioOverPreviews), true, "While the spectator window plays a watched player's song, song previews are silenced so only that song is heard. Off = a song preview lowers the watched player's song instead");
             MelonPrefs.RegisterFloat(Category, nameof(SpectatorVolume), 100f, "Volume of a watched player's song in the spectator window, in % of the song preview level [0,100,5,100]");
@@ -404,6 +406,7 @@ namespace ExScoringMod
             HeadshotEffects = MelonPrefs.GetBool(Category, nameof(HeadshotEffects));
             HeadshotSounds = MelonPrefs.GetBool(Category, nameof(HeadshotSounds));
             AllowSpectators = MelonPrefs.GetBool(Category, nameof(AllowSpectators));
+            RecordGameplay = MelonPrefs.GetBool(Category, nameof(RecordGameplay));
             SpectatorAudioOverPreviews = MelonPrefs.GetBool(Category, nameof(SpectatorAudioOverPreviews));
             SpectatorVolume = Mathf.Clamp(MelonPrefs.GetFloat(Category, nameof(SpectatorVolume)), 0f, 100f);
             LobbySongPreview = MelonPrefs.GetBool(Category, nameof(LobbySongPreview));
@@ -480,6 +483,13 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(HeadshotSounds), value);
             HeadshotSounds = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateRecordGameplay(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(RecordGameplay), value);
+            RecordGameplay = value;
             MelonPrefs.SaveConfig();
         }
 
