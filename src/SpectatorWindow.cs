@@ -98,8 +98,8 @@ namespace ExScoringMod
     /// diorama's spot.
     ///   Placing: the diorama's spot is the centre of their target sphere (the SpawnerDome); it
     ///   always faces the menus (+z) and stays upright. The grip pressed while a gun points into that
-    ///   sphere (radius DomeRadius x scale) grabs it: the centre then keeps its offset in the gun's
-    ///   space (it swings with the wrist like the window) but never turns. First time: DioramaAhead m
+    ///   sphere (radius DomeRadius x scale) grabs it: the centre then follows the gun's movement 1:1
+    ///   (turning the wrist doesn't swing it, unlike the window) and never turns. First time: DioramaAhead m
     ///   in front of the headset toward the menus, DioramaHeight m up.
     ///   Size: - and + step the diorama's scale by SizeStepFactor around DioramaBaseScale (min
     ///   SizeStepMin steps), separately from the window's size.
@@ -258,6 +258,8 @@ namespace ExScoringMod
         private static int grabHand = -1;
         private static Vector3 grabLocalPos;
         private static Quaternion grabLocalRot = Quaternion.identity;
+        private static Vector3 grabStartGunPos;       // diorama grab: gun position and centre when the grip went down
+        private static Vector3 grabStartCentre;
 
         private static bool prefsRegistered;
 
@@ -1353,8 +1355,10 @@ namespace ExScoringMod
                     Transform g = gun.transform;
                     if (dioramaMode)
                     {
-                        // The centre keeps its place in the gun's space; the diorama never turns.
-                        dioramaCentre = g.position + g.rotation * grabLocalPos;
+                        // The centre follows the hand's movement 1:1. Not its rotation: the centre is
+                        // usually a metre or more down the ray, so wrist turns would swing it far
+                        // faster than the hand moves. The diorama never turns.
+                        dioramaCentre = grabStartCentre + (g.position - grabStartGunPos);
                         continue;
                     }
                     root.transform.position = g.position + g.rotation * grabLocalPos;
@@ -1366,6 +1370,8 @@ namespace ExScoringMod
                     Quaternion inverse = Quaternion.Inverse(g.rotation);
                     grabLocalPos = inverse * ((dioramaMode ? dioramaCentre : root.transform.position) - g.position);
                     grabLocalRot = inverse * root.transform.rotation;
+                    grabStartGunPos = g.position;
+                    grabStartCentre = dioramaCentre;
                     grabHand = h;
                 }
             }
