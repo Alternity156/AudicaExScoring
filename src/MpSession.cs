@@ -197,8 +197,15 @@ namespace ExScoringMod
 
         // ── Clock (19.1.3) ──
 
-        /// <summary>Server clock minus local clock, in ms, from the lowest-RTT recent ping.</summary>
+        /// <summary>
+        /// Server clock minus local clock, in ms, as used right now. It follows TargetClockOffsetMs
+        /// (the lowest-RTT recent ping) gradually, at ClockSlewRate, so a new best ping never makes
+        /// server time jump: every pose time stamp and every remote's render time stay smooth. Big
+        /// changes (the first pong, more than ClockSnapMs) are taken at once.
+        /// </summary>
         public static long ClockOffsetMs { get; private set; }
+        /// <summary>The offset the latest clock sample asks for; ClockOffsetMs moves toward it.</summary>
+        public static long TargetClockOffsetMs { get; private set; }
         public static long LastRttMs { get; private set; } = -1;
         public static long BestRttMs { get; private set; } = -1;
         /// <summary>True once at least one pong has been measured (welcome alone gives only a rough offset).</summary>
@@ -380,7 +387,7 @@ namespace ExScoringMod
             helloSentApiKey = !string.IsNullOrEmpty(Config.ApiKey);
             resumeToken = null;
             clockSamples.Clear();
-            ClockOffsetMs = 0;
+            SetClockOffset(0, true);
             LastRttMs = -1;
             BestRttMs = -1;
 
@@ -415,6 +422,7 @@ namespace ExScoringMod
             MpClient.Tick();
             ReportStateIfChanged();
             ExpireQueuedRequests(MpClient.NowMs());
+            SlewClock(MpClient.NowMs());
 
             if (!IsConnected) return;
 
@@ -911,7 +919,7 @@ namespace ExScoringMod
             sb.AppendLine("[Mp] ===== MpSession =====");
             sb.AppendLine($"[Mp] enabled={Config.EnableOnlinePlay} state={MpClient.State} me={MyUserId ?? "none"} \"{MyNickname}\" guest={IsGuest} apiKeyRejected={ApiKeyRejected} resumeToken={(resumeToken != null ? "held" : "none")} presence={PresenceEnabled} poseRate={(PoseRateEnabled ? PoseRateHz + " Hz (server)" : PoseRateHz + " Hz (default)")} headshot={HeadshotEnabled} gunHit={GunHitEnabled} spectate={SpectateEnabled} spectatorRole={SpectatorRoleEnabled} communityMaps={CommunityMapsEnabled} watchers={WatcherCount} cosmetics={CosmeticsEnabled} assets={AssetsEnabled} seat={MySeat}");
             sb.AppendLine($"[Mp] cosmetics: wanted={wantedCosmeticsKey ?? "none"} sent={(wantedCosmeticsKey != null && wantedCosmeticsKey == lastSentCosmeticsKey ? "yes" : "no")}");
-            sb.AppendLine($"[Mp] clock: offset={ClockOffsetMs} ms, lastRtt={LastRttMs} ms, bestRtt={BestRttMs} ms, samples={clockSamples.Count}, serverNow={ServerNowMs}");
+            sb.AppendLine($"[Mp] clock: offset={ClockOffsetMs} ms (target {TargetClockOffsetMs}), lastRtt={LastRttMs} ms, bestRtt={BestRttMs} ms, samples={clockSamples.Count}, serverNow={ServerNowMs}");
             sb.AppendLine($"[Mp] pending requests={pendingRequests.Count}, queued={queuedRequests.Count}, location=\"{currentLocation}\" browsing={currentBrowsingSongId ?? "none"}");
 
             if (LastDisconnect != null)
@@ -1243,7 +1251,7 @@ namespace ExScoringMod
             // Rough offset until the first pong (no RTT correction).
             if (clockSamples.Count == 0 && welcome.serverTime > 0)
             {
-                ClockOffsetMs = welcome.serverTime - MpClient.NowMs();
+                SetClockOffset(welcome.serverTime - MpClient.NowMs(), true);
             }
 
             MpClient.MarkWelcomed();
@@ -1438,7 +1446,45 @@ namespace ExScoringMod
 
             LastRttMs = rtt;
             BestRttMs = best.Rtt;
-            ClockOffsetMs = best.Offset;
+            // The first pong replaces welcome's rough offset (no RTT correction) at once.
+            SetClockOffset(best.Offset, clockSamples.Count == 1);
+        }
+
+        // ── Clock slewing ──
+
+        // How fast the offset in use follows a new target: 20 ms per second (server time runs 2%
+        // fast or slow meanwhile, never backwards). A difference above ClockSnapMs is taken at once.
+        private const double ClockSlewRate = 0.02;
+        private const long ClockSnapMs = 250;
+        private const long ClockSlewMaxStepMs = 100; // a long frame doesn't slew more than this much time's worth
+
+        private static double clockOffsetExact;
+        private static long lastClockSlewMs;
+
+        /// <summary>Sets the target offset; snap = take it now (also when it is more than ClockSnapMs away).</summary>
+        private static void SetClockOffset(long offset, bool snap)
+        {
+            TargetClockOffsetMs = offset;
+            if (snap || Math.Abs(offset - clockOffsetExact) > ClockSnapMs)
+            {
+                if (!snap && clockSamples.Count > 1) Log($"   clock offset jumped {ClockOffsetMs} -> {offset} ms (more than {ClockSnapMs} ms, not slewed)");
+                clockOffsetExact = offset;
+                ClockOffsetMs = offset;
+            }
+        }
+
+        /// <summary>Once per frame: moves the offset in use toward the target, at ClockSlewRate.</summary>
+        private static void SlewClock(long now)
+        {
+            long elapsed = lastClockSlewMs > 0 ? now - lastClockSlewMs : 0;
+            lastClockSlewMs = now;
+            if (clockOffsetExact == TargetClockOffsetMs) return;
+
+            elapsed = Math.Max(0, Math.Min(ClockSlewMaxStepMs, elapsed));
+            double step = ClockSlewRate * elapsed;
+            double diff = TargetClockOffsetMs - clockOffsetExact;
+            clockOffsetExact = Math.Abs(diff) <= step ? TargetClockOffsetMs : clockOffsetExact + Math.Sign(diff) * step;
+            ClockOffsetMs = (long)Math.Round(clockOffsetExact);
         }
 
         private static void SetLobby(MpLobbyState lobby)

@@ -119,6 +119,23 @@ namespace ExScoringMod
     /// came). Players missing from the latest poses message are hidden; every avatar is hidden on
     /// entering a song (the server just stops sending, it never sends an empty list there).
     ///
+    /// Spectator smoothing (2026-11-23): a watched in-song player (spectator window only) is drawn
+    /// with an adaptive delay instead of RenderDelayMs, because a sample's t is the SENDER's server
+    /// time, so the delay has to cover both players' latency, the server's broadcast wait and
+    /// clock error; a fixed 100 ms ran out on slower links and the avatar froze, then jumped.
+    ///  - Need: each arrival records how far behind it the previous newest sample was
+    ///    (serverNow - previous sample's t), the delay that would just have avoided running out.
+    ///  - Target: the SongDelayPercentile of the last LatenessWindowMs of needs, plus
+    ///    SongDelayMarginMs, within SongDelayMinMs..SongDelayMaxMs.
+    ///  - The delay in use reaches the target gradually (render time runs up to SongDelayGrowRate
+    ///    slower, SongDelayShrinkRate faster), so the window's audio (SetSpeed, +-3%) keeps up and
+    ///    nothing jumps; taken at once only during the first SongDelayWarmupMs.
+    ///  - Running out anyway: the parts carry on along their last motion for up to
+    ///    MaxExtrapolateMs, then hold; when real samples are back, the gap between what was shown
+    ///    and the real path fades out over SnapBackSeconds instead of snapping.
+    /// TryGetSongTick uses the same render time, so audio and targets stay with the avatar. Lobby
+    /// avatars keep the fixed RenderDelayMs: the headshot and thrown-gun rewinds assume it.
+    ///
     /// Cosmetics (v2.44): each player's head, body and guns follow their PlayerState.cosmetics
     /// (MpCosmetics sends this player's own). Each slot resolves to a model key: "d" the default
     /// templates below, "bN" a built-in (avatars[N] head/body, gunModels[N] or gunModelsExtras[N-32]
@@ -297,6 +314,20 @@ namespace ExScoringMod
     {
         // Send rate: MpSession.PoseRateHz (19.13.3). The server allows 1.5x that per second.
         private const long RenderDelayMs = 100;          // contract: buffer ~100 ms behind serverTime (3 samples at 30 Hz)
+
+        // Spectator smoothing (2026-11-23): an in-song (watched) player's adaptive delay, see the class notes.
+        private const long SongDelayMinMs = 100;
+        private const long SongDelayMaxMs = 400;
+        private const long SongDelayStartMs = 150;       // until the first needs are measured
+        private const long SongDelayMarginMs = 15;
+        private const long LatenessWindowMs = 5000;
+        private const double SongDelayPercentile = 0.98;
+        private const double SongDelayGrowRate = 0.05;   // ms of delay per ms of time
+        private const double SongDelayShrinkRate = 0.02;
+        private const long SongDelayWarmupMs = 1000;     // after appearing, the target is taken at once
+        private const long MaxExtrapolateMs = 60;
+        private const float SnapBackSeconds = 0.08f;     // time constant of the fade back onto the real path
+        private const float SnapBackMaxDistance = 1f;    // m; a bigger gap is a real jump, shown as is
         private const int MaxShotsPerJump = 5;           // 19.13.4: a burst after a stall stays readable
 
         // Shot effects, the game's own numbers (Ghidra, 2026-10-29).
@@ -820,6 +851,39 @@ namespace ExScoringMod
                 Shot[0].Reset();
                 Shot[1].Reset();
             }
+
+            // Spectator smoothing (2026-11-23), in-song only: arrival times (server ms) and needs (ms).
+            public readonly List<long> NeedAt = new List<long>();
+            public readonly List<long> Need = new List<long>();
+            /// <summary>The delay in use (ms behind server time), -1 = not started.</summary>
+            public double SongDelayMs = -1;
+            public double SongDelayTargetMs = SongDelayStartMs;
+            public long SongDelayStartedAt;
+            // What was shown last frame (root space), and the fading gap after running out of samples.
+            public bool WasPastNewest;
+            public readonly Vector3[] ShownPos = new Vector3[PartCount];
+            public readonly Quaternion[] ShownRot = new Quaternion[PartCount];
+            public readonly bool[] ShownHas = new bool[PartCount];
+            public readonly Vector3[] ErrPos = new Vector3[PartCount];
+            public readonly Quaternion[] ErrRot = new Quaternion[PartCount];
+            public readonly bool[] HasErr = new bool[PartCount];
+            // For the debug dump.
+            public int ExtrapolatedFrames, HeldFrames, SnapBacks;
+
+            /// <summary>Starts the adaptive delay and the pose smoothing over (new samples don't carry over a gap).</summary>
+            public void ResetSmoothing()
+            {
+                NeedAt.Clear();
+                Need.Clear();
+                SongDelayMs = -1;
+                SongDelayTargetMs = SongDelayStartMs;
+                WasPastNewest = false;
+                for (int p = 0; p < PartCount; p++)
+                {
+                    ShownHas[p] = false;
+                    HasErr[p] = false;
+                }
+            }
         }
 
         private static readonly Dictionary<string, Remote> remotes = new Dictionary<string, Remote>();
@@ -1283,7 +1347,7 @@ namespace ExScoringMod
             if (!remote.Present || !remote.InSong) return false;
 
             List<Sample> samples = remote.Samples;
-            long renderTime = MpSession.ServerNowMs - RenderDelayMs;
+            long renderTime = RenderTimeOf(remote, MpSession.ServerNowMs);
 
             // The newest sample at or before the render time, and the one after it.
             Sample a = null, b = null;
@@ -1643,6 +1707,7 @@ namespace ExScoringMod
                 remote.Samples.Clear();
                 remote.BodyInit = false;
                 remote.ResetShots(); // coming back, their count only sets a new baseline
+                remote.ResetSmoothing();
             }
         }
 
@@ -1665,6 +1730,7 @@ namespace ExScoringMod
                 remote.Samples.Clear();
                 remote.BodyInit = false;
                 remote.ResetShots();
+                remote.ResetSmoothing();
             }
             AddSample(remote, entry);
         }
@@ -1673,6 +1739,10 @@ namespace ExScoringMod
         {
             List<Sample> samples = remote.Samples;
             if (samples.Count > 0 && entry.t <= samples[samples.Count - 1].T) return; // out of order or repeated
+
+            // Spectator smoothing: until this arrived, the newest sample was the previous one, so a
+            // render time any later than it would have run out.
+            if (remote.InSong && samples.Count > 0) RecordNeed(remote, MpSession.ServerNowMs - samples[samples.Count - 1].T);
 
             Sample sample = new Sample { T = entry.t, LTrigger = entry.lTrigger, RTrigger = entry.rTrigger };
             ReadPart(entry.head, sample, PartHead);
@@ -1769,12 +1839,15 @@ namespace ExScoringMod
         {
             if (remotes.Count == 0) return;
 
-            long renderTime = MpSession.ServerNowMs - RenderDelayMs;
+            long serverNow = MpSession.ServerNowMs;
+            float dt = Time.deltaTime;
+            foreach (Remote remote in remotes.Values) UpdateSongDelay(remote, serverNow, dt);
 
             if (!Config.ShowOtherPlayers)
             {
                 foreach (Remote remote in remotes.Values)
                 {
+                    long renderTime = RenderTimeOf(remote, serverNow);
                     // Shots are still read, so the baselines stay current and turning it back on
                     // doesn't replay a burst. Nothing fires while it's off.
                     if (remote.Present && remote.Samples.Count > 0) ReadShotsUpTo(remote, renderTime, false);
@@ -1785,7 +1858,6 @@ namespace ExScoringMod
             }
             int mySeat = MpSession.MySeat;
             MpLobbyState lobby = MpSession.Lobby;
-            float dt = Time.deltaTime;
 
             CheckSpectator();
             Transform headsetEye = localHead;
@@ -1803,6 +1875,8 @@ namespace ExScoringMod
                     SetVisible(remote, false);
                     continue;
                 }
+
+                long renderTime = RenderTimeOf(remote, serverNow);
 
                 if (!EnsureTemplates())
                 {
@@ -1838,7 +1912,8 @@ namespace ExScoringMod
 
                 ApplyColors(remote, player);
 
-                Interpolate(remote.Samples, renderTime);
+                bool pastNewest = Interpolate(remote.Samples, renderTime, remote.InSong ? MaxExtrapolateMs : 0, out bool extrapolated);
+                if (remote.InSong) SmoothSongPose(remote, pastNewest, extrapolated, dt);
                 remote.Pull[0] = curPull[0];
                 remote.Pull[1] = curPull[1];
                 UpdateBody(remote, dt);
@@ -2296,15 +2371,23 @@ namespace ExScoringMod
             part.localRotation = curRot[index];
         }
 
-        /// <summary>Fills curPos/curRot/curHas for renderTime from the samples around it.</summary>
-        private static void Interpolate(List<Sample> samples, long renderTime)
+        /// <summary>
+        /// Fills curPos/curRot/curHas for renderTime from the samples around it. Returns whether
+        /// renderTime is past the newest sample. Past it, with maxExtrapolateMs > 0, positions and
+        /// rotations carry on along the last two samples' motion for up to maxExtrapolateMs (and at
+        /// most one sample gap), then hold (extrapolated = it moved them); otherwise the last is held.
+        /// </summary>
+        private static bool Interpolate(List<Sample> samples, long renderTime, long maxExtrapolateMs, out bool extrapolated)
         {
+            extrapolated = false;
             Sample a = null, b = null;
+            int aIndex = -1;
             for (int i = 0; i < samples.Count; i++)
             {
                 if (samples[i].T <= renderTime)
                 {
                     a = samples[i];
+                    aIndex = i;
                 }
                 else
                 {
@@ -2313,8 +2396,9 @@ namespace ExScoringMod
                 }
             }
 
+            bool pastNewest = b == null;
             if (a == null) a = b;   // render time before the first sample: show the first
-            if (b == null) b = a;   // after the last: hold the last
+            if (b == null) b = a;   // after the last: hold the last (or extrapolate, below)
 
             float frac = 0f;
             if (a != b && b.T > a.T) frac = Mathf.Clamp01((float)(renderTime - a.T) / (b.T - a.T));
@@ -2351,6 +2435,142 @@ namespace ExScoringMod
                 // values (HandAnim [0, 0, 0], no fingers).
                 LerpUnitValues(a.HasHandAnim[h], a.HandAnim[h], b.HasHandAnim[h], b.HandAnim[h], frac, curHandAnim[h]);
                 curHasFingers[h] = LerpUnitValues(a.HasFingers[h], a.Fingers[h], b.HasFingers[h], b.Fingers[h], frac, curFingers[h]);
+            }
+
+            // Spectator smoothing: past the newest sample, carry on along the last motion for a while.
+            if (pastNewest && maxExtrapolateMs > 0 && aIndex > 0)
+            {
+                Sample prev = samples[aIndex - 1];
+                long gap = a.T - prev.T;
+                long over = Math.Min(renderTime - a.T, Math.Min(maxExtrapolateMs, gap));
+                if (gap > 0 && over > 0)
+                {
+                    float k = (float)over / gap;
+                    for (int p = 0; p < PartCount; p++)
+                    {
+                        if (!a.Has[p] || !prev.Has[p]) continue;
+                        curPos[p] = a.Pos[p] + (a.Pos[p] - prev.Pos[p]) * k;
+                        // The last step's turn, k of it again (k <= 1, so a plain Slerp).
+                        Quaternion turn = a.Rot[p] * Quaternion.Inverse(prev.Rot[p]);
+                        curRot[p] = Quaternion.Slerp(Quaternion.identity, turn, k) * a.Rot[p];
+                    }
+                    extrapolated = true;
+                }
+            }
+            return pastNewest;
+        }
+
+        // ── Spectator smoothing (2026-11-23) ──
+
+        /// <summary>When this remote is drawn: an in-song (watched) player at their adaptive delay, anyone else RenderDelayMs behind.</summary>
+        private static long RenderTimeOf(Remote remote, long serverNow)
+        {
+            if (!remote.InSong) return serverNow - RenderDelayMs;
+            double delay = remote.SongDelayMs >= 0 ? remote.SongDelayMs : SongDelayStartMs;
+            return serverNow - (long)Math.Round(delay);
+        }
+
+        /// <summary>Adds one arrival's need and works out the new target delay from the window.</summary>
+        private static void RecordNeed(Remote remote, long need)
+        {
+            long now = MpSession.ServerNowMs;
+            remote.NeedAt.Add(now);
+            remote.Need.Add(Math.Max(0, need));
+            while (remote.NeedAt.Count > 1 && now - remote.NeedAt[0] > LatenessWindowMs)
+            {
+                remote.NeedAt.RemoveAt(0);
+                remote.Need.RemoveAt(0);
+            }
+
+            needScratch.Clear();
+            needScratch.AddRange(remote.Need);
+            needScratch.Sort();
+            int index = (int)Math.Ceiling(SongDelayPercentile * (needScratch.Count - 1));
+            long target = needScratch[Math.Max(0, Math.Min(needScratch.Count - 1, index))] + SongDelayMarginMs;
+            remote.SongDelayTargetMs = Math.Max(SongDelayMinMs, Math.Min(SongDelayMaxMs, target));
+        }
+        private static readonly List<long> needScratch = new List<long>();
+
+        /// <summary>Once per frame: moves an in-song remote's delay toward its target (at once while warming up).</summary>
+        private static void UpdateSongDelay(Remote remote, long serverNow, float dt)
+        {
+            if (!remote.InSong || !remote.Present) return;
+
+            double target = remote.SongDelayTargetMs;
+            if (remote.SongDelayMs < 0)
+            {
+                remote.SongDelayMs = target;
+                remote.SongDelayStartedAt = serverNow;
+                return;
+            }
+            if (serverNow - remote.SongDelayStartedAt < SongDelayWarmupMs)
+            {
+                remote.SongDelayMs = target;
+                return;
+            }
+
+            double diff = target - remote.SongDelayMs;
+            double step = (diff > 0 ? SongDelayGrowRate : SongDelayShrinkRate) * Math.Max(0f, Math.Min(0.1f, dt)) * 1000.0;
+            remote.SongDelayMs = Math.Abs(diff) <= step ? target : remote.SongDelayMs + Math.Sign(diff) * step;
+        }
+
+        /// <summary>
+        /// After Interpolate, for an in-song remote: when real samples are back after running out
+        /// (extrapolated or held), the gap between last frame's pose and the real path is kept and
+        /// faded out over SnapBackSeconds, so the avatar (and the window's camera in its head)
+        /// glides back instead of snapping. Records what is shown for the next frame.
+        /// </summary>
+        private static void SmoothSongPose(Remote remote, bool pastNewest, bool extrapolated, float dt)
+        {
+            if (pastNewest)
+            {
+                if (extrapolated) remote.ExtrapolatedFrames++;
+                else remote.HeldFrames++;
+            }
+
+            if (remote.WasPastNewest && !pastNewest)
+            {
+                bool any = false;
+                for (int p = 0; p < PartCount; p++)
+                {
+                    remote.HasErr[p] = false;
+                    if (!remote.ShownHas[p] || !curHas[p]) continue;
+                    Vector3 err = remote.ShownPos[p] - curPos[p];
+                    if (err.sqrMagnitude > SnapBackMaxDistance * SnapBackMaxDistance) continue;
+                    remote.ErrPos[p] = err;
+                    remote.ErrRot[p] = remote.ShownRot[p] * Quaternion.Inverse(curRot[p]);
+                    remote.HasErr[p] = true;
+                    any = true;
+                }
+                if (any) remote.SnapBacks++;
+            }
+            remote.WasPastNewest = pastNewest;
+
+            float keep = (float)Math.Exp(-Math.Max(0f, dt) / SnapBackSeconds);
+            for (int p = 0; p < PartCount; p++)
+            {
+                if (remote.HasErr[p])
+                {
+                    if (!curHas[p])
+                    {
+                        remote.HasErr[p] = false;
+                    }
+                    else
+                    {
+                        remote.ErrPos[p] *= keep;
+                        remote.ErrRot[p] = Quaternion.Slerp(Quaternion.identity, remote.ErrRot[p], keep);
+                        curPos[p] += remote.ErrPos[p];
+                        curRot[p] = remote.ErrRot[p] * curRot[p];
+                        if (remote.ErrPos[p].sqrMagnitude < 1e-8f && 1f - Math.Abs(remote.ErrRot[p].w) < 1e-7f)
+                            remote.HasErr[p] = false;
+                    }
+                }
+                remote.ShownHas[p] = curHas[p];
+                if (curHas[p])
+                {
+                    remote.ShownPos[p] = curPos[p];
+                    remote.ShownRot[p] = curRot[p];
+                }
             }
         }
 
@@ -6159,11 +6379,18 @@ namespace ExScoringMod
             sb.AppendLine($"[MpPresence] hands: knuckles={knuckles} handAnim L={JsonDump(HandAnimJson(localKataL, 0, knuckles))} R={JsonDump(HandAnimJson(localKataR, 1, knuckles))} fingers L={JsonDump(FingersJson(localKataL, knuckles))} R={JsonDump(FingersJson(localKataR, knuckles))}");
             sb.AppendLine($"[MpPresence] gloves: L={GloveTemplateDump(0)} R={GloveTemplateDump(1)}");
             foreach (GunParts parts in gunParts.Values) sb.AppendLine($"[MpPresence] gun model {GunPartsDump(parts)}");
-            long renderTime = MpSession.ServerNowMs - RenderDelayMs;
             foreach (Remote remote in remotes.Values)
             {
+                long renderTime = RenderTimeOf(remote, MpSession.ServerNowMs);
                 MpPlayerState player = MpSession.Lobby?.FindPlayer(remote.UserId);
                 long newest = remote.Samples.Count > 0 ? remote.Samples[remote.Samples.Count - 1].T : 0;
+                if (remote.InSong)
+                {
+                    long maxNeed = 0;
+                    foreach (long n in remote.Need) maxNeed = Math.Max(maxNeed, n);
+                    sb.AppendLine($"[MpPresence]   {remote.UserId} song smoothing: delay={remote.SongDelayMs:F0} ms target={remote.SongDelayTargetMs:F0} ms " +
+                                  $"(needs {remote.Need.Count} in {LatenessWindowMs / 1000} s, max {maxNeed} ms) frames extrapolated={remote.ExtrapolatedFrames} held={remote.HeldFrames} snapBacks={remote.SnapBacks}");
+                }
                 sb.AppendLine($"[MpPresence]   {remote.UserId} \"{player?.nickname}\" seat={player?.seat} present={remote.Present} samples={remote.Samples.Count} " +
                               $"newest={(newest > 0 ? (newest - renderTime) + " ms ahead of render" : "-")} " +
                               $"shots L={ShotDump(remote, 0)} R={ShotDump(remote, 1)} fx L={FxDump(remote.Fx[0])} R={FxDump(remote.Fx[1])} pull L={remote.Pull[0]:F2} R={remote.Pull[1]:F2} hand L={HandDump(remote, 0)} R={HandDump(remote, 1)} gun L={GunRigDump(remote.Guns[0])} R={GunRigDump(remote.Guns[1])} headshotFx={(remote.HeadshotStart >= 0f ? "on" : "off")} discFade={DiscFadeDump(remote)} ready={player?.ready} connected={player?.connected} discShade={DiscShadeDump(remote)} models={KeysDump(remote.BuiltKeys)} wanted={KeysDump(remote.WantedKeys)} built={remote.Root != null} visible={remote.Root != null && remote.Root.activeSelf} colors={player?.gunColors != null} name={(remote.NameHeadset != null && remote.NameHeadset.gameObject.activeSelf ? "headset@" + remote.NameHeadset.gameObject.layer : "off")}/{(remote.NameSpectator != null && remote.NameSpectator.gameObject.activeSelf ? "spectator" : "off")}");
