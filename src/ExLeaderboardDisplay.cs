@@ -1060,9 +1060,12 @@ namespace ExScoringMod
             if (row.username != null)
             {
                 string nickname = string.IsNullOrEmpty(entry.nickname) ? "???" : entry.nickname;
-                row.username.text = entry.fullCombo
+                string nameText = entry.fullCombo
                     ? FullComboLaurelWrap(nickname, entry.worstJudgement)
                     : LeaderboardDisplay.LaurelWrap(nickname, false);
+
+                // Badge icon in front of the name, like native's developer icon (Badges.cs).
+                ApplyBadgedUsername(row, slot, entry.badge, nameText);
             }
 
             if (row.score != null) row.score.text = $"{entry.judgementPercent:0.00}%";
@@ -1172,7 +1175,7 @@ namespace ExScoringMod
             if (row.username != null)
             {
                 string nickname = string.IsNullOrEmpty(entry.nickname) ? "???" : entry.nickname;
-                row.username.text = LeaderboardDisplay.LaurelWrap(nickname, false);
+                ApplyBadgedUsername(row, slot, entry.badge, LeaderboardDisplay.LaurelWrap(nickname, false));
             }
 
             if (row.score != null)
@@ -1267,6 +1270,7 @@ namespace ExScoringMod
             ClearLeaderboardRowGradeVisual(row.gameObject.GetInstanceID());
             ClearLeaderboardHitboxRun(row.gameObject.GetInstanceID());
             ClearCompareTarget(row.gameObject.GetInstanceID());
+            ForgetBadgeRow(row.gameObject.GetInstanceID());
         }
 
         /// <summary>
@@ -1421,6 +1425,10 @@ namespace ExScoringMod
 
                 ClearLeaderboardRowGradeVisual(row.gameObject.GetInstanceID());
                 ClearCompareTarget(row.gameObject.GetInstanceID());
+
+                // Native writes its own names from here on; a custom badge icon that finishes
+                // downloading later must not overwrite them (Badges.cs).
+                ForgetBadgeRow(row.gameObject.GetInstanceID());
                 restoredRows++;
             }
 

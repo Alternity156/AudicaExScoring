@@ -152,6 +152,12 @@ namespace ExScoringMod
             /// for how this maps to a row icon.
             /// </summary>
             public string platform;
+
+            /// <summary>
+            /// The badge this player shows next to their name (ApiContract.md v2.63), or null for none
+            /// (or a server older than v2.63). Drawn by BadgePrefix in Badges.cs.
+            /// </summary>
+            public BadgeInfo badge;
         }
 
         public class LeaderboardApiResponse
@@ -198,6 +204,40 @@ namespace ExScoringMod
             /// a server older than v2.30 — the compare button then stays hidden.
             /// </summary>
             public string userId;
+
+            /// <summary>
+            /// The badge this player shows next to their name (ApiContract.md v2.63), or null for none
+            /// (or a server older than v2.63). Same as LeaderboardApiEntry.badge.
+            /// </summary>
+            public BadgeInfo badge;
+        }
+
+        /// <summary>
+        /// A player's displayed badge, as sent on leaderboard entries (ApiContract.md v2.63).
+        /// nativeSprite is set when the badge uses one of the game's own icons (a sprite name in the
+        /// "icons" TMP sprite asset); it's null for a custom icon, which is downloaded from iconUrl.
+        /// iconUrl is always set and is relative to the site root (an absolute https:// URL is also
+        /// accepted). See Badges.cs.
+        /// </summary>
+        public class BadgeInfo
+        {
+            public string id;
+            public string name;
+            public string nativeSprite;
+            public string iconUrl;
+        }
+
+        /// <summary>
+        /// Response shape for GET and PATCH /api/users/me/badges (ApiContract.md v2.63). choice is the
+        /// stored value: "auto", "none" or a badge id. displayed is the badge actually shown (null for
+        /// none). owned is every badge the player has, by priority. Drives the Badge row in
+        /// Options > Leaderboard (Badges.cs).
+        /// </summary>
+        public class MyBadgesApiResponse
+        {
+            public string choice;
+            public BadgeInfo displayed;
+            public BadgeInfo[] owned;
         }
 
         public class TotalLeaderboardApiResponse

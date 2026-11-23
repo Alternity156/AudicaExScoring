@@ -910,6 +910,10 @@ namespace ExScoringMod
                     () => OptionsMenuFunctions.OnApiKeyButtonShot(),
                     OptionsMenuFunctions.GetApiKeyButtonHover());
                 OptionsMenuClone.AddRow(enableUploadToggle, apiKeyButton);
+
+                // Badge shown next to your name (Badges.cs): only with an API key and at least one
+                // owned badge. Fetches the badges itself and redraws this page when they arrive.
+                ExScoring.AddBadgeOptionRow();
             }),
 
             // Online play settings (OnlinePlayMenu.cs). The lobby menu itself is only on the Main
