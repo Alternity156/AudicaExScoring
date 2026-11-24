@@ -401,61 +401,65 @@ namespace ExScoringMod
         // ── Old versions (SongDownloader.DownloadSong with an expected song ID) ──
 
         /// <summary>
-        /// Before a new version of a map is written: takes every installed song loaded from a
-        /// file named <paramref name="fileName"/> (other than <paramref name="keepSongId"/>) out
-        /// of the game, and moves its file, plus any file of that name in the songs folder or
-        /// Downloads, to the SongBackups folder, which the game doesn't load. Not a delete: the
-        /// old ID isn't blocked from auto-download, and the lobby isn't told. A file that can't
-        /// be moved now (in use) is copied to SongBackups and deleted on quit. Returns true when
-        /// every file was moved.
+        /// Before a new version of a map is written: takes every installed song loaded from one of
+        /// <paramref name="files"/> (other than <paramref name="keepSongId"/>) out of the game,
+        /// and moves those files to the SongBackups folder, which the game doesn't load. The
+        /// caller (SongDownloader.DownloadSong) passes only files that are this map: same real
+        /// file name, case included, and same title and artist (RealFileName). A different song
+        /// whose file name is the same, or only differs in case, is never touched. Not a delete:
+        /// the old ID isn't blocked from auto-download, and the lobby isn't told. A file that
+        /// can't be moved now (in use) is copied to SongBackups and deleted on quit. Returns true
+        /// when every file was moved.
         /// </summary>
-        internal static bool BackUpOtherVersions(string fileName, string keepSongId)
+        internal static bool BackUpOtherVersions(IList<string> files, string keepSongId)
         {
-            if (string.IsNullOrEmpty(fileName)) return true;
+            if (files == null || files.Count == 0) return true;
 
             // Full path → the song ID it was loaded as (null for a file that isn't loaded).
-            var files = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var oldSongs = new List<SongList.SongData>();
+            var targets = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+            var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (string f in files)
+            {
+                try
+                {
+                    string full = Path.GetFullPath(f);
+                    targets[full] = null;
+                    names.Add(Path.GetFileName(full));
+                }
+                catch { }
+            }
 
+            var oldSongs = new List<SongList.SongData>();
             if (SongList.I != null)
             {
                 for (int i = 0; i < SongList.I.songs.Count; i++)
                 {
                     SongList.SongData sd = SongList.I.songs[i];
                     if (sd == null || sd.songID == keepSongId || string.IsNullOrEmpty(sd.zipPath)) continue;
-                    if (!string.Equals(Path.GetFileName(sd.zipPath), fileName, StringComparison.OrdinalIgnoreCase)) continue;
-                    oldSongs.Add(sd);
+                    if (!names.Contains(Path.GetFileName(sd.zipPath))) continue;
+                    try
+                    {
+                        // Only the song loaded from one of these files, not another file of that name.
+                        string primary = ResolveSongFile(sd);
+                        if (primary == null || !targets.ContainsKey(primary)) continue;
+                        targets[primary] = sd.songID;
+                        oldSongs.Add(sd);
+                    }
+                    catch (Exception ex)
+                    {
+                        DebugLog.Log($"{LogPrefix} Couldn't locate the file of {sd.songID}: {ex.Message}");
+                    }
                 }
             }
 
             foreach (SongList.SongData sd in oldSongs)
             {
                 DebugLog.Log($"{LogPrefix} Backing up older version {sd.songID} \"{sd.title}\" (zipPath={sd.zipPath})");
-                try
-                {
-                    string primary = ResolveSongFile(sd);
-                    if (primary != null) files[primary] = sd.songID;
-                }
-                catch (Exception ex)
-                {
-                    DebugLog.Log($"{LogPrefix} Couldn't locate the file of {sd.songID}: {ex.Message}");
-                }
                 RemoveSongFromGame(sd);
             }
 
-            // Files of that name that aren't loaded (a failed import, or already removed).
-            foreach (string dir in new[] { mainSongDirectory, downloadsDirectory })
-            {
-                try
-                {
-                    string candidate = Path.GetFullPath(Path.Combine(dir, fileName));
-                    if (File.Exists(candidate) && !files.ContainsKey(candidate)) files[candidate] = null;
-                }
-                catch { }
-            }
-
             bool allMoved = true;
-            foreach (var kv in files)
+            foreach (var kv in targets)
             {
                 if (!MoveToBackup(kv.Key, kv.Value)) allMoved = false;
             }

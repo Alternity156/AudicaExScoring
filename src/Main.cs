@@ -187,6 +187,12 @@ namespace ExScoringMod
         /// folder. This ensures the game loads them on startup without needing
         /// a custom song source directory. If a file already exists in the
         /// destination it is deleted from Downloads to avoid duplicates.
+        ///
+        /// A file of that name (any case) with different contents is another version of the map
+        /// only when the real names match exactly and so do the title and artist (RealFileName);
+        /// then the one in the songs folder goes to SongBackups. Otherwise it's another song:
+        /// the download moves in as "name~N.audica" with its real name stored inside, and the
+        /// song already there is left alone.
         /// </summary>
         private static void MoveDownloadedSongs()
         {
@@ -218,6 +224,11 @@ namespace ExScoringMod
                         File.Delete(filePath);
                         DebugLog.Log($"  Deleted duplicate: {fileName}");
                     }
+                    else if (File.Exists(destination) && !IsSameMapAs(filePath, destination))
+                    {
+                        // Same file name (or only differing in case), but another song.
+                        MoveInUnderFreeName(filePath);
+                    }
                     else if (File.Exists(destination))
                     {
                         // Same name, different contents: another version of the map. The download
@@ -246,6 +257,64 @@ namespace ExScoringMod
                     // will ensure it still gets loaded
                 }
             }
+        }
+
+        /// <summary>
+        /// True when the download is a version of the map in the songs folder: the same real
+        /// name (case included) and the same title and artist (unknown counts as the same).
+        /// </summary>
+        private static bool IsSameMapAs(string download, string installedPath)
+        {
+            string installed = ActualPath(installedPath);
+            if (!string.Equals(RealFileName.RealNameOf(download), RealFileName.RealNameOf(installed), StringComparison.Ordinal))
+                return false;
+            return RealFileName.SameMap(RealFileName.MetaOfFile(download), RealFileName.MetaOfFile(installed));
+        }
+
+        /// <summary>The path with the file name as it is on disk (File.Exists ignores case), or the path itself.</summary>
+        private static string ActualPath(string path)
+        {
+            try
+            {
+                string dir = Path.GetDirectoryName(path);
+                string name = Path.GetFileName(path);
+                foreach (string f in Directory.GetFiles(dir, "*.audica", SearchOption.TopDirectoryOnly))
+                    if (string.Equals(Path.GetFileName(f), name, StringComparison.OrdinalIgnoreCase)) return f;
+            }
+            catch { }
+            return path;
+        }
+
+        /// <summary>
+        /// Moves a download whose name is taken by another song into the songs folder as
+        /// "realName~N.audica", with its real name stored inside (RealFileName), so it keeps its ID.
+        /// The download is only removed once the copy is written; if it can't be, the copy is
+        /// removed instead and the download stays (Downloads is loaded too).
+        /// </summary>
+        private static void MoveInUnderFreeName(string filePath)
+        {
+            string fileName = Path.GetFileName(filePath);
+            string realName = RealFileName.RealNameOf(filePath);
+            string diskName = RealFileName.ChooseDiskName(realName);
+            if (diskName == null)
+            {
+                DebugLog.Log($"  Kept {fileName} in Downloads: another song uses that name and no free name was found");
+                return;
+            }
+
+            string target = Path.Combine(mainSongDirectory, diskName);
+            RealFileName.WriteTaggedCopy(filePath, target, realName);
+            try
+            {
+                File.Delete(filePath);
+            }
+            catch (Exception e)
+            {
+                try { File.Delete(target); } catch { }
+                DebugLog.Log($"  Kept {fileName} in Downloads ({e.Message}): another song uses that name in the songs folder");
+                return;
+            }
+            DebugLog.Log($"  Moved: {fileName} as {diskName} (another song uses that name; it still loads as {realName})");
         }
 
         /// <summary>

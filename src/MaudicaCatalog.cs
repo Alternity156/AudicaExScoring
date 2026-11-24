@@ -129,6 +129,8 @@ namespace ExScoringMod
         // ── Data ──────────────────────────────────────────────────────────────
         private static Dictionary<int, CatalogMap> byId = new Dictionary<int, CatalogMap>();
         private static Dictionary<string, CatalogMap> byStem = new Dictionary<string, CatalogMap>(StringComparer.OrdinalIgnoreCase);
+        // Same, case included: two maps whose file names only differ in case are different songs.
+        private static Dictionary<string, CatalogMap> byStemExact = new Dictionary<string, CatalogMap>(StringComparer.Ordinal);
         private static Dictionary<string, List<CatalogMap>> byNormStem = new Dictionary<string, List<CatalogMap>>();
         private static List<CatalogMap> newestFirst = new List<CatalogMap>();
         private static long lastFullSyncUtcTicks = 0;
@@ -507,6 +509,7 @@ namespace ExScoringMod
             list.Sort((a, b) => b.id.CompareTo(a.id)); // ids grow with uploads: newest first
 
             var stems = new Dictionary<string, CatalogMap>(StringComparer.OrdinalIgnoreCase);
+            var exactStems = new Dictionary<string, CatalogMap>(StringComparer.Ordinal);
             var norms = new Dictionary<string, List<CatalogMap>>();
 
             foreach (CatalogMap m in list)
@@ -520,6 +523,7 @@ namespace ExScoringMod
                 m.searchTextNoSpaces = text.Replace(" ", "");
 
                 if (!stems.ContainsKey(m.stem)) stems[m.stem] = m; // newest wins
+                if (!exactStems.ContainsKey(m.stem)) exactStems[m.stem] = m;
                 if (m.normStem.Length > 0)
                 {
                     if (!norms.TryGetValue(m.normStem, out List<CatalogMap> bucket))
@@ -533,6 +537,7 @@ namespace ExScoringMod
 
             newestFirst = list;
             byStem = stems;
+            byStemExact = exactStems;
             byNormStem = norms;
             IsReady = list.Count > 0;
             Version++;
@@ -550,10 +555,21 @@ namespace ExScoringMod
             return int.TryParse((id ?? "").Trim(), out int n) ? GetById(n) : null;
         }
 
+        private static readonly Regex mapIdInUrl = new Regex(@"/maps/(\d+)(/|$|\?)");
+
+        /// <summary>The map a maudica download URL (".../maps/{id}/download") points to, or null.</summary>
+        public static CatalogMap GetByDownloadUrl(string url)
+        {
+            if (string.IsNullOrEmpty(url)) return null;
+            Match m = mapIdInUrl.Match(url);
+            return m.Success ? GetById(m.Groups[1].Value) : null;
+        }
+
         /// <summary>
-        /// The map whose filename is stem + ".audica": exact (ignoring case), then the same letters
-        /// and digits ignoring punctuation/spacing, then with a trailing copy suffix like " (1)"
-        /// removed. The fuzzy steps only answer when exactly one map fits.
+        /// The map whose filename is stem + ".audica": exact (case included, then ignoring case),
+        /// then the same letters and digits ignoring punctuation/spacing, then with a trailing
+        /// copy suffix like " (1)" or a RealFileName "~2" removed. The fuzzy steps only answer
+        /// when exactly one map fits.
         /// </summary>
         public static CatalogMap FindByStem(string stem)
         {
@@ -561,6 +577,7 @@ namespace ExScoringMod
             stem = stem.Trim();
             if (stem.EndsWith(".audica", StringComparison.OrdinalIgnoreCase)) stem = stem.Substring(0, stem.Length - 7);
 
+            if (byStemExact.TryGetValue(stem, out CatalogMap exactCase)) return exactCase;
             if (byStem.TryGetValue(stem, out CatalogMap exact)) return exact;
 
             CatalogMap unique = UniqueNorm(Normalize(stem));
@@ -569,13 +586,14 @@ namespace ExScoringMod
             string stripped = copySuffix.Replace(stem, "");
             if (stripped.Length > 0 && stripped != stem)
             {
+                if (byStemExact.TryGetValue(stripped, out CatalogMap strippedExactCase)) return strippedExactCase;
                 if (byStem.TryGetValue(stripped, out CatalogMap strippedExact)) return strippedExact;
                 return UniqueNorm(Normalize(stripped));
             }
             return null;
         }
 
-        private static readonly Regex copySuffix = new Regex(@"(\s*\(\d+\)|_\d+)$");
+        private static readonly Regex copySuffix = new Regex(@"(\s*\(\d+\)|_\d+|~\d+)$");
 
         private static CatalogMap UniqueNorm(string norm)
         {
