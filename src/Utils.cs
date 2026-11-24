@@ -141,18 +141,25 @@ namespace ExScoringMod
             List<Cue> fullChain = GetChainFromLastNode(cue);
 
             float total = 0;
+            int count = 0;
 
-            // Every node's aim counts (the walk back from the last node includes the ChainStart, as
-            // before). Used to test the LAST node's behavior instead of each node's, which zeroed the
-            // whole average when the last node isn't a Chain (a chain sustain is a Hold once hit).
+            // Only the traced nodes count: the walk back from the last node also reaches the
+            // ChainStart, whose aim is the head shot's own aim (already judged as a shot) and must
+            // not be part of the tracing average. Filtered on "not the ChainStart" rather than "is a
+            // Chain", since a chain sustain tail is a Hold once hit and its aim still counts.
+            // RunDataRecalculator.BuildChainAverages rebuilds the same value from saved run data —
+            // KEEP IN SYNC.
             foreach (Cue chainCue in fullChain)
             {
+                if (chainCue.behavior == Target.TargetBehavior.ChainStart) continue;
+
                 total += chainCue.aim;
+                count++;
             }
 
-            float chainAverage = total / fullChain.Count;
+            if (count == 0) return 0f;
 
-            return chainAverage;
+            return total / count;
         }
 
         private static string Colorize(string text, Color color)

@@ -397,6 +397,8 @@ namespace ExScoringMod
             ExCueSaveData[] cues = data.exCues;
             if (cues == null) return summary;
 
+            Dictionary<int, float> chainAverages = BuildChainAverages(cues, chainTailLookup);
+
             for (int i = 0; i < cues.Length; i++)
             {
                 ExCueSaveData saved = cues[i];
@@ -445,7 +447,7 @@ namespace ExScoringMod
                 if ((isChain || isChainSustain) && isChainTail)
                 {
                     Judgement chainJudgement = default(Judgement);
-                    if (saved.chainAverage.HasValue) chainJudgement = GetChainJudgement(saved.chainAverage.Value);
+                    if (TryGetChainAverage(chainAverages, i, saved, out float chainAverage)) chainJudgement = GetChainJudgement(chainAverage);
                     cueScore += GetJudgementScore(chainJudgement);
                 }
                 if ((saved.behavior == Target.TargetBehavior.Hold || isChainSustain) && saved.sustainPercent.HasValue && saved.sustainPercent.Value >= 1f)
@@ -665,6 +667,77 @@ namespace ExScoringMod
         }
 
         /// <summary>
+        /// Chain tracing average for every hit chain tail (Chain tail or ChainSustain), rebuilt from
+        /// the saved node aims instead of trusting the saved chainAverage: runs saved before
+        /// 2026-11-23 included the ChainStart's own aim in it (see GetChainAverageFromLastNodeCue in
+        /// Utils.cs, KEEP IN SYNC). Keyed by the tail's index in `cues`.
+        ///
+        /// Cues are walked per hand in tick order: a ChainStart starts a new chain, every Chain /
+        /// ChainSustain cue after it adds its aim (a missed node adds 0, though a chain with a
+        /// missed node has a missed tail anyway), and the tail closes it. A tail with no node
+        /// collected (no ChainStart found before it) is left out, so callers fall back to the
+        /// saved value. Plain C# with no Unity types: SummarizeRun calls it on the loader thread.
+        /// </summary>
+        private static Dictionary<int, float> BuildChainAverages(ExCueSaveData[] cues, Dictionary<float, bool> chainTailLookup)
+        {
+            var averages = new Dictionary<int, float>();
+            if (cues == null || cues.Length == 0) return averages;
+
+            // Stable sort, so cues sharing a tick keep their saved order.
+            int[] order = Enumerable.Range(0, cues.Length).OrderBy(i => cues[i].tick).ToArray();
+
+            var sums = new Dictionary<Target.TargetHandType, float>();
+            var counts = new Dictionary<Target.TargetHandType, int>();
+
+            foreach (int i in order)
+            {
+                ExCueSaveData saved = cues[i];
+                Target.TargetHandType hand = saved.handType;
+
+                if (saved.behavior == Target.TargetBehavior.ChainStart)
+                {
+                    sums[hand] = 0f;
+                    counts[hand] = 0;
+                    continue;
+                }
+
+                bool isChain = saved.behavior == Target.TargetBehavior.Chain;
+                bool isChainSustain = saved.behavior == ChainSustain.Behavior;
+                if (!isChain && !isChainSustain) continue;
+                if (!counts.ContainsKey(hand)) continue; // no ChainStart seen yet for this hand
+
+                sums[hand] += saved.miss ? 0f : (saved.aim ?? 0f);
+                counts[hand]++;
+
+                bool isTail = isChainSustain || (saved.miss
+                    ? (saved.isChainTail ?? ResolveIsChainTail(chainTailLookup, saved.tick))
+                    : (saved.isChainTail ?? false));
+                if (!isTail) continue;
+
+                if (!saved.miss && counts[hand] > 0) averages[i] = sums[hand] / counts[hand];
+
+                counts.Remove(hand);
+                sums.Remove(hand);
+            }
+
+            return averages;
+        }
+
+        /// <summary>The rebuilt chain average for the tail at `index`, or the saved chainAverage
+        /// when it couldn't be rebuilt. False when neither exists.</summary>
+        private static bool TryGetChainAverage(Dictionary<int, float> chainAverages, int index, ExCueSaveData saved, out float chainAverage)
+        {
+            if (chainAverages.TryGetValue(index, out chainAverage)) return true;
+            if (saved.chainAverage.HasValue)
+            {
+                chainAverage = saved.chainAverage.Value;
+                return true;
+            }
+            chainAverage = 0f;
+            return false;
+        }
+
+        /// <summary>
         /// Rebuilds a live-shaped ExCue list from saved raw cue data, deriving timing/aim/chain
         /// judgements purely from numbers already on disk. Missed cues (which only save
         /// behavior/handType/tick/health/miss — see BuildExCueSaveData) are marked Miss outright
@@ -674,9 +747,11 @@ namespace ExScoringMod
         private static List<ExCue> RecalculateExCues(ExCueSaveData[] savedCues, Dictionary<float, bool> chainTailLookup)
         {
             var result = new List<ExCue>(savedCues.Length);
+            Dictionary<int, float> chainAverages = BuildChainAverages(savedCues, chainTailLookup);
 
-            foreach (var saved in savedCues)
+            for (int i = 0; i < savedCues.Length; i++)
             {
+                ExCueSaveData saved = savedCues[i];
                 var cue = new ExCue
                 {
                     behavior = saved.behavior,
@@ -736,9 +811,9 @@ namespace ExScoringMod
                 if (saved.behavior == Target.TargetBehavior.Chain)
                 {
                     cue.isChainTail = saved.isChainTail ?? false;
-                    if (cue.isChainTail && saved.chainAverage.HasValue)
+                    if (cue.isChainTail && TryGetChainAverage(chainAverages, i, saved, out float chainAverage))
                     {
-                        cue.chainAverage = saved.chainAverage.Value;
+                        cue.chainAverage = chainAverage;
                         cue.chainJudgement = GetChainJudgement(cue.chainAverage);
                     }
                 }
@@ -747,9 +822,9 @@ namespace ExScoringMod
                 {
                     cue.isChainTail = true;
                     if (saved.aim.HasValue) cue.aim = saved.aim.Value;
-                    if (saved.chainAverage.HasValue)
+                    if (TryGetChainAverage(chainAverages, i, saved, out float chainAverage))
                     {
-                        cue.chainAverage = saved.chainAverage.Value;
+                        cue.chainAverage = chainAverage;
                         cue.chainJudgement = GetChainJudgement(cue.chainAverage);
                     }
                 }
