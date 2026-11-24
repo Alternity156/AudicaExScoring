@@ -820,6 +820,8 @@ namespace ExScoringMod
                 OptionsMenuClone.AddRow(searchKeyboardPosZSlider, searchKeyboardTiltSlider);
             }),
 
+            new OptionsCategory(SpectatorCamera.CategoryId, "Spectator Camera", SpectatorCamera.BuildPage),
+
             new OptionsCategory("opt_data", "Data", () =>
             {
                 OptionsMenuFunctions.GetEnableRunDataSaving();
@@ -1185,6 +1187,12 @@ namespace ExScoringMod
 
             // in RestoreIfPending, log entry + which category
             DebugLog.Log($"[Options] RestoreIfPending: catId={restoreCategoryId}");
+        }
+
+        /// <summary>True while this category is the one drawn on the clone.</summary>
+        public static bool IsShowing(string categoryId)
+        {
+            return panelShown && activeCategory != null && activeCategory.Id == categoryId;
         }
 
         /// <summary>

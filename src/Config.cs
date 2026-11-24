@@ -306,6 +306,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(ShowNativeTimingGraph), false, "Shows a second timing graph on the results screen using the game's native frame-based timing, for comparison with Precise Shot Timing");
 
             ColorSettings.Register(); // judgement / song-list colours (hidden prefs)
+            SpectatorCamera.Register(); // Options > Spectator Camera (hidden prefs)
 
             OnModSettingsApplied();
         }
@@ -313,6 +314,7 @@ namespace ExScoringMod
         public static void OnModSettingsApplied()
         {
             ColorSettings.Load();
+            SpectatorCamera.Load();
 
             AudicaType = MelonPrefs.GetBool(Category, nameof(AudicaType));
             ExType = MelonPrefs.GetBool(Category, nameof(ExType));

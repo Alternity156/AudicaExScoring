@@ -273,6 +273,7 @@
     <Compile Include="src\PerSongOptionsPage.cs" />
     <Compile Include="src\PerSongSettings.cs" />
     <Compile Include="src\PreciseTiming.cs" />
+    <Compile Include="src\RealFileName.cs" />
     <Compile Include="src\ReleaseNotesPanel.cs" />
     <Compile Include="src\PlayHistoryButton.cs" />
     <Compile Include="src\PlayHistoryUI.cs" />
@@ -335,6 +336,7 @@
     <Compile Include="src\SongSearchField.cs" />
     <Compile Include="src\SongSearchMenu.cs" />
     <Compile Include="src\SongTimelineGraph.cs" />
+    <Compile Include="src\SpectatorCamera.cs" />
     <Compile Include="src\SpectatorDebug.cs" />
     <Compile Include="src\SpectatorDiorama.cs" />
     <Compile Include="src\SpectatorEvents.cs" />
