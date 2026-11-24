@@ -32,7 +32,9 @@ namespace ExScoringMod
     /// While this page is open, the game's spectator preview (previewCam + previewCamDisplay) is
     /// forced on and the display is moved onto our cloned options panel, at the same spot relative
     /// to it as on the native settings panel. The game only shows it on its own Spectator page,
-    /// which our clone never is. It's put back as soon as the page closes.
+    /// which our clone never is. It's put back as soon as the page closes. While shown, it's shaped
+    /// like the game window (its render texture is swapped for a matching one if needed) and uses
+    /// the spectator camera's field of view, so it matches the desktop view.
     ///
     /// AudicaFollowCamera (FollowCamera.dll) must be removed: its Update Prefix turns the native
     /// update off whenever it isn't active. Its Mods/Config/FollowCamera.json is imported once.
@@ -612,6 +614,8 @@ namespace ExScoringMod
         /// <summary>
         /// Every frame while the page is open (the native code turns it off every frame, since its
         /// condition is the native options page). The display is moved under our clone once.
+        /// It's shaped like the game window and uses the spectator camera's field of view, so it
+        /// shows what's on the desktop (re-checked every frame, so resizing the window follows).
         /// </summary>
         private static void ForcePreview(SpectatorCam cam)
         {
@@ -624,12 +628,216 @@ namespace ExScoringMod
             if (!preview.gameObject.activeSelf) preview.gameObject.SetActive(true);
             if (!display.activeSelf) display.SetActive(true);
 
-            // As the native code does while it shows the preview.
             Camera main = cam.cam;
-            if (main != null) preview.aspect = main.aspect;
-            if (previewMoved && preview.aspect > 0.01f)
-                display.transform.localScale = new Vector3(previewBaseScale.x, previewBaseScale.x / preview.aspect, previewBaseScale.z);
+            float aspect = WindowAspect(main);
+            if (aspect <= 0.01f) return;
+
+            if (main != null) preview.fieldOfView = main.fieldOfView;
+
+            // Shape first: a failed texture swap mustn't skip it.
+            ApplyPreviewShape(display, aspect);
+
+            try
+            {
+                MatchPreviewTexture(preview, display, aspect);
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Log("[SpectatorCamera] preview texture swap failed: " + ex.Message);
+            }
+            preview.aspect = aspect; // after any texture swap (that resets the aspect)
         }
+
+        // Which of the display's local axes the screen's width and height lie along, and the
+        // screen's unscaled size along each (from its mesh bounds). Found once per page opening.
+        private static bool shapeKnown;
+        private static int shapeWidthAxis, shapeHeightAxis;
+        private static float shapeWidthLength, shapeHeightLength;
+        private static Vector3 shapeBaseScale;
+
+        /// <summary>
+        /// Scales the display so its world width / height equals the window's. The screen mesh may be
+        /// a quad (height along local Y) or a plane (local Z), possibly on a rotated child, so the
+        /// axes are read from the mesh rather than assumed. Width keeps its scale; height is set.
+        /// </summary>
+        private static void ApplyPreviewShape(GameObject display, float aspect)
+        {
+            Transform d = display.transform;
+            if (!shapeKnown && !FindPreviewShape(display)) return;
+
+            Vector3 scale = shapeBaseScale;
+            float width = scale[shapeWidthAxis] * shapeWidthLength;
+            if (shapeHeightLength <= 0f || width <= 0f) return;
+            scale[shapeHeightAxis] = width / (shapeHeightLength * aspect);
+            d.localScale = scale;
+        }
+
+        private static bool FindPreviewShape(GameObject display)
+        {
+            Transform d = display.transform;
+            MeshFilter filter = display.GetComponentInChildren<MeshFilter>(true);
+            Mesh mesh = filter != null ? filter.sharedMesh : null;
+            if (mesh == null)
+            {
+                DebugLog.Log("[SpectatorCamera] preview display has no mesh, shape not matched");
+                return false;
+            }
+
+            shapeBaseScale = previewMoved ? previewBaseScale : d.localScale;
+            Vector3 size = mesh.bounds.size;
+            Transform m = filter.transform;
+
+            // Each mesh axis, as a vector in the display's local units (the display's own scale taken
+            // out by InverseTransformVector, so world length = local length x localScale on that axis).
+            // A flat screen has two: height is the one closest to vertical in the world, width the other.
+            int count = 0;
+            int[] along = new int[3];
+            float[] length = new float[3], up = new float[3];
+            for (int i = 0; i < 3; i++)
+            {
+                Vector3 axis = Vector3.zero;
+                axis[i] = size[i];
+                Vector3 world = m.TransformVector(axis);
+                if (world.sqrMagnitude < 0.00000001f) continue; // the flat side
+                Vector3 local = d.InverseTransformVector(world);
+                Vector3 abs = new Vector3(Mathf.Abs(local.x), Mathf.Abs(local.y), Mathf.Abs(local.z));
+                along[count] = abs.x >= abs.y && abs.x >= abs.z ? 0 : (abs.y >= abs.z ? 1 : 2);
+                length[count] = local.magnitude;
+                up[count] = Mathf.Abs(Vector3.Dot(world.normalized, Vector3.up));
+                count++;
+            }
+
+            int wAxis = 0, hAxis = 0;
+            float wLen = 0f, hLen = 0f;
+            if (count >= 2)
+            {
+                // The two longest mesh axes are the screen; if there are three, drop the shortest.
+                int drop = -1;
+                if (count == 3)
+                    drop = length[0] <= length[1] && length[0] <= length[2] ? 0 : (length[1] <= length[2] ? 1 : 2);
+                int first = -1, second = -1;
+                for (int i = 0; i < count; i++)
+                {
+                    if (i == drop) continue;
+                    if (first < 0) first = i; else second = i;
+                }
+                int h = up[first] >= up[second] ? first : second;
+                int w = h == first ? second : first;
+                hAxis = along[h]; hLen = length[h];
+                wAxis = along[w]; wLen = length[w];
+            }
+
+            if (wAxis == hAxis || wLen <= 0f || hLen <= 0f)
+            {
+                DebugLog.Log($"[SpectatorCamera] preview shape not found (mesh {size}, width axis {wAxis}, height axis {hAxis})");
+                return false;
+            }
+
+            shapeWidthAxis = wAxis;
+            shapeHeightAxis = hAxis;
+            shapeWidthLength = wLen;
+            shapeHeightLength = hLen;
+            shapeKnown = true;
+            const string axes = "XYZ";
+            char wName = axes[wAxis], hName = axes[hAxis];
+            DebugLog.Log($"[SpectatorCamera] preview shape: mesh size {size.x:F3}x{size.y:F3}x{size.z:F3}, width along local {wName} ({wLen:F3}), height along local {hName} ({hLen:F3}), base scale {shapeBaseScale.x:F3},{shapeBaseScale.y:F3},{shapeBaseScale.z:F3}");
+            return true;
+        }
+
+        /// <summary>The game window's width / height (what the desktop shows).</summary>
+        private static float WindowAspect(Camera main)
+        {
+            if (Screen.width > 0 && Screen.height > 0) return (float)Screen.width / Screen.height;
+            return main != null ? main.aspect : 0f;
+        }
+
+        // Preview render texture swapped for one shaped like the window (restored when the page closes).
+        private static bool textureSwapped;
+        private static RenderTexture originalTexture;
+        private static RenderTexture matchedTexture;
+        private static Renderer displayRenderer;
+        private static Material originalDisplayMaterial;
+        private static Material matchedDisplayMaterial;
+
+        /// <summary>
+        /// The preview camera draws into a fixed-size render texture; if it isn't the window's
+        /// shape, the picture is squashed. Swaps in one of the same height and the window's shape,
+        /// shown on a copy of the display's material.
+        /// </summary>
+        private static void MatchPreviewTexture(Camera preview, GameObject display, float aspect)
+        {
+            RenderTexture source = textureSwapped ? originalTexture : preview.targetTexture;
+            if (source == null || source.height <= 0) return;
+
+            int height = source.height;
+            int width = Mathf.Max(1, Mathf.RoundToInt(height * aspect));
+
+            if (!textureSwapped)
+            {
+                float sourceAspect = (float)source.width / source.height;
+                if (Mathf.Abs(sourceAspect - aspect) < 0.01f) return; // already the right shape
+
+                Renderer renderer = display.GetComponentInChildren<Renderer>(true);
+                if (renderer == null)
+                {
+                    DebugLog.Log("[SpectatorCamera] preview display has no renderer, texture not swapped");
+                    return;
+                }
+
+                originalTexture = source;
+                displayRenderer = renderer;
+                originalDisplayMaterial = renderer.sharedMaterial;
+                if (originalDisplayMaterial == null) return;
+                if (originalDisplayMaterial.mainTexture != source)
+                    DebugLog.Log("[SpectatorCamera] preview material's main texture isn't the camera's texture, swapping it anyway");
+
+                matchedDisplayMaterial = new Material(originalDisplayMaterial);
+                matchedDisplayMaterial.hideFlags |= HideFlags.DontUnloadUnusedAsset;
+                renderer.sharedMaterial = matchedDisplayMaterial;
+                textureSwapped = true;
+            }
+
+            if (matchedTexture != null && matchedTexture.width == width && matchedTexture.height == height) return;
+
+            // New or resized window: (re)build the texture.
+            RenderTexture old = matchedTexture;
+            matchedTexture = new RenderTexture(width, height, originalTexture.depth, originalTexture.format);
+            matchedTexture.antiAliasing = Mathf.Max(1, originalTexture.antiAliasing);
+            matchedTexture.filterMode = originalTexture.filterMode;
+            matchedTexture.hideFlags |= HideFlags.DontUnloadUnusedAsset;
+            matchedTexture.Create();
+
+            preview.targetTexture = matchedTexture;
+            if (matchedDisplayMaterial != null) matchedDisplayMaterial.mainTexture = matchedTexture;
+
+            if (old != null) { old.Release(); UnityEngine.Object.Destroy(old); }
+            DebugLog.Log($"[SpectatorCamera] preview texture {width}x{height} (game's was {originalTexture.width}x{originalTexture.height})");
+        }
+
+        private static void RestorePreviewTexture(SpectatorCam cam)
+        {
+            if (!textureSwapped) return;
+            textureSwapped = false;
+
+            Camera preview = cam.previewCam;
+            if (preview != null) preview.targetTexture = originalTexture;
+            if (displayRenderer != null && originalDisplayMaterial != null) displayRenderer.sharedMaterial = originalDisplayMaterial;
+
+            if (matchedDisplayMaterial != null) UnityEngine.Object.Destroy(matchedDisplayMaterial);
+            if (matchedTexture != null) { matchedTexture.Release(); UnityEngine.Object.Destroy(matchedTexture); }
+            matchedDisplayMaterial = null;
+            matchedTexture = null;
+            originalTexture = null;
+            originalDisplayMaterial = null;
+            displayRenderer = null;
+            DebugLog.Log("[SpectatorCamera] preview texture put back");
+        }
+
+        /// <summary>Where the preview sits on our cloned options panel (local to its OptionsMenu).</summary>
+        private static readonly Vector3 PreviewLocalPosition = new Vector3(-32.5f, -6.27f, -7.5f);
+
+        private static readonly System.Collections.Generic.List<Collider> disabledPreviewColliders =
+            new System.Collections.Generic.List<Collider>();
 
         private static void MovePreviewOntoClone(GameObject display)
         {
@@ -662,16 +870,28 @@ namespace ExScoringMod
             previewOrigLocalScale = d.localScale;
 
             d.SetParent(clone.transform, false);
-            d.localPosition = localPos;
+            d.localPosition = PreviewLocalPosition; // fixed spot on the clone (relative pose was localPos)
             d.localRotation = localRot;
             d.localScale = localScale;
             previewBaseScale = localScale;
             previewMoved = true;
-            DebugLog.Log($"[SpectatorCamera] preview moved onto the options clone (local {localPos}, from {(previewOrigParent != null ? previewOrigParent.name : "root")})");
+
+            // Not shootable while it's on our panel: its colliders are switched off (back on when it's put back).
+            disabledPreviewColliders.Clear();
+            var colliders = display.GetComponentsInChildren<Collider>(true);
+            for (int i = 0; i < colliders.Length; i++)
+            {
+                Collider collider = colliders[i];
+                if (collider == null || !collider.enabled) continue;
+                collider.enabled = false;
+                disabledPreviewColliders.Add(collider);
+            }
+            DebugLog.Log($"[SpectatorCamera] preview moved onto the options clone ({disabledPreviewColliders.Count} colliders off, relative pose was {localPos.x:F3},{localPos.y:F3},{localPos.z:F3}, from {(previewOrigParent != null ? previewOrigParent.name : "root")})");
         }
 
         private static void RestorePreview(SpectatorCam cam)
         {
+            RestorePreviewTexture(cam);
             if (!previewMoved) return;
             previewMoved = false;
             GameObject display = cam.previewCamDisplay;
@@ -682,6 +902,11 @@ namespace ExScoringMod
             d.localRotation = previewOrigLocalRot;
             d.localScale = previewOrigLocalScale;
             previewOrigParent = null;
+            shapeKnown = false;
+
+            foreach (Collider collider in disabledPreviewColliders)
+                if (collider != null) collider.enabled = true;
+            disabledPreviewColliders.Clear();
             DebugLog.Log("[SpectatorCamera] preview put back");
         }
 
