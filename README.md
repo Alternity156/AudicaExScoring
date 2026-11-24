@@ -10,12 +10,13 @@ MineSoundDisabler
 TimingAssist
 TemporalAimAssistDisabler
 ForcedHitSounds
-GunBeamRedirrectionDisabler
+GunBeamRedirectionDisabler
 TrippyMenu
 MenuGrabDisabler
 Grind-Mode
 ColoredChains
 AutoRecenterDisabler
+FollowCamera
 ```
 
 Functionality of these mods has been added as options.
