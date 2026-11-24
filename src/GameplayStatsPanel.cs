@@ -106,6 +106,9 @@ namespace ExScoringMod
             try
             {
                 BuildGameplayStatsContent(LeaderboardStatsContext, panel, run.exCues, run.judgementPercent, run.failed);
+                // Song page leaderboard only, not when opened from the results screen's leaderboard
+                // (LeaderboardStatsButton.cs).
+                if (!leaderboardStatsOpenedOnResults) CreateGunColorLegend(panel);
             }
             finally
             {
@@ -293,6 +296,57 @@ namespace ExScoringMod
 
             GameObject gradeVisual = CreateGradeVisual(context, parent, judgementPercent, failed);
             ApplyStatsPanelScaleAndOffset(gradeVisual, scaleMultiplier, yOffset);
+        }
+
+        // Leaderboard stats panel only: a left and a right gun circle, like the website's profile
+        // page (.gun-swatch: filled circles with a thin light border, left gun first). Above the
+        // timing judgement breakdown, left of the score; position tuned in UnityExplorer (2026-11-24).
+        private static readonly Vector3 GunColorLegendLocalPosition = new Vector3(-7.5f, -0.5f, 0f);
+        private static readonly Vector3 GunColorLegendLocalScale = new Vector3(1.25f, 1.25f, 1.25f);
+        private const float GunColorLegendCircleRadius = 0.3f;
+        private const float GunColorLegendGap = 0.25f;
+
+        /// <summary>
+        /// Builds the two gun colour circles under `parent`. Uses ChainArrow.GetStatsHandColor, so call it
+        /// while the run owner's colour override is set (ShowLeaderboardGameplayStatsPanel). Named
+        /// "(Clone)" like the stats labels, so the panel's reopen sweep removes the previous one.
+        /// </summary>
+        private static void CreateGunColorLegend(Transform parent)
+        {
+            if (parent == null) return;
+
+            GameObject legend = new GameObject("GunColorLegend (Clone)");
+            legend.transform.SetParent(parent, false);
+            legend.layer = parent.gameObject.layer;
+            legend.transform.localPosition = GunColorLegendLocalPosition;
+            legend.transform.localScale = GunColorLegendLocalScale;
+
+            // Left circle at the legend's origin, right circle next to it.
+            CreateGunColorSwatch(legend.transform, "LeftGun", 0f, ChainArrow.GetStatsHandColor(Target.TargetHandType.Left));
+            CreateGunColorSwatch(legend.transform, "RightGun", GunColorLegendCircleRadius * 2f + GunColorLegendGap,
+                ChainArrow.GetStatsHandColor(Target.TargetHandType.Right));
+        }
+
+        private static void CreateGunColorSwatch(Transform parent, string name, float x, Color color)
+        {
+            // Thin light border, drawn behind the fill.
+            GameObject borderGo = new GameObject(name + "Border");
+            borderGo.transform.SetParent(parent, false);
+            borderGo.layer = parent.gameObject.layer;
+            borderGo.transform.localPosition = new Vector3(x, 0f, 0f);
+            borderGo.AddComponent<MeshFilter>().mesh = BuildFilledCircleMesh(GunColorLegendCircleRadius * 1.1f, new Color(0.7f, 0.7f, 0.7f), 32);
+            MeshRenderer borderMr = borderGo.AddComponent<MeshRenderer>();
+            borderMr.material = new Material(Shader.Find("Sprites/Default"));
+            borderMr.material.renderQueue = 3100;
+
+            GameObject go = new GameObject(name);
+            go.transform.SetParent(parent, false);
+            go.layer = parent.gameObject.layer;
+            go.transform.localPosition = new Vector3(x, 0f, 0f);
+            go.AddComponent<MeshFilter>().mesh = BuildFilledCircleMesh(GunColorLegendCircleRadius, new Color(color.r, color.g, color.b, 1f), 32);
+            MeshRenderer mr = go.AddComponent<MeshRenderer>();
+            mr.material = new Material(Shader.Find("Sprites/Default"));
+            mr.material.renderQueue = 3101;
         }
     }
 }
