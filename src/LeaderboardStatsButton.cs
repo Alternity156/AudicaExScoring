@@ -218,6 +218,7 @@ namespace ExScoringMod
             currentGameplayStatsRunByContext.Remove(LeaderboardStatsContext);
             DestroyTimingGraph(LeaderboardStatsContext);
             DestroyAimGraph(LeaderboardStatsContext);
+            DestroyChainGraph(LeaderboardStatsContext);
             DestroySongTimelineGraph(LeaderboardStatsContext);
             DestroyGradeVisual(LeaderboardStatsContext);
         }

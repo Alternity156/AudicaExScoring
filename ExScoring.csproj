@@ -212,6 +212,7 @@
     <Compile Include="src\AvatarPreview.cs" />
     <Compile Include="src\Badges.cs" />
     <Compile Include="src\ChainArrow.cs" />
+    <Compile Include="src\ChainGraph.cs" />
     <Compile Include="src\ChainSustain.cs" />
     <Compile Include="src\AddPlaylistButton.cs" />
     <Compile Include="src\AlbumArt.cs" />

@@ -810,6 +810,9 @@ namespace ExScoringMod
 
                 if (saved.behavior == Target.TargetBehavior.Chain)
                 {
+                    // Every chain node's own tracing aim (the chain graph plots it per node).
+                    if (saved.aim.HasValue) cue.aim = saved.aim.Value;
+
                     cue.isChainTail = saved.isChainTail ?? false;
                     if (cue.isChainTail && TryGetChainAverage(chainAverages, i, saved, out float chainAverage))
                     {

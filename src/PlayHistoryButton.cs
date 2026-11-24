@@ -244,6 +244,7 @@ namespace ExScoringMod
             currentGameplayStatsRunByContext.Remove(HistoryStatsContext);
             DestroyTimingGraph(HistoryStatsContext);
             DestroyAimGraph(HistoryStatsContext);
+            DestroyChainGraph(HistoryStatsContext);
             DestroySongTimelineGraph(HistoryStatsContext);
             DestroyGradeVisual(HistoryStatsContext);
         }

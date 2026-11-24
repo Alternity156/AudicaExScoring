@@ -260,6 +260,9 @@ namespace ExScoringMod
             GameObject aimGraph = CreateAimGraph(context, parent, cuesToShow);
             ApplyStatsPanelScaleAndOffset(aimGraph, scaleMultiplier, yOffset);
 
+            GameObject chainGraph = CreateChainGraph(context, parent, cuesToShow);
+            ApplyStatsPanelScaleAndOffset(chainGraph, scaleMultiplier, yOffset);
+
             GameObject songTimelineGraph = CreateSongTimelineGraph(context, parent, cuesToShow);
             ApplyStatsPanelScaleAndOffset(songTimelineGraph, scaleMultiplier, yOffset);
 
