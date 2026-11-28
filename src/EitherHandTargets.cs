@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Reflection;
 using System.Text;
 using Harmony;
+using UnhollowerBaseLib;
 using UnityEngine;
 
 namespace ExScoringMod
@@ -26,6 +27,10 @@ namespace ExScoringMod
     ///  - Bug 3: the chain-break particles use the left pool only for handType 2, so Either always
     ///    gets the right-hand colour. Fix: during the same call, when the owner is the left gun,
     ///    swap ParticlePoolManager's left/right failure pools.
+    ///  - Bug 4: CueDartManager only makes cue darts for hands 1 and 2, so Either cues never get
+    ///    one. Fix: a CueDartManager.Update postfix runs the same CheckToCreate for Either as a
+    ///    third hand (its own pool of 10 darts and its own cue index), so an Either dart starts
+    ///    from the previous Either cue.
     ///
     /// Gun.Fire and Target.OnHit are NOT patched here (see ChainSustain.cs). The log works out
     /// each shot's result from what it can see around them instead:
@@ -720,6 +725,199 @@ namespace ExScoringMod
                 if (a.targetPtr == c.targetPtr && a.result) { inAim = true; break; }
             if (!inAim) return "in the window and valid, but the gun's aim didn't find it";
             return "!! in the window, valid and in aim, but not hit (unexpected)";
+        }
+
+        // ══════════════════════════════════════════════════════════════════
+        //  Fix 4: cue darts for Either cues, as a third hand
+        // ══════════════════════════════════════════════════════════════════
+        //
+        // Native (Ghidra 2026-11-27): CueDartManager.Update calls CheckToCreate(Left) and
+        // CheckToCreate(Right) unless the special game mode is 4. CheckToCreate and ClaimDart only
+        // know hands 1 and 2, so an Either cue never gets a dart. This runs the same
+        // CheckToCreate for hand 0 in an Update postfix, with its own set: a pool of 10 darts
+        // (ClaimDart cycles (dartIndex + 1) % 10) and its own cueIndex. So an Either dart starts from
+        // the previous Either cue, like a left or right dart starts from the previous cue of its hand.
+        // Init, SetShowing, SetUpColors and CueDart.Update are the game's own; only the scan is copied.
+        //
+        // The pool copies are made from manager.dartPrefab, under the same parent and with the same
+        // local transform as the game's own right-hand dart [0], so they sit where native darts sit.
+        // ResetDarts isn't known yet, so a restart, rewind or practice jump is detected from the song
+        // tick: on a jump, every Either dart is hidden and the scan restarts after the last cue that
+        // is already past.
+
+        private const int EitherDartPoolSize = 10;
+        private const float JumpTicks = 960f;
+
+        private static IntPtr dartManagerPtr = IntPtr.Zero;
+        private static readonly List<CueDart> EitherDarts = new List<CueDart>();
+        private static int eitherDartIndex = -1;
+        private static int eitherCueIndex = -1;
+        private static IntPtr dartCuesPtr = IntPtr.Zero;
+        private static float lastDartTick = float.NaN;
+        private static bool dartPoolFailed;
+
+        private static bool BuildEitherDartPool(CueDartManager manager)
+        {
+            EitherDarts.Clear();
+            eitherDartIndex = -1;
+
+            CueDart prefab = manager.dartPrefab;
+            if (prefab == null) { DebugLog.Log(Tag + "cue darts: no dartPrefab, Either darts off"); return false; }
+
+            // Where the game's own darts live.
+            Transform parent = manager.transform;
+            Transform reference = null;
+            CueDartManager.DartSet right = manager.mDartsRight;
+            if (right != null && right.darts != null && right.darts.Length > 0 && right.darts[0] != null)
+            {
+                reference = right.darts[0].transform;
+                parent = reference.parent;
+            }
+
+            for (int i = 0; i < EitherDartPoolSize; i++)
+            {
+                GameObject go = UnityEngine.Object.Instantiate(prefab.gameObject, parent);
+                go.name = "CueDart Either " + i;
+                if (reference != null)
+                {
+                    go.transform.localPosition = reference.localPosition;
+                    go.transform.localRotation = reference.localRotation;
+                    go.transform.localScale = reference.localScale;
+                }
+                CueDart dart = go.GetComponent<CueDart>();
+                if (dart == null) { UnityEngine.Object.Destroy(go); continue; }
+                dart.SetUpColors(Either);
+                dart.SetShowing(false);
+                EitherDarts.Add(dart);
+            }
+
+            DebugLog.Log(Tag + $"cue darts: Either pool of {EitherDarts.Count} made under '{(parent != null ? parent.name : "none")}'");
+            return EitherDarts.Count > 0;
+        }
+
+        private static CueDart ClaimEitherDart()
+        {
+            for (int tries = 0; tries < EitherDarts.Count; tries++)
+            {
+                eitherDartIndex = (eitherDartIndex + 1) % EitherDarts.Count;
+                CueDart d = EitherDarts[eitherDartIndex];
+                if (d != null) return d; // Unity-null: destroyed with its scene
+            }
+            return null;
+        }
+
+        private static void HideEitherDarts()
+        {
+            foreach (CueDart d in EitherDarts)
+            {
+                try { if (d != null) d.SetShowing(false); } catch { }
+            }
+        }
+
+        /// <summary>After a jump: no darts for cues that are already past.</summary>
+        private static void ResyncEitherDarts(Il2CppReferenceArray<SongCues.Cue> cues, float now)
+        {
+            HideEitherDarts();
+            eitherCueIndex = -1;
+            for (int i = 0; i < cues.Length; i++)
+            {
+                SongCues.Cue c = cues[i];
+                if (c == null || c.tick >= now) break;
+                eitherCueIndex = i;
+            }
+        }
+
+        [HarmonyPatch(typeof(CueDartManager), "Update", new Type[0])]
+        private static class CueDartManagerUpdatePatch
+        {
+            private static void Postfix(CueDartManager __instance)
+            {
+                if (__instance == null) return;
+                if (__instance.Pointer != dartManagerPtr) dartPoolFailed = false; // new scene: try again
+                if (dartPoolFailed) return;
+                try { CheckToCreateEither(__instance); }
+                catch (Exception e)
+                {
+                    dartPoolFailed = true; // never spam: off until the next scene
+                    MelonLoader.MelonLogger.Log(Tag + "Either cue darts failed and are off: " + e);
+                }
+            }
+        }
+
+        /// <summary>CueDartManager.CheckToCreate for hand 0 (Either), with the Either set.</summary>
+        private static void CheckToCreateEither(CueDartManager manager)
+        {
+            KataConfig kc = KataConfig.I;
+            if (kc == null || (int)kc.GetSpecialGameMode() == 4) return;
+
+            if (manager.Pointer != dartManagerPtr || EitherDarts.Count == 0 || EitherDarts[0] == null)
+            {
+                dartManagerPtr = manager.Pointer;
+                dartCuesPtr = IntPtr.Zero;
+                if (!BuildEitherDartPool(manager)) { dartPoolFailed = true; return; }
+            }
+
+            AudioDriver audio = AudioDriver.I;
+            if (audio == null) return;
+            float now = audio.GetTick((AudioDriver.TickContext)1);
+
+            Il2CppReferenceArray<SongCues.Cue> cues = manager.GetCues();
+            if (cues == null) return;
+
+            bool newCues = cues.Pointer != dartCuesPtr;
+            bool jumped = !float.IsNaN(lastDartTick) && (now < lastDartTick - 1f || now - lastDartTick > JumpTicks);
+            if (newCues || jumped)
+            {
+                dartCuesPtr = cues.Pointer;
+                ResyncEitherDarts(cues, now);
+                if (jumped && LogOn) DebugLog.Log(Tag + $"cue darts: song jumped {lastDartTick:0} -> {now:0}, Either darts resynced");
+            }
+            lastDartTick = now;
+
+            int length = cues.Length;
+            int prevIndex = eitherCueIndex;
+            for (int i = eitherCueIndex + 1; i < length; i++)
+            {
+                SongCues.Cue cue = cues[i];
+                if (cue == null) { prevIndex = i; continue; }
+
+                float start = cue.tick - manager.GetTicksLookahead(cue);
+                int beh = (int)cue.behavior;
+                if (start <= now && cue.handType == Either && (beh < 5 || beh > 7) && manager.ShouldCreateDart(cue))
+                {
+                    CueDart dart = ClaimEitherDart();
+                    if (dart == null) return;
+
+                    // The last Either cue that got a dart (after a resync, the index can be a cue of
+                    // another hand: then there is none).
+                    SongCues.Cue prevSame = eitherCueIndex >= 0 && eitherCueIndex < length ? cues[eitherCueIndex] : null;
+                    if (prevSame != null && prevSame.handType != Either) prevSame = null;
+
+                    // Same walk as native: back from the cue before this one, skipping cues on the
+                    // same tick and chain nodes / melee / dodge (behavior 5-7), any hand.
+                    SongCues.Cue prevShootable = null;
+                    for (int j = prevIndex; j >= 0; j--)
+                    {
+                        SongCues.Cue p = cues[j];
+                        if (p == null) continue;
+                        int pb = (int)p.behavior;
+                        if (p.tick != cue.tick && (pb < 5 || pb > 7)) { prevShootable = p; break; }
+                    }
+
+                    dart.SetUpColors(Either); // picks up a colour changed since the pool was made
+                    dart.Init(cue, prevSame, prevShootable, manager);
+                    dart.SetShowing(true);
+                    eitherCueIndex = i;
+
+                    if (LogOn)
+                        DebugLog.Log(Tag + $"cue dart for Either cue {cue.index} ({CueName(cue)}, tick {cue.tick}): " +
+                            (dart.mHasPreviousCue ? "from a previous cue" : "from off-screen") +
+                            $" [prev Either {(prevSame != null ? prevSame.index.ToString() : "none")}, prev shootable {(prevShootable != null ? prevShootable.index.ToString() : "none")}]");
+                }
+
+                prevIndex = i;
+                if (start - 1920f > now) break;
+            }
         }
 
         // ══════════════════════════════════════════════════════════════════
