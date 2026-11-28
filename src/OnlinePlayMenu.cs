@@ -13,7 +13,8 @@ namespace ExScoringMod
     ///    Auto-Download Missing Songs, Headshot Effects, Headshot Sounds, Lobby Song Preview,
     ///    Lobby Preview Volume);
     ///  - Build: the Online Play screen on the Main page (OnlinePlayScreen), not reachable from the
-    ///    song list. No settings there (they live only in Options > Multiplayer); just the lobby menu. Not in a lobby: create, join by code, the public lobby
+    ///    song list. Its one setting is Streamer Mode at the top (the same setting as in Options > Multiplayer, for quick access);
+    ///    the others live only in Options > Multiplayer. Not in a lobby: create, join by code, the public lobby
     ///    list. In a lobby: ready, leave, suggest a song, and for the host the lobby settings,
     ///    song selection, start/abort, kick and make host.
     /// The Main page's Online Play button (OnlinePlayButton) opens that screen.
@@ -178,6 +179,12 @@ namespace ExScoringMod
             }
 
             OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, StatusLine()));
+
+            // Quick access to Streamer Mode (same setting as Options > Multiplayer), before any code shows.
+            OptionsMenuClone.AddRow(OptionsMenuClone.CreateToggle(0, "Streamer Mode",
+                () => Config.StreamerMode,
+                v => { Config.UpdateStreamerMode(v); Redraw(); },
+                "Hides lobby codes on screen (shown as ****) so stream viewers can't see them. Copy Code still copies the real code"));
 
             MpConnectionState state = MpSession.ConnectionState;
             if (state == MpConnectionState.Disconnected)
