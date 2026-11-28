@@ -684,7 +684,7 @@ namespace ExScoringMod
             List<string> output = new List<string>();
             MpLobbyState lobby = MpSession.Lobby;
 
-            output.Add($"<b>Lobby {lobby.code}</b>  {Safe(lobby.name)}");
+            output.Add($"<b>Lobby {OnlinePlayMenu.DisplayCode(lobby.code)}</b>  {Safe(lobby.name)}");
             if (MpSession.ConnectionState == MpConnectionState.Reconnecting)
             {
                 output.Add("<color=#ffaa33>Connection lost, reconnecting...</color>");

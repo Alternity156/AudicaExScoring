@@ -154,7 +154,11 @@ namespace ExScoringMod
                 () => Config.SongChangeSound,
                 v => Config.UpdateSongChangeSound(v),
                 "In a lobby, plays a sound when the host selects a different song");
-            OptionsMenuClone.AddRow(songChangeSound);
+            var streamerMode = OptionsMenuClone.CreateToggle(1, "Streamer Mode",
+                () => Config.StreamerMode,
+                v => { Config.UpdateStreamerMode(v); Redraw(); },
+                "Hides lobby codes on screen (shown as ****) so stream viewers can't see them. Copy Code still copies the real code");
+            OptionsMenuClone.AddRow(songChangeSound, streamerMode);
         }
 
         // ── Online Play (lobby) category ──
@@ -216,13 +220,21 @@ namespace ExScoringMod
                 GameObject codeHeader = OptionsMenuClone.CreateHeader(0, CodeLabelText());
                 codeLabel = codeHeader.GetComponentInChildren<TextMeshPro>(true);
                 OptionsMenuClone.AddRow(codeHeader);
+
+                // Every redraw goes through OptionsMenu.ShowPage, whose prefix (Hooks.cs) clears
+                // shouldShowKeyboard: that let the keyboard hide and stopped its keys reaching the
+                // code. Turn it back on after each redraw while the code is being typed.
+                KeepKeyboardUp();
             }
 
-            OptionsMenuClone.AddRow(OptionsMenuClone.CreateButton(0, "Refresh", () =>
+            var refresh = OptionsMenuClone.CreateButton(0, "Refresh", () =>
             {
                 lastListRequestMs = MpSession.LocalNowMs;
                 MpSession.RefreshLobbyList(list => { if (list == null) SetStatus("Couldn't load the lobby list."); });
-            }, "Reloads the list of public lobbies"));
+            }, "Reloads the list of public lobbies");
+            var paste = OptionsMenuClone.CreateButton(1, "Paste Code", PasteCode,
+                "Joins the lobby whose 4-character code is on the clipboard (the code can be inside longer text)");
+            OptionsMenuClone.AddRow(refresh, paste);
 
             MpLobbySummary[] lobbies = MpSession.LastLobbyList;
             int count = lobbies != null ? lobbies.Length : 0;
@@ -241,7 +253,7 @@ namespace ExScoringMod
                                      : "playing");
 
                 var joinButton = OptionsMenuClone.CreateButton(0, Trim(summary.name, 24), () => JoinLobby(code),
-                    $"Join {summary.name} (code {code}): {details}");
+                    $"Join {summary.name} (code {DisplayCode(code)}): {details}");
                 var info = OptionsMenuClone.CreateHeader(1, details);
                 OptionsMenuClone.AddRow(joinButton, info);
             }
@@ -254,7 +266,11 @@ namespace ExScoringMod
             bool isHost = MpSession.IsHost;
             bool inMatch = lobby.phase != "lobby";
 
-            OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0, $"Lobby {lobby.code} - {lobby.name}"));
+            string lobbyCode = lobby.code;
+            var lobbyHeader = OptionsMenuClone.CreateHeader(0, $"Lobby {DisplayCode(lobbyCode)} - {lobby.name}");
+            var copyCode = OptionsMenuClone.CreateButton(1, "Copy Code", () => CopyCode(lobbyCode),
+                "Copies the lobby code to the clipboard, to share with friends");
+            OptionsMenuClone.AddRow(lobbyHeader, copyCode);
             OptionsMenuClone.AddRow(OptionsMenuClone.CreateHeader(0,
                 (inMatch ? "Match in progress - " : "") +
                 (lobby.selectedSong != null ? $"Song: {lobby.selectedSong.DisplayTitle} [{lobby.selectedSong.difficulty}]" : "No song selected yet")));
@@ -411,7 +427,7 @@ namespace ExScoringMod
 
         private static void JoinLobby(string code)
         {
-            SetStatus($"Joining {code}...");
+            SetStatus($"Joining {DisplayCode(code)}...");
             MpSession.JoinLobby(code, error =>
             {
                 SetStatus(error == null ? "" : Describe(error));
@@ -496,8 +512,99 @@ namespace ExScoringMod
         private static string CodeLabelText()
         {
             StringBuilder sb = new StringBuilder("Code: ");
-            for (int i = 0; i < LobbyCodeLength; i++) sb.Append(i < codeText.Length ? codeText[i] : '_');
+            for (int i = 0; i < LobbyCodeLength; i++)
+                sb.Append(i < codeText.Length ? (Config.StreamerMode ? '*' : codeText[i]) : '_');
             return sb.ToString();
+        }
+
+        /// <summary>Shows the keyboard again (if it was hidden) and turns its input routing back on.</summary>
+        private static void KeepKeyboardUp()
+        {
+            if (!SearchKeyboard.IsVisible) SearchKeyboard.ShowGeneric();
+            else ExScoring.shouldShowKeyboard = true;
+        }
+
+        // ── Copy / paste code ──
+
+        /// <summary>A lobby code as shown on screen: "****" while Streamer Mode is on.</summary>
+        public static string DisplayCode(string code)
+        {
+            if (string.IsNullOrEmpty(code)) return code ?? "";
+            return Config.StreamerMode ? new string('*', code.Length) : code;
+        }
+
+        private static void CopyCode(string code)
+        {
+            if (string.IsNullOrEmpty(code)) return;
+            try
+            {
+                GUIUtility.systemCopyBuffer = code;
+                SetStatus("Lobby code copied to the clipboard.");
+            }
+            catch (Exception e)
+            {
+                DebugLog.Log("[OnlinePlayMenu] Copy code failed: " + e.Message);
+                SetStatus("Couldn't copy the lobby code.");
+            }
+        }
+
+        private static void PasteCode()
+        {
+            string clipboard = null;
+            try { clipboard = GUIUtility.systemCopyBuffer; }
+            catch (Exception e) { DebugLog.Log("[OnlinePlayMenu] Paste code failed: " + e.Message); }
+
+            string code = ExtractCode(clipboard);
+            if (code == null)
+            {
+                SetStatus($"The clipboard doesn't hold a {LobbyCodeLength}-character lobby code.");
+                return;
+            }
+
+            if (EnteringCode) CancelCodeEntry();
+            JoinLobby(code);
+        }
+
+        /// <summary>
+        /// Finds a lobby code in the clipboard text: the whole text if it's just the code (spaces,
+        /// dashes and the like ignored), otherwise a 4-character word in it. A word right after
+        /// "code" or "lobby" wins, then one with a digit in it, then the first one. "CODE" and
+        /// "JOIN" themselves are skipped. Null if there's none.
+        /// </summary>
+        private static string ExtractCode(string text)
+        {
+            if (string.IsNullOrWhiteSpace(text)) return null;
+            string upper = text.ToUpperInvariant();
+
+            StringBuilder all = new StringBuilder();
+            foreach (char c in upper) if (char.IsLetterOrDigit(c)) all.Append(c);
+            if (all.Length == LobbyCodeLength) return all.ToString();
+
+            List<string> words = new List<string>();
+            StringBuilder word = new StringBuilder();
+            foreach (char c in upper)
+            {
+                if (char.IsLetterOrDigit(c)) { word.Append(c); continue; }
+                if (word.Length > 0) { words.Add(word.ToString()); word.Length = 0; }
+            }
+            if (word.Length > 0) words.Add(word.ToString());
+
+            string afterKeyword = null, withDigit = null, first = null;
+            for (int i = 0; i < words.Count; i++)
+            {
+                string w = words[i];
+                if (w.Length != LobbyCodeLength || w == "CODE" || w == "JOIN") continue;
+
+                string previous = i > 0 ? words[i - 1] : null;
+                if (afterKeyword == null && (previous == "CODE" || previous == "LOBBY")) afterKeyword = w;
+
+                bool hasDigit = false;
+                foreach (char c in w) if (char.IsDigit(c)) { hasDigit = true; break; }
+                if (withDigit == null && hasDigit) withDigit = w;
+
+                if (first == null) first = w;
+            }
+            return afterKeyword ?? withDigit ?? first;
         }
 
         // ── Helpers ──

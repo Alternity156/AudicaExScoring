@@ -148,6 +148,7 @@ namespace ExScoringMod
         public static float SpectatorVolume; // 0..100 %, of the song preview level
         public static bool LobbySongPreview;
         public static bool SongChangeSound;
+        public static bool StreamerMode; // hides lobby codes on screen (OnlinePlayMenu, LobbyPanel)
         // Lobby song preview volume, 0..10 like Music Level. Below 0 = never set: follows the
         // current Music Level (see GetLobbySongPreviewVolume) until the player moves the slider.
         public static float LobbySongPreviewVolume;
@@ -294,6 +295,7 @@ namespace ExScoringMod
             // default doesn't fit a [min,max,step,default] range).
             MelonPrefs.RegisterFloat(Category, nameof(LobbySongPreviewVolume), -1f, "");
             MelonPrefs.RegisterBool(Category, nameof(SongChangeSound), true, "In an online lobby, plays a sound when the host selects a different song");
+            MelonPrefs.RegisterBool(Category, nameof(StreamerMode), false, "Hides lobby codes on screen (shown as ****) so stream viewers can't see them. Copy Code still copies the real code");
 
             MelonPrefs.RegisterString(Category, nameof(gunTricksHeader), "", "[Header]Gun Tricks");
             MelonPrefs.RegisterBool(Category, nameof(DisableThrowing), false, "Prevents the guns from being thrown");
@@ -413,6 +415,7 @@ namespace ExScoringMod
             SpectatorVolume = Mathf.Clamp(MelonPrefs.GetFloat(Category, nameof(SpectatorVolume)), 0f, 100f);
             LobbySongPreview = MelonPrefs.GetBool(Category, nameof(LobbySongPreview));
             SongChangeSound = MelonPrefs.GetBool(Category, nameof(SongChangeSound));
+            StreamerMode = MelonPrefs.GetBool(Category, nameof(StreamerMode));
             LobbySongPreviewVolume = MelonPrefs.GetFloat(Category, nameof(LobbySongPreviewVolume));
             if (LobbySongPreviewVolume > 10f) LobbySongPreviewVolume = 10f;
 
@@ -529,6 +532,13 @@ namespace ExScoringMod
         {
             MelonPrefs.SetBool(Category, nameof(SongChangeSound), value);
             SongChangeSound = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateStreamerMode(bool value)
+        {
+            MelonPrefs.SetBool(Category, nameof(StreamerMode), value);
+            StreamerMode = value;
             MelonPrefs.SaveConfig();
         }
 
