@@ -71,7 +71,7 @@ namespace ExScoringMod
 
                 MeshRenderer renderer = favoriteIndicator.GetComponent<MeshRenderer>();
                 if (renderer != null)
-                    renderer.material.color = new Color(1f, 1f, 1f, 1f);
+                    renderer.material.color = ExScoring.IndicatorPurple;
 
                 favoriteIndicator.SetActive(false);
             }

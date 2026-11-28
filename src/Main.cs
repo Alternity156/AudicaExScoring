@@ -66,6 +66,9 @@ namespace ExScoringMod
 
         public static Dictionary<string, KataConfig.Difficulty> difficultyButtonMap = new Dictionary<string, KataConfig.Difficulty>();
         public static GameObject difficultyIndicatorSource;
+        /// <summary>Native SelectedIndicator purple (ForceShield 1 / ButtonSelect _Color). Applied to every
+        /// cloned indicator so none can end up white or pick up a stray tint from the source.</summary>
+        public static readonly Color IndicatorPurple = new Color(0.5701f, 0f, 1f, 1f);
         public static bool difficultyUISetup = false;
         public static bool songListUISetup = false;
         public static bool launchPanelUISetup = false;

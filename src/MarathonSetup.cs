@@ -246,7 +246,7 @@ namespace ExScoringMod
                 indicator.transform.localScale = new Vector3(0.675f, 0.75f, 1f);
 
                 var rend = indicator.GetComponent<MeshRenderer>();
-                if (rend != null) rend.material.color = new Color(1f, 1f, 1f, 1f);
+                if (rend != null) rend.material.color = ExScoring.IndicatorPurple;
 
                 indicator.SetActive(get());
             }

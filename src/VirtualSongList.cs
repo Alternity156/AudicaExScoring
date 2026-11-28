@@ -1466,7 +1466,7 @@ namespace ExScoringMod
                 ind.transform.localRotation = Quaternion.identity;
                 ind.transform.localScale = new Vector3(3.625f, 1.5f, 1f); // match song-row indicator
                 var r = ind.GetComponent<MeshRenderer>();
-                if (r != null) { r.material.color = new Color(1f, 1f, 1f, 1f); r.sortingOrder = -1; }
+                if (r != null) { r.material.color = ExScoring.IndicatorPurple; r.sortingOrder = -1; }
                 existing = ind.transform;
             }
             existing.gameObject.SetActive(true);

@@ -199,11 +199,11 @@ namespace ExScoringMod
             indicator.transform.localRotation = Quaternion.identity;
             indicator.transform.localScale = indicatorScale;
 
-            // Same white tint the favorite/marathon indicators use, so it can't inherit a stray colour
-            // from whatever state the source was in when cloned.
+            // Same native purple every indicator uses, so it can't inherit a stray colour from whatever
+            // state the source was in when cloned.
             MeshRenderer renderer = indicator.GetComponent<MeshRenderer>();
             if (renderer != null)
-                renderer.material.color = new Color(1f, 1f, 1f, 1f);
+                renderer.material.color = ExScoring.IndicatorPurple;
 
             // Start hidden; SyncIndicator decides whether it should be lit.
             indicator.SetActive(false);

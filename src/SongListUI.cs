@@ -50,7 +50,10 @@ namespace ExScoringMod
                 // Keep the indicator below the row's Canvas (canvas = 0, indicator = -1)
                 MeshRenderer existingRenderer = existing.GetComponent<MeshRenderer>();
                 if (existingRenderer != null)
+                {
                     existingRenderer.sortingOrder = -1;
+                    existingRenderer.material.color = IndicatorPurple;
+                }
             }
             else
             {
@@ -63,7 +66,10 @@ namespace ExScoringMod
 
                 MeshRenderer renderer = indicator.GetComponent<MeshRenderer>();
                 if (renderer != null)
+                {
                     renderer.sortingOrder = -1; // draw beneath the row Canvas (sortingOrder 0)
+                    renderer.material.color = IndicatorPurple;
+                }
             }
 
             indicator.SetActive(true);
@@ -603,6 +609,10 @@ namespace ExScoringMod
                 clone.transform.localPosition = new Vector3(0f, 0f, -0.005f);
                 clone.transform.localRotation = Quaternion.identity;
                 clone.transform.localScale = new Vector3(0.39f, 0.49f, 1f);
+
+                MeshRenderer cloneRenderer = clone.GetComponent<MeshRenderer>();
+                if (cloneRenderer != null)
+                    cloneRenderer.material.color = IndicatorPurple;
 
                 clone.SetActive(false);
             }
