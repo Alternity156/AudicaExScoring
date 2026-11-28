@@ -105,10 +105,11 @@ namespace ExScoringMod
 
         private string GetSongName(string song)
         {
-            string fileName = song + ".audica";
-            if (PlaylistManager.internalSongList.Any(s => Path.GetFileName(s.zipPath) == fileName))
+            // Dictionary lookup (see PlaylistManager.FindSongByFileName) instead of scanning the
+            // whole library for every playlist entry.
+            SongList.SongData _song = PlaylistManager.FindSongByFileName(song + ".audica");
+            if (_song != null)
             {
-                SongList.SongData _song = PlaylistManager.internalSongList.First(s => Path.GetFileName(s.zipPath) == fileName);
                 SetSongDownloaded(song, true);
                 return _song.title + " - " + _song.author;
             }

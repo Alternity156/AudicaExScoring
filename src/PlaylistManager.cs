@@ -1,4 +1,5 @@
-﻿using System.Collections.Generic;
+﻿using System;
+using System.Collections.Generic;
 using System.IO;
 using MelonLoader;
 using UnityEngine;
@@ -53,16 +54,77 @@ namespace ExScoringMod
 
         public static void PopulatePlaylistsSongNames()
         {
-            internalSongList = new List<SongList.SongData>();
-            for (int i = 0; i < SongList.I.songs.Count; i++)
-            {
-                internalSongList.Add(SongList.I.songs[i]);
-            }
+            RebuildSongIndex();
 
             foreach (Playlist playlist in playlists.Values)
             {
                 playlist.PopulateSongNames();
             }
+        }
+
+        // ── Song lookup by .audica file name ──────────────────────────────────
+        //
+        // Playlists store songs by file name stem. Looking each one up used to scan the whole
+        // library (twice, reading zipPath from Il2Cpp every time), which made song list entry
+        // cost playlistEntries × songs: ~3.9 s for 723 entries × 1985 songs. One pass here builds
+        // a file name → song map, and every lookup after that is a dictionary hit.
+
+        private static Dictionary<string, SongList.SongData> songsByFileName;
+        private static int indexedSongCount = -1;
+
+        /// <summary>
+        /// Snapshot the game's song list and index it by file name. Same snapshot point as the old
+        /// internalSongList copy (every song select entry). When two songs share a file name, the
+        /// first one wins, matching the old First() lookup.
+        /// </summary>
+        private static void RebuildSongIndex()
+        {
+            internalSongList = new List<SongList.SongData>();
+            songsByFileName = new Dictionary<string, SongList.SongData>(StringComparer.Ordinal);
+            indexedSongCount = -1;
+
+            if (SongList.I == null || SongList.I.songs == null) return;
+
+            var songs = SongList.I.songs;
+            int count = songs.Count;
+            for (int i = 0; i < count; i++)
+            {
+                SongList.SongData sd = songs[i];
+                internalSongList.Add(sd);
+                if (sd == null) continue;
+
+                string zipPath = sd.zipPath;
+                if (string.IsNullOrEmpty(zipPath)) continue;
+
+                string fileName = Path.GetFileName(zipPath);
+                if (!songsByFileName.ContainsKey(fileName))
+                    songsByFileName.Add(fileName, sd);
+            }
+            indexedSongCount = count;
+        }
+
+        /// <summary>
+        /// The song whose .audica file is <paramref name="fileName"/>, or null if it isn't in the
+        /// library. On a miss, re-indexes once if the library has changed size since the last
+        /// index (e.g. a song was downloaded since entering the song list).
+        /// </summary>
+        public static SongList.SongData FindSongByFileName(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName)) return null;
+
+            if (songsByFileName == null) RebuildSongIndex();
+
+            if (songsByFileName.TryGetValue(fileName, out SongList.SongData found))
+                return found;
+
+            int liveCount = SongList.I != null && SongList.I.songs != null ? SongList.I.songs.Count : -1;
+            if (liveCount != indexedSongCount)
+            {
+                RebuildSongIndex();
+                if (songsByFileName.TryGetValue(fileName, out found))
+                    return found;
+            }
+            return null;
         }
 
         public static void SavePlaylistData()

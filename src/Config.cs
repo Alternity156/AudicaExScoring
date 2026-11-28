@@ -68,6 +68,7 @@ namespace ExScoringMod
         public static bool OptionsBackToSongList;
         public static bool PracticeModeMinimizeButtonEnabled;
         public static int RandomSongScope; // 0 = Folder Songs, 1 = All Songs
+        public static string StartingSort; // FolderRowManager.SortMode name the song list starts on ("Default" = the game's default)
         public static int MenuMusic; // 0 = Environment, 1..5 = arena 1..5 menu music, 6 = Tutorial, 7 = Random Song
         public static float MenuMusicVolume; // 0..100 %, relative to the game's Music Level
         public static float SongPreviewVolume; // 0..100 %, song list previews, relative to the game's Music Level
@@ -234,6 +235,7 @@ namespace ExScoringMod
             MelonPrefs.RegisterBool(Category, nameof(OptionsBackToSongList), true, "While in the song list's Options menu, the bottom Back button returns to the song list instead of the main menu");
             MelonPrefs.RegisterBool(Category, nameof(PracticeModeMinimizeButtonEnabled), true, "Adds a button in practice mode to minimize its panel");
             MelonPrefs.RegisterInt(Category, nameof(RandomSongScope), 0, "Random Song source: 0 = Folder Songs, 1 = All Songs");
+            MelonPrefs.RegisterString(Category, nameof(StartingSort), "Default", "Song list sort used when the game starts: Default, AToZ, ZToA, MostStars, LeastStars, MostPlayed, LeastPlayed, MostRecent, Artist, Mapper, DateAdded, ExRank (EX scoring only)");
             MelonPrefs.RegisterInt(Category, nameof(MenuMusic), 0, "Menu music: 0 = follows the environment, 1..5 = always that environment's music, 6 = the tutorial song, 7 = a random song from your library");
             MelonPrefs.RegisterFloat(Category, nameof(MenuMusicVolume), 100f, "Menu music volume in %, relative to the Music Level (song previews aren't affected) [0,100,5,100]");
             MelonPrefs.RegisterFloat(Category, nameof(SongPreviewVolume), 100f, "Song list preview volume in %, relative to the Music Level (lobby previews aren't affected) [0,100,5,100]");
@@ -365,6 +367,8 @@ namespace ExScoringMod
             OptionsBackToSongList = MelonPrefs.GetBool(Category, nameof(OptionsBackToSongList));
             PracticeModeMinimizeButtonEnabled = MelonPrefs.GetBool(Category, nameof(PracticeModeMinimizeButtonEnabled));
             RandomSongScope = MelonPrefs.GetInt(Category, nameof(RandomSongScope));
+            StartingSort = MelonPrefs.GetString(Category, nameof(StartingSort));
+            if (string.IsNullOrEmpty(StartingSort)) StartingSort = "Default";
             MenuMusic = ExScoringMod.MenuMusic.Clamp(MelonPrefs.GetInt(Category, nameof(MenuMusic)));
             MenuMusicVolume = Mathf.Clamp(MelonPrefs.GetFloat(Category, nameof(MenuMusicVolume)), 0f, 100f);
             SongPreviewVolume = Mathf.Clamp(MelonPrefs.GetFloat(Category, nameof(SongPreviewVolume)), 0f, 100f);
@@ -718,6 +722,14 @@ namespace ExScoringMod
         {
             MelonPrefs.SetInt(Category, nameof(RandomSongScope), value);
             RandomSongScope = value;
+            MelonPrefs.SaveConfig();
+        }
+
+        public static void UpdateStartingSort(string value)
+        {
+            if (string.IsNullOrEmpty(value)) value = "Default";
+            MelonPrefs.SetString(Category, nameof(StartingSort), value);
+            StartingSort = value;
             MelonPrefs.SaveConfig();
         }
 

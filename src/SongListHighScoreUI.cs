@@ -77,6 +77,23 @@ namespace ExScoringMod
         // cleared with it; updated after each upload (OnRunSubmittedForRanks).
         private static readonly Dictionary<string, OnlineRank> onlineRanks = new Dictionary<string, OnlineRank>();
 
+        /// <summary>
+        /// Bumped whenever onlineRanks changes (cleared, filled by a fetch, updated after an upload),
+        /// so the song list's EX Rank sort (FolderRowManager) knows to rebuild its folders.
+        /// </summary>
+        public static int OnlineRanksVersion { get; private set; }
+
+        /// <summary>The player's global EX rank on one song+difficulty, if the server sent one.</summary>
+        public static bool TryGetGlobalRank(string songId, string difficulty, out int rank)
+        {
+            rank = 0;
+            if (string.IsNullOrEmpty(songId) || string.IsNullOrEmpty(difficulty)) return false;
+            if (!onlineRanks.TryGetValue(songId + "|" + difficulty, out OnlineRank ranks)) return false;
+            if (!ranks.globalRank.HasValue || ranks.globalRank.Value <= 0) return false;
+            rank = ranks.globalRank.Value;
+            return true;
+        }
+
         // API key the current onlineBestScores (or the in-flight fetch) belongs to. null = never
         // fetched, or the last attempt failed and may be retried after OnlineBestRetryDelaySeconds.
         private static string onlineBestFetchedForKey;
@@ -104,6 +121,7 @@ namespace ExScoringMod
                 {
                     onlineBestScores.Clear();
                     onlineRanks.Clear();
+                    OnlineRanksVersion++;
                     onlineBestFetchedForKey = null;
                     onlineBestFetchInFlight = false;
                     onlineBestReady = false;
@@ -124,6 +142,7 @@ namespace ExScoringMod
             onlineBestReady = false;
             onlineBestScores.Clear();
             onlineRanks.Clear();
+            OnlineRanksVersion++;
             int version = ++onlineBestRequestVersion;
 
             if (keyChanged)
@@ -203,6 +222,7 @@ namespace ExScoringMod
 
             onlineBestScores.Clear();
             onlineRanks.Clear();
+            OnlineRanksVersion++;
             for (int i = 0; i < response.bests.Length; i++)
             {
                 MyBestsApiEntry best = response.bests[i];
@@ -235,6 +255,7 @@ namespace ExScoringMod
 
             onlineBestScores.Clear();
             onlineRanks.Clear(); // the run history carries no ranks — the rank labels stay empty
+            OnlineRanksVersion++;
             for (int i = 0; i < response.runs.Length; i++)
             {
                 MyRunsApiEntry run = response.runs[i];
@@ -275,6 +296,7 @@ namespace ExScoringMod
                 globalTotal = best.globalTotal,
                 friendsRank = best.friendsRank
             };
+            OnlineRanksVersion++;
         }
 
         /// <summary>
@@ -302,6 +324,7 @@ namespace ExScoringMod
             if (updated.globalRank.HasValue && (updated.globalTotal ?? 0) < updated.globalRank.Value)
                 updated.globalTotal = updated.globalRank; // first score on this chart: the real total comes with the fetch below
             onlineRanks[key] = updated;
+            OnlineRanksVersion++;
 
             DebugLog.Log($"[ExScoring] Song-list ranks: {key} global rank {updated.globalRank?.ToString() ?? "-"} from the upload, fetching friends rank.");
             RefreshAllVisibleSongRowRanks();
@@ -314,6 +337,7 @@ namespace ExScoringMod
                 if (response.requesterRank == null)
                 {
                     onlineRanks.Remove(key);
+                    OnlineRanksVersion++;
                     DebugLog.Log($"[ExScoring] Song-list ranks: {key} has no friends rank after the upload (hidden player?), labels cleared.");
                 }
                 else
@@ -325,6 +349,7 @@ namespace ExScoringMod
                     }
                     current.friendsRank = response.requesterRank;
                     current.globalTotal = Mathf.Max(response.total, current.globalRank ?? 0);
+                    OnlineRanksVersion++;
                     DebugLog.Log($"[ExScoring] Song-list ranks: {key} friends rank {current.friendsRank}, global {current.globalRank?.ToString() ?? "-"}/{current.globalTotal}.");
                 }
 

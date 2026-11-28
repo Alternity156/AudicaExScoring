@@ -795,6 +795,24 @@ namespace ExScoringMod
                     "Folder Songs: picks from the currently open folder. All Songs: picks from your entire library and jumps to it.");
                 OptionsMenuClone.AddRow(randomSongScopeCycle);
 
+                var sortingHeader = OptionsMenuClone.CreateHeader(0, "Sorting");
+                OptionsMenuClone.AddRow(sortingHeader);
+
+                // Built when the page opens: the stars sorts take the grade wording, and EX Rank is
+                // only listed under EX scoring. A saved EX Rank shows as Default in Audica mode
+                // (that's what the game starts on then); it's only overwritten if this is changed.
+                FolderRowManager.GetStartingSortOptions(out string[] startingSortLabels, out string[] startingSortKeys);
+                var startingSortCycle = OptionsMenuClone.CreateCycle(0, "Starting Sort", startingSortLabels,
+                    () =>
+                    {
+                        int i = Array.IndexOf(startingSortKeys, Config.StartingSort);
+                        return i < 0 ? 0 : i;
+                    },
+                    v => Config.UpdateStartingSort(startingSortKeys[v]),
+                    0,
+                    "The song list sort used when the game starts. EX Rank is only available with EX scoring on.");
+                OptionsMenuClone.AddRow(startingSortCycle);
+
                 var searchKeyboardHeader = OptionsMenuClone.CreateHeader(0, "Search Keyboard");
                 OptionsMenuClone.AddRow(searchKeyboardHeader);
 

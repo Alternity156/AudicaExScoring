@@ -1,8 +1,10 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using MelonLoader;
 using TMPro;
+using UnhollowerBaseLib;
 using UnityEngine;
 
 namespace ExScoringMod
@@ -38,7 +40,9 @@ namespace ExScoringMod
         private static readonly Stack<bool> scrollWrapStack = new Stack<bool>();
 
         // ── Sort mode (drives which folder set BuildRootView produces) ─────────
-        internal enum SortMode { Default, AToZ, ZToA, MostStars, LeastStars, MostPlayed, LeastPlayed, MostRecent }
+        // Artist / Mapper / DateAdded / ExRank are the mod's own sorts: they aren't in SongSelect.Sort,
+        // so they're set from the extra Sort menu buttons (SetCustomSort), not the ChangeSort postfix.
+        internal enum SortMode { Default, AToZ, ZToA, MostStars, LeastStars, MostPlayed, LeastPlayed, MostRecent, Artist, Mapper, DateAdded, ExRank }
         private static SortMode currentSort = SortMode.Default;
 
         // ── Search folder maudica integration ─────────────────────────────────
@@ -70,7 +74,37 @@ namespace ExScoringMod
 
             RequestSortLabelRefresh(); // the game may have just rewritten the sort button's text
 
+            // A custom sort is only left by picking a native sort in the Sort menu. A ChangeSort
+            // made while the menu has been closed for a while (the game refreshing its own sort)
+            // keeps it; the label pass puts the custom sort's name back on the sort button.
+            if (IsCustomSort && !SortMenuRecentlyOpen())
+            {
+                DebugLog.Log($"[FolderRowManager] ChangeSort({gameSort}) with the Sort menu closed: keeping {currentSort}");
+                return;
+            }
+
             if (mode == currentSort) return;
+            ChangeSortMode(mode);
+        }
+
+        /// <summary>
+        /// Switches to one of the mod's own sorts (Artist, Mapper, Date Added, EX Rank) — called
+        /// from their Sort menu buttons and the Starting Sort option. Native sorts go through the
+        /// game (SongSelect.ChangeSort) so its own sort state stays in step. EX Rank only exists
+        /// under EX scoring; asked for in Audica mode, it's ignored.
+        /// </summary>
+        public static void SetCustomSort(SortMode mode)
+        {
+            if (!IsCustomSortMode(mode)) return;
+            if (mode == SortMode.ExRank && !Config.ExType) return;
+
+            RequestSortLabelRefresh();
+            if (mode == currentSort) return;
+            ChangeSortMode(mode);
+        }
+
+        private static void ChangeSortMode(SortMode mode)
+        {
             currentSort = mode;
             pendingGradeReveal = null;
 
@@ -713,6 +747,10 @@ namespace ExScoringMod
                 case SortMode.MostPlayed: return BuildPlaysView(reversed: false);
                 case SortMode.LeastPlayed: return BuildPlaysView(reversed: true);
                 case SortMode.MostRecent: return BuildRecentView();
+                case SortMode.Artist: return BuildNameView(mapper: false);
+                case SortMode.Mapper: return BuildNameView(mapper: true);
+                case SortMode.DateAdded: return BuildDateAddedView();
+                case SortMode.ExRank: return Config.ExType ? BuildRankView() : BuildDefaultRootView();
                 default: return BuildDefaultRootView();
             }
         }
@@ -891,10 +929,37 @@ namespace ExScoringMod
         /// pre-grow. Over-estimates slightly on purpose; if a view ever exceeds it, Tier 1's lazy
         /// growth still covers the difference.
         /// </summary>
+        // Cached EstimateMaxViewSize result. The full-library pass costs ~80 ms (Il2Cpp reads), and
+        // the pool it sizes never shrinks, so it only needs recomputing when the library or folder
+        // set changes size. A slightly stale estimate is harmless: Tier 1's lazy growth covers any
+        // view that outgrows it.
+        private static int cachedMaxViewSize = -1;
+        private static int cachedMaxViewSongCount = -1;
+        private static int cachedMaxViewFolderCount = -1;
+        private static int cachedMaxViewMapCount = -1;
+
         private static int EstimateMaxViewSize()
         {
             if (SongList.I == null || SongList.I.songs == null) return 0;
 
+            int songCount = SongList.I.songs.Count;
+            int folderCount = SongFolderManager.availableFolders?.Count ?? 0;
+            int mapCount = CommunityMapManager.Count;
+            if (cachedMaxViewSize >= 0 &&
+                songCount == cachedMaxViewSongCount &&
+                folderCount == cachedMaxViewFolderCount &&
+                mapCount == cachedMaxViewMapCount)
+                return cachedMaxViewSize;
+
+            cachedMaxViewSize = ComputeMaxViewSize();
+            cachedMaxViewSongCount = songCount;
+            cachedMaxViewFolderCount = folderCount;
+            cachedMaxViewMapCount = mapCount;
+            return cachedMaxViewSize;
+        }
+
+        private static int ComputeMaxViewSize()
+        {
             var counts = new Dictionary<string, int>();
             int favCount = 0;
             for (int i = 0; i < SongList.I.songs.Count; i++)
@@ -939,6 +1004,10 @@ namespace ExScoringMod
                 case SortMode.MostPlayed:
                 case SortMode.LeastPlayed: return GetPlayFolderSongs(folder);
                 case SortMode.MostRecent: return GetRecentFolderSongs(folder);
+                case SortMode.Artist: return GetGroupSongs(BuildNameGroups(mapper: false), folder);
+                case SortMode.Mapper: return GetGroupSongs(BuildNameGroups(mapper: true), folder);
+                case SortMode.DateAdded: return GetGroupSongs(BuildDateAddedGroups(), folder);
+                case SortMode.ExRank: return GetGroupSongs(BuildRankGroups(), folder);
             }
 
             var result = new List<string>();
@@ -1091,6 +1160,22 @@ namespace ExScoringMod
                 return RecentLabel(recentCache.TryGetValue(songID, out int da) ? da : -1);
             }
 
+            if (currentSort == SortMode.Artist || currentSort == SortMode.Mapper ||
+                currentSort == SortMode.DateAdded || currentSort == SortMode.ExRank)
+            {
+                var sd = FindVisibleSong(songID);
+                if (sd == null) return null;
+                switch (currentSort)
+                {
+                    case SortMode.Artist: return NameGroupLabel(sd.artist, false);
+                    case SortMode.Mapper: return NameGroupLabel(sd.author, true);
+                    case SortMode.DateAdded: return DateAddedLabelFor(sd);
+                    default:
+                        if (!ExScoring.OnlineBestScoresSettled) return null; // ranks still loading
+                        return RankLabel(RankFor(songID));
+                }
+            }
+
             if (SongList.I != null && SongList.I.songs != null)
             {
                 for (int i = 0; i < SongList.I.songs.Count; i++)
@@ -1101,6 +1186,886 @@ namespace ExScoringMod
                 }
             }
             return null;
+        }
+
+        // ── Custom sorts: Artist / Mapper / Date Added / EX Rank ───────────────
+        //
+        // The mod's own sorts, on top of the game's eight. They aren't in SongSelect.Sort, so the
+        // game knows nothing about them: four extra buttons are cloned into the Sort menu
+        // (EnsureCustomSortButtons) and set currentSort directly (SetCustomSort). EX Rank only
+        // exists under EX scoring — in Audica mode its button is removed, the menu frame shrinks
+        // back to three extra rows, and an active EX Rank sort falls back to Default.
+        //
+        // Each view is built like the other generated sorts: a text header per non-empty group,
+        // the open group's songs inlined, songs within a group A-Z by title.
+
+        private static readonly string[] CustomSortObjNames = { "Sort_Artist", "Sort_Mapper", "Sort_DateAdded", "Sort_ExRank" };
+        private static readonly string[] CustomSortLabels = { "Artist", "Mapper", "Date Added", "EX Rank" };
+        private static readonly SortMode[] CustomSortModes = { SortMode.Artist, SortMode.Mapper, SortMode.DateAdded, SortMode.ExRank };
+        private const int ExRankButtonIndex = 3;
+
+        // Native button object per native sort mode (SortMenu/<name>/Label holds its wording).
+        private static readonly Dictionary<SortMode, string> NativeSortObjNames = new Dictionary<SortMode, string>
+        {
+            { SortMode.Default, "Sort_Default" },
+            { SortMode.AToZ, "Sort_A-Z" },
+            { SortMode.ZToA, "Sort_Z-A" },
+            { SortMode.MostStars, "Sort_MostStars" },
+            { SortMode.LeastStars, "Sort_LeastStars" },
+            { SortMode.MostPlayed, "Sort_MostPlayed" },
+            { SortMode.LeastPlayed, "Sort_LeastPlayed" },
+            { SortMode.MostRecent, "Sort_MostRecent" },
+        };
+
+        private static SongSelect customSortSongSelect;   // the SongSelect our buttons belong to
+        private static GameObject customSortMenu;         // its SortMenu
+        private static readonly GameObject[] customSortButtons = new GameObject[4];
+
+        // The menu frame, and its native layout (read once, before anything is moved).
+        private static Transform frameGlass, frameBottom, frameLeft, frameRight;
+        private static Vector3 glassPos0, glassScale0, bottomPos0, leftPos0, leftScale0, rightPos0, rightScale0;
+        private static float frameHeight0;      // highlight_top.y - highlight_bottom.y (native ~17.7)
+        private static float buttonStep = 2f;   // vertical distance between buttons (native 2.0)
+        private static int customFrameExtra = -1; // extra rows the frame is currently sized for; -1 = not sized yet
+        private static bool customSortLastEx;
+
+        // A native sort button can only be shot while the menu is open. ChangeSort calls made while
+        // it has been closed for a while (the game refreshing its own sort) don't leave a custom sort.
+        private static int sortMenuLastOpenFrame = -100;
+
+        private static bool startingSortApplied; // once per launch
+
+        private static bool IsCustomSortMode(SortMode m) =>
+            m == SortMode.Artist || m == SortMode.Mapper || m == SortMode.DateAdded || m == SortMode.ExRank;
+
+        private static bool IsCustomSort => IsCustomSortMode(currentSort);
+
+        /// <summary>Display name of a custom sort (button and sort-button label).</summary>
+        private static string CustomSortName(SortMode m)
+        {
+            int i = Array.IndexOf(CustomSortModes, m);
+            return i >= 0 ? CustomSortLabels[i] : m.ToString();
+        }
+
+        private static bool IsCustomSortName(string text)
+        {
+            if (string.IsNullOrEmpty(text)) return false;
+            for (int i = 0; i < CustomSortLabels.Length; i++)
+                if (string.Equals(text, CustomSortLabels[i], StringComparison.OrdinalIgnoreCase)) return true;
+            return false;
+        }
+
+        /// <summary>
+        /// Called from the SongSelect.OnEnable postfix: adds the custom sort buttons (once per Sort
+        /// menu), sizes the frame for the current scoring mode, and applies the Starting Sort the
+        /// first time the song page opens after launch.
+        /// </summary>
+        public static void OnSongSelectEnabled(SongSelect songSelect)
+        {
+            if (songSelect == null) return;
+            customSortSongSelect = songSelect;
+            if (songSelectTransform == null) songSelectTransform = songSelect.transform;
+
+            try
+            {
+                EnsureCustomSortButtons(songSelect);
+                UpdateCustomSortButtons();
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Log($"[FolderRowManager] Custom sort buttons failed: {ex}");
+            }
+
+            RequestSortLabelRefresh();
+            ApplyStartingSortOnce(songSelect);
+        }
+
+        /// <summary>Clones Sort_MostRecent four times under it and stretches the frame to fit.</summary>
+        private static void EnsureCustomSortButtons(SongSelect songSelect)
+        {
+            GameObject menu = songSelect.sortMenu;
+            if (menu == null)
+            {
+                DebugLog.Log("[FolderRowManager] Custom sort buttons: SongSelect.sortMenu is null.");
+                return;
+            }
+
+            Transform menuT = menu.transform;
+
+            if (customSortMenu == menu && customSortButtons[0] != null) return; // already set up
+
+            // Our buttons already on this menu (shouldn't happen: statics live for the whole session) — reuse them.
+            if (menuT.Find(CustomSortObjNames[0]) != null)
+            {
+                for (int i = 0; i < CustomSortObjNames.Length; i++)
+                {
+                    Transform existing = menuT.Find(CustomSortObjNames[i]);
+                    customSortButtons[i] = existing != null ? existing.gameObject : null;
+                }
+                customSortMenu = menu;
+                customFrameExtra = -1;
+                return;
+            }
+
+            Transform template = menuT.Find("Sort_MostRecent");
+            if (template == null)
+            {
+                DebugLog.Log("[FolderRowManager] Custom sort buttons: Sort_MostRecent not found.");
+                return;
+            }
+
+            // Spacing between buttons, from the native layout (Sort_Default 1.4, Sort_A-Z -0.6).
+            Transform first = menuT.Find("Sort_Default");
+            Transform second = menuT.Find("Sort_A-Z");
+            if (first != null && second != null)
+            {
+                float step = first.localPosition.y - second.localPosition.y;
+                if (step > 0.01f) buttonStep = step;
+            }
+
+            // Frame pieces and their native layout.
+            frameGlass = menuT.Find("Glass");
+            Transform frameTop = menuT.Find("highlights/highlight_top");
+            frameBottom = menuT.Find("highlights/highlight_bottom");
+            frameLeft = menuT.Find("highlights/highlight_left");
+            frameRight = menuT.Find("highlights/highlight_right");
+
+            if (frameGlass != null) { glassPos0 = frameGlass.localPosition; glassScale0 = frameGlass.localScale; }
+            if (frameBottom != null) bottomPos0 = frameBottom.localPosition;
+            if (frameLeft != null) { leftPos0 = frameLeft.localPosition; leftScale0 = frameLeft.localScale; }
+            if (frameRight != null) { rightPos0 = frameRight.localPosition; rightScale0 = frameRight.localScale; }
+
+            frameHeight0 = (frameTop != null && frameBottom != null)
+                ? frameTop.localPosition.y - frameBottom.localPosition.y
+                : (frameGlass != null ? glassScale0.y : 0f);
+
+            for (int i = 0; i < CustomSortObjNames.Length; i++)
+                customSortButtons[i] = CreateCustomSortButton(template, menuT, i);
+
+            customSortMenu = menu;
+            customFrameExtra = -1;
+
+            AddCustomButtonsToLayout(menu, template);
+
+            DebugLog.Log($"[FolderRowManager] Custom sort buttons added (step {buttonStep:0.###}, frame height {frameHeight0:0.###}).");
+        }
+
+        private static GameObject CreateCustomSortButton(Transform template, Transform menuT, int index)
+        {
+            GameObject clone = GameObject.Instantiate(template.gameObject, menuT);
+            clone.name = CustomSortObjNames[index];
+
+            Transform t = clone.transform;
+            Vector3 pos = template.localPosition;
+            pos.y -= buttonStep * (index + 1);
+            t.localPosition = pos;
+            t.localRotation = template.localRotation;
+            t.localScale = template.localScale;
+
+            // Label: drop the Localizer (it would put "Most Recent" back), then our wording.
+            Transform label = t.Find("Label");
+            if (label != null)
+            {
+                var localizers = label.GetComponents<Localizer>();
+                if (localizers != null)
+                    foreach (Localizer loc in localizers)
+                        if (loc != null) GameObject.DestroyImmediate(loc);
+
+                TMP_Text text = label.GetComponent<TMP_Text>();
+                if (text != null) text.text = CustomSortLabels[index];
+            }
+
+            // Hover / selected visuals copied in whatever state the template was in.
+            SetChildActive(t, "Highlight", false);
+            SetChildActive(t, "SelectedIndicator", false);
+            SetChildActive(t, "FakeBloom", false);
+
+            // The cloned GunButton still calls SongSelect.SetSort_MostRecent: replace the event.
+            GunButton gb = clone.GetComponentInChildren<GunButton>(true);
+            if (gb != null)
+            {
+                SortMode mode = CustomSortModes[index];
+                gb.onHitEvent = new UnityEngine.Events.UnityEvent();
+                gb.onHitEvent.AddListener(new Action(() => OnCustomSortButtonShot(mode)));
+            }
+            else
+            {
+                DebugLog.Log($"[FolderRowManager] Custom sort button {clone.name}: no GunButton found.");
+            }
+
+            return clone;
+        }
+
+        private static void SetChildActive(Transform parent, string name, bool active)
+        {
+            Transform child = parent.Find(name);
+            if (child != null && child.gameObject.activeSelf != active) child.gameObject.SetActive(active);
+        }
+
+        /// <summary>
+        /// Appends our buttons to the menu's ShellButtonLayout.buttons. Arrange() (the only method,
+        /// no callers in game code) places buttons[i] at buttons[0] - up * i * spacingY, which is
+        /// where ours already are — this only keeps the layout consistent if it ever runs. Skipped
+        /// unless the native list ends with Sort_MostRecent (ours continue from it).
+        /// </summary>
+        private static void AddCustomButtonsToLayout(GameObject menu, Transform template)
+        {
+            try
+            {
+                ShellButtonLayout layout = menu.GetComponent<ShellButtonLayout>();
+                if (layout == null) return;
+
+                var old = layout.buttons;
+                if (old == null || old.Length == 0) return;
+                int n = old.Length;
+                if (old[n - 1] == null || old[n - 1].name != template.name) return;
+
+                var arr = new Il2CppReferenceArray<Transform>(n + customSortButtons.Length);
+                for (int i = 0; i < n; i++) arr[i] = old[i];
+                for (int i = 0; i < customSortButtons.Length; i++)
+                    arr[n + i] = customSortButtons[i] != null ? customSortButtons[i].transform : null;
+                layout.buttons = arr;
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Log($"[FolderRowManager] ShellButtonLayout update skipped: {ex.Message}");
+            }
+        }
+
+        /// <summary>Shows EX Rank only under EX scoring and sizes the frame for the visible rows.</summary>
+        private static void UpdateCustomSortButtons()
+        {
+            bool ex = Config.ExType;
+            customSortLastEx = ex;
+
+            if (customSortButtons[0] == null) return; // not set up (or the menu was destroyed)
+
+            GameObject rankButton = customSortButtons[ExRankButtonIndex];
+            if (rankButton != null && rankButton.activeSelf != ex) rankButton.SetActive(ex);
+
+            int extra = ex ? customSortButtons.Length : customSortButtons.Length - 1;
+            if (extra == customFrameExtra) return;
+
+            SizeSortMenuFrame(extra);
+            customFrameExtra = extra;
+        }
+
+        /// <summary>Stretches the glass and the frame lines down by <paramref name="extra"/> button rows.</summary>
+        private static void SizeSortMenuFrame(int extra)
+        {
+            float grow = buttonStep * extra;
+
+            if (frameGlass != null)
+            {
+                frameGlass.localPosition = new Vector3(glassPos0.x, glassPos0.y - grow * 0.5f, glassPos0.z);
+                frameGlass.localScale = new Vector3(glassScale0.x, glassScale0.y + grow, glassScale0.z);
+            }
+
+            if (frameBottom != null)
+                frameBottom.localPosition = new Vector3(bottomPos0.x, bottomPos0.y - grow, bottomPos0.z);
+
+            // The side lines are rotated 90 degrees: their length is localScale.x.
+            float ratio = frameHeight0 > 0.01f ? (frameHeight0 + grow) / frameHeight0 : 1f;
+            if (frameLeft != null)
+            {
+                frameLeft.localPosition = new Vector3(leftPos0.x, leftPos0.y - grow * 0.5f, leftPos0.z);
+                frameLeft.localScale = new Vector3(leftScale0.x * ratio, leftScale0.y, leftScale0.z);
+            }
+            if (frameRight != null)
+            {
+                frameRight.localPosition = new Vector3(rightPos0.x, rightPos0.y - grow * 0.5f, rightPos0.z);
+                frameRight.localScale = new Vector3(rightScale0.x * ratio, rightScale0.y, rightScale0.z);
+            }
+        }
+
+        private static void OnCustomSortButtonShot(SortMode mode)
+        {
+            DebugLog.Log($"[FolderRowManager] Custom sort button shot: {mode}");
+            CloseSortMenu(); // native sort buttons close the menu too
+            SetCustomSort(mode);
+        }
+
+        /// <summary>True when a native sort pick can have come from the Sort menu (open now or a moment ago).</summary>
+        private static bool SortMenuRecentlyOpen()
+        {
+            GameObject menu = CurrentSortMenu();
+            if (menu == null) return true; // can't tell: behave as before (every ChangeSort counts)
+            if (menu.activeInHierarchy) return true;
+            return Time.frameCount - sortMenuLastOpenFrame <= 3;
+        }
+
+        /// <summary>The song page's SortMenu (ours, or the SongSelect's when our buttons couldn't be added).</summary>
+        private static GameObject CurrentSortMenu()
+        {
+            if (customSortMenu != null) return customSortMenu;
+            if (customSortSongSelect == null) return null;
+            try { return customSortSongSelect.sortMenu; } catch { return null; }
+        }
+
+        /// <summary>
+        /// Per frame, from TickSortLabels: tracks the menu, reacts to the scoring mode changing
+        /// (EX Rank button, frame size, EX Rank falling back to Default), keeps the sort button's
+        /// label on the custom sort's name, and re-applies the EX Rank view when ranks arrive.
+        /// </summary>
+        private static void TickCustomSorts()
+        {
+            GameObject menu = CurrentSortMenu();
+            if (menu != null && menu.activeInHierarchy)
+                sortMenuLastOpenFrame = Time.frameCount;
+
+            bool ex = Config.ExType;
+
+            // Audica scoring: there is no EX Rank sort (also covers a switch made off the song page).
+            if (!ex && currentSort == SortMode.ExRank)
+                FallBackToDefaultSort();
+
+            if (customSortSongSelect == null || !VirtualSongList.IsActive) return;
+
+            if (ex != customSortLastEx)
+            {
+                try { UpdateCustomSortButtons(); }
+                catch (Exception e) { DebugLog.Log($"[FolderRowManager] Custom sort buttons update failed: {e.Message}"); }
+            }
+
+            UpdateSortButtonLabel();
+            TickRankView();
+        }
+
+        /// <summary>
+        /// EX Rank while Audica scoring is on: back to Default without leaving the view the player is
+        /// in (they may be switching the scoring mode from the song list's Options).
+        /// </summary>
+        private static void FallBackToDefaultSort()
+        {
+            DebugLog.Log("[FolderRowManager] EX Rank sort without EX scoring -> Default");
+            currentSort = SortMode.Default;
+            pendingGradeReveal = null;
+            SongFolderManager.openFolder = null;
+            try { SongSelect.sListSort = SongSelect.Sort.Default; } catch { }
+            RequestSortLabelRefresh();
+
+            if (VirtualSongList.IsActive && level == NavLevel.Root)
+                Apply();
+        }
+
+        /// <summary>
+        /// The sort button reads the custom sort's name while one is active. Back on a native sort,
+        /// if the game didn't rewrite it (it may skip that when its own sort didn't change), the
+        /// native button's wording is put back.
+        /// </summary>
+        private static void UpdateSortButtonLabel()
+        {
+            TMP_Text label = null;
+            try { label = customSortSongSelect.sortLabel; } catch { }
+            if (label == null) return;
+
+            string current = label.text ?? "";
+            if (IsCustomSort)
+            {
+                string wanted = CustomSortName(currentSort);
+                if (current != wanted) label.text = wanted;
+                return;
+            }
+
+            if (!IsCustomSortName(current)) return;
+
+            string native = NativeSortLabelText(currentSort);
+            if (!string.IsNullOrEmpty(native) && native != current)
+            {
+                label.text = native;
+                RequestSortLabelRefresh(); // stars/grade wording
+            }
+        }
+
+        private static string NativeSortLabelText(SortMode mode)
+        {
+            GameObject menu = CurrentSortMenu();
+            if (menu == null || !NativeSortObjNames.TryGetValue(mode, out string obj)) return null;
+            Transform label = menu.transform.Find(obj + "/Label");
+            if (label == null) return null;
+            TMP_Text text = label.GetComponent<TMP_Text>();
+            return text != null ? text.text : null;
+        }
+
+        // ── Starting Sort (Options > Menu) ─────────────────────────────────────
+
+        // Keys are SortMode names (saved in Config.StartingSort); labels are what the option shows.
+        private static readonly SortMode[] StartingSortModes =
+        {
+            SortMode.Default, SortMode.AToZ, SortMode.ZToA, SortMode.MostStars, SortMode.LeastStars,
+            SortMode.MostPlayed, SortMode.LeastPlayed, SortMode.MostRecent,
+            SortMode.Artist, SortMode.Mapper, SortMode.DateAdded, SortMode.ExRank
+        };
+
+        /// <summary>
+        /// Options for the Starting Sort cycle. The stars sorts use the grade wording under EX
+        /// scoring, like the Sort menu, and EX Rank is only offered under EX scoring.
+        /// </summary>
+        public static void GetStartingSortOptions(out string[] labels, out string[] keys)
+        {
+            bool ex = Config.ExType;
+            var l = new List<string>();
+            var k = new List<string>();
+            foreach (SortMode m in StartingSortModes)
+            {
+                if (m == SortMode.ExRank && !ex) continue;
+                string label;
+                switch (m)
+                {
+                    case SortMode.Default: label = "Default"; break;
+                    case SortMode.AToZ: label = "A-Z"; break;
+                    case SortMode.ZToA: label = "Z-A"; break;
+                    case SortMode.MostStars: label = ex ? HighGradeText : "Most Stars"; break;
+                    case SortMode.LeastStars: label = ex ? LowGradeText : "Least Stars"; break;
+                    case SortMode.MostPlayed: label = "Most Played"; break;
+                    case SortMode.LeastPlayed: label = "Least Played"; break;
+                    case SortMode.MostRecent: label = "Most Recent"; break;
+                    default: label = CustomSortName(m); break;
+                }
+                l.Add(label);
+                k.Add(m.ToString());
+            }
+            labels = l.ToArray();
+            keys = k.ToArray();
+        }
+
+        private static bool TryGetGameSort(SortMode mode, out SongSelect.Sort sort)
+        {
+            switch (mode)
+            {
+                case SortMode.Default: sort = SongSelect.Sort.Default; return true;
+                case SortMode.AToZ: sort = SongSelect.Sort.AToZ; return true;
+                case SortMode.ZToA: sort = SongSelect.Sort.ZToA; return true;
+                case SortMode.MostStars: sort = SongSelect.Sort.MostStars; return true;
+                case SortMode.LeastStars: sort = SongSelect.Sort.LeastStars; return true;
+                case SortMode.MostPlayed: sort = SongSelect.Sort.MostPlayed; return true;
+                case SortMode.LeastPlayed: sort = SongSelect.Sort.LeastPlayed; return true;
+                case SortMode.MostRecent: sort = SongSelect.Sort.MostRecent; return true;
+                default: sort = SongSelect.Sort.Default; return false;
+            }
+        }
+
+        /// <summary>
+        /// First song page entry after launch: switch to the saved Starting Sort. Native sorts go
+        /// through SongSelect.ChangeSort (the same path as the Sort menu), custom ones through
+        /// SetCustomSort. EX Rank in Audica mode starts on Default; the saved choice is kept.
+        /// </summary>
+        private static void ApplyStartingSortOnce(SongSelect songSelect)
+        {
+            if (startingSortApplied) return;
+            startingSortApplied = true;
+
+            string key = Config.StartingSort;
+            if (string.IsNullOrEmpty(key)) return;
+
+            SortMode mode;
+            try { mode = (SortMode)Enum.Parse(typeof(SortMode), key, true); }
+            catch
+            {
+                DebugLog.Log($"[FolderRowManager] Starting Sort '{key}' not recognised, using Default.");
+                return;
+            }
+            if (mode == SortMode.Default) return;
+
+            DebugLog.Log($"[FolderRowManager] Starting Sort: {mode}");
+
+            if (IsCustomSortMode(mode))
+            {
+                if (mode == SortMode.ExRank && !Config.ExType)
+                {
+                    DebugLog.Log("[FolderRowManager] Starting Sort is EX Rank but EX scoring is off: starting on Default.");
+                    return;
+                }
+                SetCustomSort(mode);
+                return;
+            }
+
+            if (!TryGetGameSort(mode, out SongSelect.Sort gameSort)) return;
+            try
+            {
+                songSelect.ChangeSort(gameSort);
+            }
+            catch (Exception ex)
+            {
+                DebugLog.Log($"[FolderRowManager] Starting Sort ChangeSort failed ({ex.Message}), applying it to the folder view only.");
+                SetSort(gameSort);
+            }
+        }
+
+        // ── Shared helpers for the custom views ────────────────────────────────
+
+        /// <summary>The visible (not hidden) SongData for an id, or null.</summary>
+        private static SongList.SongData FindVisibleSong(string songID)
+        {
+            if (string.IsNullOrEmpty(songID) || SongList.I == null || SongList.I.songs == null) return null;
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd != null && !sd.hidden && sd.songID == songID) return sd;
+            }
+            return null;
+        }
+
+        /// <summary>(title, id) pairs to ids, sorted by title (case-insensitive).</summary>
+        private static List<string> IdsByTitle(List<KeyValuePair<string, string>> entries)
+        {
+            entries.Sort((a, b) => string.Compare(a.Key, b.Key, StringComparison.OrdinalIgnoreCase));
+            var ids = new List<string>(entries.Count);
+            foreach (var e in entries) ids.Add(e.Value);
+            return ids;
+        }
+
+        private static List<string> GetGroupSongs(List<KeyValuePair<string, List<string>>> groups, string folder)
+        {
+            foreach (var kv in groups)
+                if (kv.Key == folder) return kv.Value;
+            return new List<string>();
+        }
+
+        /// <summary>A header per group (color from <paramref name="colorFor"/>, or the default grey), open group's songs inlined.</summary>
+        private static List<ViewRow> BuildGroupView(List<KeyValuePair<string, List<string>>> groups, string what,
+                                                     Func<string, Color?> colorFor = null)
+        {
+            var rows = new List<ViewRow>();
+            string open = SongFolderManager.openFolder;
+
+            foreach (var kv in groups)
+            {
+                rows.Add(ViewRow.Header(kv.Key, kv.Value.Count, null, colorFor != null ? colorFor(kv.Key) : null));
+                if (kv.Key == open)
+                    foreach (string id in kv.Value)
+                        rows.Add(ViewRow.SongRow(id));
+            }
+
+            DebugLog.Log($"[FolderRowManager] Build{what}View: {groups.Count} folder(s), open={open ?? "none"}");
+            return rows;
+        }
+
+        // ── Artist / Mapper view ───────────────────────────────────────────────
+        //
+        // One folder per exact name, case-insensitive and trimmed ("A & B" is its own folder).
+        // A name written with different casing across songs shows the spelling most songs use.
+        // Folders A-Z, "Unknown Artist" / "Unknown Mapper" (no name) last.
+        private const string UnknownArtistLabel = "Unknown Artist";
+        private const string UnknownMapperLabel = "Unknown Mapper";
+
+        // Last grouping's name key -> folder label, per field. Lets CurrentFolderFor find a song's
+        // folder without regrouping; rebuilt with every grouping, dropped with the sort caches.
+        private static Dictionary<string, string> artistLabelCache;
+        private static Dictionary<string, string> mapperLabelCache;
+
+        private static string NameKey(string name) => (name ?? "").Trim().ToLowerInvariant();
+
+        private static List<KeyValuePair<string, List<string>>> BuildNameGroups(bool mapper)
+        {
+            var byKey = new Dictionary<string, List<KeyValuePair<string, string>>>(); // name key -> (title, id)
+            var spellings = new Dictionary<string, Dictionary<string, int>>();          // name key -> spelling -> songs
+
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd == null || sd.hidden) continue;
+
+                string name = ((mapper ? sd.author : sd.artist) ?? "").Trim();
+                string key = name.ToLowerInvariant();
+
+                if (!byKey.TryGetValue(key, out var list))
+                {
+                    list = new List<KeyValuePair<string, string>>();
+                    byKey[key] = list;
+                    spellings[key] = new Dictionary<string, int>();
+                }
+                list.Add(new KeyValuePair<string, string>(sd.title ?? "", sd.songID));
+
+                var sp = spellings[key];
+                sp[name] = sp.TryGetValue(name, out int c) ? c + 1 : 1;
+            }
+
+            string unknown = mapper ? UnknownMapperLabel : UnknownArtistLabel;
+            var labels = new Dictionary<string, string>(); // name key -> label
+            foreach (var kv in spellings)
+            {
+                if (kv.Key.Length == 0) { labels[kv.Key] = unknown; continue; }
+
+                string best = null;
+                int bestCount = -1;
+                foreach (var s in kv.Value)
+                {
+                    if (s.Value > bestCount || (s.Value == bestCount && string.CompareOrdinal(s.Key, best) < 0))
+                    {
+                        best = s.Key;
+                        bestCount = s.Value;
+                    }
+                }
+                labels[kv.Key] = best;
+            }
+
+            var keys = new List<string>(byKey.Keys);
+            keys.Sort((a, b) =>
+            {
+                if (a.Length == 0 || b.Length == 0) return (a.Length == 0 ? 1 : 0) - (b.Length == 0 ? 1 : 0); // unknown last
+                int c = string.Compare(labels[a], labels[b], StringComparison.OrdinalIgnoreCase);
+                return c != 0 ? c : string.CompareOrdinal(labels[a], labels[b]);
+            });
+
+            var result = new List<KeyValuePair<string, List<string>>>();
+            foreach (string k in keys)
+                result.Add(new KeyValuePair<string, List<string>>(labels[k], IdsByTitle(byKey[k])));
+
+            if (mapper) mapperLabelCache = labels; else artistLabelCache = labels;
+            return result;
+        }
+
+        private static List<ViewRow> BuildNameView(bool mapper)
+            => BuildGroupView(BuildNameGroups(mapper), mapper ? "Mapper" : "Artist");
+
+        /// <summary>The folder label a name goes in (same as the grouping's).</summary>
+        private static string NameGroupLabel(string name, bool mapper)
+        {
+            var cache = mapper ? mapperLabelCache : artistLabelCache;
+            if (cache == null)
+            {
+                BuildNameGroups(mapper);
+                cache = mapper ? mapperLabelCache : artistLabelCache;
+            }
+            return cache != null && cache.TryGetValue(NameKey(name), out string label) ? label : null;
+        }
+
+        // ── Date Added view ────────────────────────────────────────────────────
+        //
+        // Buckets by when the song's .audica file arrived: the later of its creation and last-write
+        // times (a copied file gets a new creation time but keeps its write time; one updated in
+        // place gets a new write time). Same graduated labels as Most Recent (Today, Yesterday,
+        // N days ago, months, years), newest first. Songs whose file can't be found go in "Unknown
+        // Date". The official songs keep their usual "Audica" / "Audica DLC" folders, at the end.
+        private const string UnknownDateLabel = "Unknown Date";
+
+        // songID|zipPath -> file date (local ticks), 0 = file not found. Kept for the session: file
+        // dates don't change under a loaded song, and a new file means a new zipPath key.
+        private static readonly Dictionary<string, long> addedTicksCache = new Dictionary<string, long>();
+
+        private static bool IsOfficialFolder(string folder) =>
+            folder == SongFolderManager.FolderAudica || folder == SongFolderManager.FolderAudicaDLC;
+
+        private static long AddedTicks(SongList.SongData sd)
+        {
+            string key = sd.songID + "|" + (sd.zipPath ?? "");
+            if (addedTicksCache.TryGetValue(key, out long ticks)) return ticks;
+
+            ticks = 0;
+            string file = ResolveSongFilePath(sd);
+            if (file != null)
+            {
+                try
+                {
+                    DateTime created = File.GetCreationTime(file);
+                    DateTime written = File.GetLastWriteTime(file);
+                    ticks = (created > written ? created : written).Ticks;
+                }
+                catch (Exception ex)
+                {
+                    DebugLog.Log($"[FolderRowManager] Date Added: couldn't read {file}: {ex.Message}");
+                }
+            }
+
+            addedTicksCache[key] = ticks;
+            return ticks;
+        }
+
+        /// <summary>The .audica file a song was loaded from, or null (same lookup as the Delete button).</summary>
+        private static string ResolveSongFilePath(SongList.SongData song)
+        {
+            string zipPath = song.zipPath;
+            if (string.IsNullOrEmpty(zipPath)) return null;
+
+            var candidates = new List<string>();
+            try
+            {
+                if (Path.IsPathRooted(zipPath))
+                    candidates.Add(zipPath);
+                else
+                {
+                    if (!string.IsNullOrEmpty(song.searchRoot)) candidates.Add(Path.Combine(song.searchRoot, zipPath));
+                    candidates.Add(Path.Combine(Application.dataPath, zipPath));
+                }
+
+                string fileName = Path.GetFileName(zipPath);
+                if (!string.IsNullOrEmpty(ExScoring.mainSongDirectory)) candidates.Add(Path.Combine(ExScoring.mainSongDirectory, fileName));
+                if (!string.IsNullOrEmpty(ExScoring.downloadsDirectory)) candidates.Add(Path.Combine(ExScoring.downloadsDirectory, fileName));
+            }
+            catch { return null; } // invalid characters in the path
+
+            foreach (string candidate in candidates)
+            {
+                try
+                {
+                    string full = Path.GetFullPath(candidate);
+                    if (File.Exists(full)) return full;
+                }
+                catch { }
+            }
+            return null;
+        }
+
+        /// <summary>Whole days since the file date (clamped to 0), or -1 when unknown.</summary>
+        private static int AddedDaysAgo(SongList.SongData sd)
+        {
+            long ticks = AddedTicks(sd);
+            if (ticks <= 0) return -1;
+            int d = (DateTime.Now.Date - new DateTime(ticks).Date).Days;
+            return d < 0 ? 0 : d;
+        }
+
+        private static string DateAddedLabelFor(SongList.SongData sd)
+        {
+            string home = SongFolderManager.GetFolder(sd.songID);
+            if (IsOfficialFolder(home)) return home;
+
+            int days = AddedDaysAgo(sd);
+            return days < 0 ? UnknownDateLabel : RecentLabel(days);
+        }
+
+        private static List<KeyValuePair<string, List<string>>> BuildDateAddedGroups()
+        {
+            var byLabel = new Dictionary<string, List<KeyValuePair<string, string>>>(); // label -> (title, id)
+            var rank = new Dictionary<string, int>();                                    // label -> sort key (ascending)
+
+            const int UnknownRank = int.MaxValue - 2;
+            const int AudicaRank = int.MaxValue - 1;
+            const int AudicaDLCRank = int.MaxValue;
+
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd == null || sd.hidden) continue;
+
+                string label;
+                int key;
+                string home = SongFolderManager.GetFolder(sd.songID);
+                if (home == SongFolderManager.FolderAudica) { label = home; key = AudicaRank; }
+                else if (home == SongFolderManager.FolderAudicaDLC) { label = home; key = AudicaDLCRank; }
+                else
+                {
+                    int days = AddedDaysAgo(sd);
+                    if (days < 0) { label = UnknownDateLabel; key = UnknownRank; }
+                    else { label = RecentLabel(days); key = days; }
+                }
+
+                if (!byLabel.TryGetValue(label, out var list))
+                {
+                    list = new List<KeyValuePair<string, string>>();
+                    byLabel[label] = list;
+                    rank[label] = key;
+                }
+                else if (key < rank[label]) rank[label] = key; // newest member represents the bucket
+                list.Add(new KeyValuePair<string, string>(sd.title ?? "", sd.songID));
+            }
+
+            var labels = new List<string>(byLabel.Keys);
+            labels.Sort((a, b) => rank[a].CompareTo(rank[b])); // fewest days ago first
+
+            var result = new List<KeyValuePair<string, List<string>>>();
+            foreach (string lbl in labels)
+                result.Add(new KeyValuePair<string, List<string>>(lbl, IdsByTitle(byLabel[lbl])));
+            return result;
+        }
+
+        private static List<ViewRow> BuildDateAddedView()
+            => BuildGroupView(BuildDateAddedGroups(), "DateAdded",
+                folder => IsOfficialFolder(folder) ? FolderColorFor(folder) : (Color?)null);
+
+        // ── EX Rank view (EX scoring only) ─────────────────────────────────────
+        //
+        // One folder per exact global rank on the selected difficulty ("1st", "2nd", ... however many
+        // that makes), then "Unranked" (no EX run on that difficulty, a hidden player, or no API key).
+        // Ranks come from the once-per-launch /me/bests fetch (ExScoring.TryGetGlobalRank): until it
+        // has answered, the view is a single "Loading ranks..." row. The view is rebuilt when the
+        // ranks change (fetch done, a run uploaded) or the difficulty changes.
+        private const string UnrankedLabel = "Unranked";
+        private const string RankLoadingLabel = "Loading ranks...";
+
+        private static int rankViewVersion = -1;
+        private static string rankViewDifficulty;
+        private static bool rankViewWaiting;
+
+        private static int RankFor(string songID)
+            => ExScoring.TryGetGlobalRank(songID, CurrentDifficultyName(), out int rank) ? rank : 0;
+
+        private static string RankLabel(int rank) => rank > 0 ? RankOrdinal(rank) : UnrankedLabel;
+
+        private static string RankOrdinal(int n)
+        {
+            int mod100 = n % 100;
+            if (mod100 >= 11 && mod100 <= 13) return n + "th";
+            switch (n % 10)
+            {
+                case 1: return n + "st";
+                case 2: return n + "nd";
+                case 3: return n + "rd";
+                default: return n + "th";
+            }
+        }
+
+        private static List<KeyValuePair<string, List<string>>> BuildRankGroups()
+        {
+            var byRank = new Dictionary<int, List<KeyValuePair<string, string>>>(); // rank (0 = unranked) -> (title, id)
+
+            for (int i = 0; i < SongList.I.songs.Count; i++)
+            {
+                var sd = SongList.I.songs[i];
+                if (sd == null || sd.hidden) continue;
+
+                int rank = RankFor(sd.songID);
+                if (!byRank.TryGetValue(rank, out var list))
+                {
+                    list = new List<KeyValuePair<string, string>>();
+                    byRank[rank] = list;
+                }
+                list.Add(new KeyValuePair<string, string>(sd.title ?? "", sd.songID));
+            }
+
+            var ranks = new List<int>(byRank.Keys);
+            ranks.Sort((a, b) =>
+            {
+                if (a == 0 || b == 0) return (a == 0 ? 1 : 0) - (b == 0 ? 1 : 0); // Unranked last
+                return a.CompareTo(b);
+            });
+
+            var result = new List<KeyValuePair<string, List<string>>>();
+            foreach (int r in ranks)
+                result.Add(new KeyValuePair<string, List<string>>(RankLabel(r), IdsByTitle(byRank[r])));
+            return result;
+        }
+
+        private static List<ViewRow> BuildRankView()
+        {
+            ExScoring.EnsureOnlineBestScores(); // nothing may have asked yet if no song row was bound
+
+            rankViewVersion = ExScoring.OnlineRanksVersion;
+            rankViewDifficulty = CurrentDifficultyName();
+
+            if (!ExScoring.OnlineBestScoresSettled)
+            {
+                rankViewWaiting = true;
+                return new List<ViewRow> { ViewRow.LabelRow(RankLoadingLabel, ViewRow.FolderColor) };
+            }
+
+            rankViewWaiting = false;
+            return BuildGroupView(BuildRankGroups(), "Rank");
+        }
+
+        /// <summary>Re-applies the EX Rank view when the ranks or the difficulty changed since it was built.</summary>
+        private static void TickRankView()
+        {
+            if (currentSort != SortMode.ExRank || level != NavLevel.Root) return;
+
+            bool stale;
+            if (rankViewWaiting)
+                stale = ExScoring.OnlineBestScoresSettled;
+            else
+                stale = rankViewVersion != ExScoring.OnlineRanksVersion || rankViewDifficulty != CurrentDifficultyName();
+
+            if (stale) Apply();
         }
 
         // ── Star view (MostStars / LeastStars) ─────────────────────────────────
@@ -1120,6 +2085,8 @@ namespace ExScoringMod
             diffNameCache.Clear();
             playCache = null;
             recentCache = null;
+            artistLabelCache = null;
+            mapperLabelCache = null;
         }
 
         /// <summary>Compute every visible song's star tier once. Lazy: only runs when a star view is needed.</summary>
@@ -1609,6 +2576,8 @@ namespace ExScoringMod
         /// <summary>Per-frame (Main.OnUpdate). Does nothing but two bool checks unless a refresh is due.</summary>
         public static void TickSortLabels()
         {
+            TickCustomSorts();
+
             if (sortMenuObj == null)
             {
                 // Only go looking while the song list is up, and not every frame.

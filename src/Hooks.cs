@@ -2233,7 +2233,8 @@ namespace ExScoringMod
 
         /// <summary>
         /// All eight SetSort_* buttons funnel through ChangeSort. After the game records its
-        /// sListSort, tell the folder system which view to build (Default / A-Z / Z-A).
+        /// sListSort, tell the folder system which view to build. (The mod's own sorts — Artist,
+        /// Mapper, Date Added, EX Rank — have their own buttons and don't go through here.)
         /// </summary>
         [HarmonyPatch(typeof(SongSelect), "ChangeSort", new Type[] { typeof(SongSelect.Sort) })]
         private static class SongSelectChangeSortPatch
@@ -2264,6 +2265,9 @@ namespace ExScoringMod
                     if (slc != null)
                         slc.FilterMain();
                 }
+
+                // Custom sort buttons (Artist / Mapper / Date Added / EX Rank) and the Starting Sort.
+                FolderRowManager.OnSongSelectEnabled(__instance);
             }
         }
 
