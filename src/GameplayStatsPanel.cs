@@ -31,32 +31,13 @@ namespace ExScoringMod
         // Leaderboard stats should open to the right), starting from History's known-good values.
         private static readonly Vector3 HistoryStatsPanelPosition = new Vector3(-28f, 6.25f, -2.5f);
         private static readonly Vector3 HistoryStatsPanelRotation = new Vector3(0f, -90f, 0f);
-        private static readonly Vector3 LeaderboardStatsPanelPosition = new Vector3(29f, 6.5f, -4f);
+        private static readonly Vector3 LeaderboardStatsPanelPosition = new Vector3(29f, 3.25f, -5f);
         private static readonly Vector3 LeaderboardStatsPanelRotation = new Vector3(0f, 90f, 0f);
 
-        // Results screen (song scene): the leaderboard stats panel opens next to the results
-        // leaderboard instead, placed from that LeaderboardDisplay's transform: its world position
-        // plus this offset (world units, along the display's own axes), and its rotation plus this
-        // rotation offset. TUNE IN UNITYEXPLORER: not readonly, so they can be changed live; the
-        // next shot uses the new values. Placeholder guess: to the right of the leaderboard, facing
-        // the same way. The anchor's world position/rotation/scale are logged on every open.
-        private static Vector3 ResultsLeaderboardStatsPanelOffset = new Vector3(12f, 0f, 0f);
-        private static Vector3 ResultsLeaderboardStatsPanelRotationOffset = new Vector3(0f, 0f, 0f);
-
-        // The results leaderboard the shot row belongs to (LeaderboardStatsButton.OnLeaderboardRowShot),
-        // or null for the song page's leaderboard.
-        internal static Transform leaderboardStatsAnchor;
-
+        // Same placement whichever leaderboard the panel was opened from (song list or results
+        // screen): the results screen's panel mimics the song list's.
         private static void GetLeaderboardStatsPanelPlacement(out Vector3 position, out Vector3 eulerAngles)
         {
-            Transform anchor = leaderboardStatsAnchor;
-            if (anchor != null)
-            {
-                position = anchor.position + anchor.rotation * ResultsLeaderboardStatsPanelOffset;
-                eulerAngles = (anchor.rotation * Quaternion.Euler(ResultsLeaderboardStatsPanelRotationOffset)).eulerAngles;
-                return;
-            }
-
             position = LeaderboardStatsPanelPosition;
             eulerAngles = LeaderboardStatsPanelRotation;
         }
@@ -106,9 +87,8 @@ namespace ExScoringMod
             try
             {
                 BuildGameplayStatsContent(LeaderboardStatsContext, panel, run.exCues, run.judgementPercent, run.failed);
-                // Song page leaderboard only, not when opened from the results screen's leaderboard
-                // (LeaderboardStatsButton.cs).
-                if (!leaderboardStatsOpenedOnResults) CreateGunColorLegend(panel);
+                // Both the song page's and the results screen's leaderboard.
+                CreateGunColorLegend(panel);
             }
             finally
             {

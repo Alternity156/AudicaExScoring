@@ -208,7 +208,6 @@ namespace ExScoringMod
             SetLeaderboardIndicatorActive(leaderboardSelectedRowId, false);
             leaderboardSelectedRowId = null;
             leaderboardStatsOpenedOnResults = false;
-            leaderboardStatsAnchor = null;
 
             // Invalidates any in-flight GET /api/runs/:runId fetch so a late response can't reopen
             // a panel the player (or a fresher selection) already closed.
@@ -268,41 +267,40 @@ namespace ExScoringMod
 
             SelectLeaderboardRow(slot);
 
-            // Results screen's leaderboard: the panel opens next to it (GameplayStatsPanel.cs).
-            leaderboardStatsAnchor = FindResultsLeaderboardAnchor(slot);
-            leaderboardStatsOpenedOnResults = leaderboardStatsAnchor != null;
+            // Results screen's leaderboard: same panel placement as the song list's
+            // (GameplayStatsPanel.cs); only remembered so leaving the results page closes it.
+            leaderboardStatsOpenedOnResults = IsResultsLeaderboardRow(slot);
 
             FetchAndShowLeaderboardStats(runId);
         }
 
         /// <summary>
-        /// The LeaderboardDisplay this row's hit-box sits in when it's the results screen's (under
-        /// InGameUI, in the song scene); null for the song page's leaderboard.
+        /// True when this row's hit-box sits in the results screen's LeaderboardDisplay (under
+        /// InGameUI, in the song scene); false for the song page's leaderboard.
         /// </summary>
-        private static Transform FindResultsLeaderboardAnchor(int slot)
+        private static bool IsResultsLeaderboardRow(int slot)
         {
             try
             {
-                if (!leaderboardHitboxes.TryGetValue(slot, out GameObject hitbox) || hitbox == null) return null;
+                if (!leaderboardHitboxes.TryGetValue(slot, out GameObject hitbox) || hitbox == null) return false;
 
                 LeaderboardDisplay display = hitbox.GetComponentInParent<LeaderboardDisplay>();
-                if (display == null) return null;
+                if (display == null) return false;
 
-                bool underInGameUI = false;
                 for (Transform t = display.transform; t != null; t = t.parent)
                 {
-                    if (t.name == "InGameUI") { underInGameUI = true; break; }
+                    if (t.name == "InGameUI")
+                    {
+                        DebugLog.Log("[ExScoring] Results leaderboard row shot.");
+                        return true;
+                    }
                 }
-                if (!underInGameUI) return null;
-
-                Transform anchor = display.transform;
-                DebugLog.Log($"[ExScoring] Results leaderboard row shot: anchor {anchor.name} world pos={anchor.position} rot={anchor.eulerAngles} lossyScale={anchor.lossyScale}");
-                return anchor;
+                return false;
             }
             catch (Exception ex)
             {
-                DebugLog.Log("[ExScoring] FindResultsLeaderboardAnchor failed: " + ex.Message);
-                return null;
+                DebugLog.Log("[ExScoring] IsResultsLeaderboardRow failed: " + ex.Message);
+                return false;
             }
         }
 
